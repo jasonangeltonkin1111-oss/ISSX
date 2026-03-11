@@ -2,6 +2,8 @@
 #property version   "9.999"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
+#include <Trade/Trade.mqh>
+
 #include <ISSX/issx_core.mqh>
 #include <ISSX/issx_registry.mqh>
 #include <ISSX/issx_runtime.mqh>
@@ -27,6 +29,15 @@ input int    InpLockStaleAfterSec       = 90;
 input bool   InpSafeMode                = false; // true = attach + timer only, no kernel
 input bool   InpRunFirstCycleInOnInit   = false; // keep false
 input bool   InpBypassLocks             = true;  // keep true until lock logic is fixed
+input bool   InpEnableEA1               = true;
+input bool   InpEnableEA2               = false;
+input bool   InpEnableEA3               = false;
+input bool   InpEnableEA4               = false;
+input bool   InpEnableEA5               = false;
+input bool   InpEnableChartMenu         = true;
+input bool   InpEnableDebugReport       = true;
+input int    InpHeartbeatTickModulo     = 30;
+input long   InpMagicNumber             = 430157245;
 
 ISSX_RegistryBundle g_registry;
 ISSX_StageRuntime   g_runtime;
@@ -49,6 +60,223 @@ bool                g_kernel_busy               = false;
 long                g_writer_generation         = 0;
 long                g_sequence_seed             = 0;
 long                g_last_ea5_export_minute_id = 0;
+
+CTrade              g_trade;
+
+bool                g_module_enabled[5]={true,false,false,false,false};
+bool                g_module_locked[5]={false,true,true,true,true};
+string              g_module_name[5]={"EA1","EA2","EA3","EA4","EA5"};
+
+string              g_ui_prefix                = "";
+string              g_ui_bg                    = "";
+string              g_ui_title                 = "";
+string              g_ui_btns[5];
+string              g_ui_subs[5];
+bool                g_ui_ready                 = false;
+
+string              g_debug_dir_primary        = "..\\Include\\ISSX\\ISSX\\Debug Reports\\";
+string              g_debug_dir_fallback       = "ISSX\\Debug Reports\\";
+string              g_debug_dir_active         = "";
+string              g_debug_file_rel           = "";
+bool                g_debug_ready              = false;
+long                g_tick_count               = 0;
+
+void ISSX_Log(const string msg,const bool force_print=true)
+  {
+   if(force_print)
+      Print(msg);
+
+   if(!InpEnableDebugReport || !g_debug_ready || StringLen(g_debug_file_rel)==0)
+      return;
+
+   int h=FileOpen(g_debug_file_rel,FILE_READ|FILE_WRITE|FILE_TXT|FILE_ANSI);
+   if(h==INVALID_HANDLE)
+      return;
+
+   FileSeek(h,0,SEEK_END);
+   FileWriteString(h,TimeToString(TimeLocal(),TIME_DATE|TIME_SECONDS)+" | "+msg+"\r\n");
+   FileClose(h);
+  }
+
+bool ISSX_EnsureFolderPath(const string folder)
+  {
+   string clean=folder;
+   while(StringFind(clean,"\\\\")>=0)
+      StringReplace(clean,"\\\\","\\");
+
+   string acc="";
+   int start=0;
+   for(int i=0;i<StringLen(clean);i++)
+     {
+      if(StringGetCharacter(clean,i)!='\\')
+         continue;
+      string part=StringSubstr(clean,start,i-start);
+      if(StringLen(part)<=0)
+        {
+         start=i+1;
+         continue;
+        }
+      if(StringLen(acc)==0)
+         acc=part;
+      else
+         acc=acc+"\\"+part;
+      FolderCreate(acc);
+      start=i+1;
+     }
+   return true;
+  }
+
+bool ISSX_BeginDebugReport()
+  {
+   if(!InpEnableDebugReport)
+      return false;
+
+   ISSX_EnsureFolderPath(g_debug_dir_primary);
+   string stamp=TimeToString(TimeLocal(),TIME_DATE|TIME_SECONDS);
+   StringReplace(stamp,".","-");
+   StringReplace(stamp,":","-");
+   StringReplace(stamp," ","_");
+
+   g_debug_file_rel=g_debug_dir_primary+"ISSX_Debug_"+stamp+"_"+IntegerToString((int)ChartID())+".log";
+   int h=FileOpen(g_debug_file_rel,FILE_WRITE|FILE_TXT|FILE_ANSI);
+   if(h!=INVALID_HANDLE)
+     {
+      g_debug_ready=true;
+      g_debug_dir_active=g_debug_dir_primary;
+      FileWriteString(h,"ISSX Debug Report\r\n");
+      FileClose(h);
+      Print("ISSX: debug report primary path active: ",g_debug_file_rel);
+      return true;
+     }
+
+   const int err_primary=GetLastError();
+   ISSX_EnsureFolderPath(g_debug_dir_fallback);
+   g_debug_file_rel=g_debug_dir_fallback+"ISSX_Debug_"+stamp+"_"+IntegerToString((int)ChartID())+".log";
+   h=FileOpen(g_debug_file_rel,FILE_WRITE|FILE_TXT|FILE_ANSI);
+   if(h==INVALID_HANDLE)
+     {
+      Print("ISSX: debug report disabled; primary err=",err_primary," fallback err=",GetLastError());
+      g_debug_ready=false;
+      g_debug_file_rel="";
+      g_debug_dir_active="";
+      return false;
+     }
+
+   g_debug_ready=true;
+   g_debug_dir_active=g_debug_dir_fallback;
+   FileWriteString(h,"ISSX Debug Report\r\n");
+   FileClose(h);
+   Print("ISSX: debug report fallback path active: ",g_debug_file_rel);
+   return true;
+  }
+
+void ISSX_WriteStartupDiagnostics()
+  {
+   MqlTick tick;
+   const bool tick_ok=SymbolInfoTick(_Symbol,tick);
+   ISSX_Log("STARTUP build="+IntegerToString((int)MQLInfoInteger(MQL_PROGRAM_BUILD))+" version=9.999 symbol="+_Symbol+" tf="+EnumToString((ENUM_TIMEFRAMES)_Period));
+   ISSX_Log("STARTUP terminal data_path="+TerminalInfoString(TERMINAL_DATA_PATH));
+   ISSX_Log("STARTUP account="+IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN))+" company="+AccountInfoString(ACCOUNT_COMPANY)+" server="+AccountInfoString(ACCOUNT_SERVER));
+   ISSX_Log("STARTUP trade_allowed terminal="+IntegerToString((int)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED))+" mql_trade_allowed="+IntegerToString((int)MQLInfoInteger(MQL_TRADE_ALLOWED)));
+   ISSX_Log("STARTUP modules EA1="+(g_module_enabled[0]?"on":"off")+" EA2="+(g_module_enabled[1]?"on":"off")+" EA3="+(g_module_enabled[2]?"on":"off")+" EA4="+(g_module_enabled[3]?"on":"off")+" EA5="+(g_module_enabled[4]?"on":"off"));
+   ISSX_Log("STARTUP symbol_tick_ok="+(tick_ok?"true":"false")+" bid="+DoubleToString(SymbolInfoDouble(_Symbol,SYMBOL_BID),_Digits)+" ask="+DoubleToString(SymbolInfoDouble(_Symbol,SYMBOL_ASK),_Digits));
+   ISSX_Log("STARTUP ui_ready="+(g_ui_ready?"true":"false")+" debug_path="+g_debug_file_rel);
+  }
+
+bool ISSX_CreateMenuLabel(const string name,const int x,const int y,const int w,const int h,const string txt,const color clr,const ENUM_BASE_CORNER corner=CORNER_LEFT_UPPER)
+  {
+   if(!ObjectCreate(0,name,OBJ_LABEL,0,0,0))
+     {
+      ISSX_Log("UI create failed name="+name+" err="+IntegerToString(GetLastError()));
+      return false;
+     }
+   ObjectSetInteger(0,name,OBJPROP_CORNER,corner);
+   ObjectSetInteger(0,name,OBJPROP_XDISTANCE,x);
+   ObjectSetInteger(0,name,OBJPROP_YDISTANCE,y);
+   ObjectSetInteger(0,name,OBJPROP_XSIZE,w);
+   ObjectSetInteger(0,name,OBJPROP_YSIZE,h);
+   ObjectSetString(0,name,OBJPROP_TEXT,txt);
+   ObjectSetInteger(0,name,OBJPROP_COLOR,clr);
+   ObjectSetInteger(0,name,OBJPROP_FONTSIZE,9);
+   return true;
+  }
+
+bool ISSX_CreateMenuButton(const string name,const int x,const int y,const int w,const int h,const string txt,const color clr)
+  {
+   if(!ObjectCreate(0,name,OBJ_BUTTON,0,0,0))
+     {
+      ISSX_Log("UI button create failed name="+name+" err="+IntegerToString(GetLastError()));
+      return false;
+     }
+   ObjectSetInteger(0,name,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+   ObjectSetInteger(0,name,OBJPROP_XDISTANCE,x);
+   ObjectSetInteger(0,name,OBJPROP_YDISTANCE,y);
+   ObjectSetInteger(0,name,OBJPROP_XSIZE,w);
+   ObjectSetInteger(0,name,OBJPROP_YSIZE,h);
+   ObjectSetString(0,name,OBJPROP_TEXT,txt);
+   ObjectSetInteger(0,name,OBJPROP_COLOR,clr);
+   ObjectSetInteger(0,name,OBJPROP_BGCOLOR,clrBlack);
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+   return true;
+  }
+
+void ISSX_UpdateMenuState()
+  {
+   if(!g_ui_ready)
+      return;
+   for(int i=0;i<5;i++)
+     {
+      ObjectSetString(0,g_ui_btns[i],OBJPROP_TEXT,ISSX_UI_ModuleStateLabel(g_module_name[i],g_module_enabled[i],g_module_locked[i]));
+      string sub="submenu: "+g_module_name[i]+" diagnostics";
+      if(g_module_locked[i])
+         sub=sub+" (internally disabled)";
+      ObjectSetString(0,g_ui_subs[i],OBJPROP_TEXT,sub);
+     }
+  }
+
+bool ISSX_BuildMenu()
+  {
+   if(!InpEnableChartMenu)
+      return false;
+   if(g_ui_ready)
+      return true;
+
+   g_ui_prefix="ISSX_UI_"+IntegerToString((int)ChartID())+"_";
+   g_ui_title=g_ui_prefix+"TITLE";
+   g_ui_bg=g_ui_prefix+"BG";
+
+   ISSX_CreateMenuLabel(g_ui_bg,8,18,340,180,"",clrDimGray);
+   ISSX_CreateMenuLabel(g_ui_title,12,22,300,18,"ISSX Main Menu (5 EAs)",clrAqua);
+
+   int y=44;
+   for(int i=0;i<5;i++)
+     {
+      g_ui_btns[i]=g_ui_prefix+"BTN_"+IntegerToString(i+1);
+      g_ui_subs[i]=g_ui_prefix+"SUB_"+IntegerToString(i+1);
+      ISSX_CreateMenuButton(g_ui_btns[i],12,y,120,18,g_module_name[i],clrSilver);
+      ISSX_CreateMenuLabel(g_ui_subs[i],140,y+2,190,16,"submenu",clrSilver);
+      y+=30;
+     }
+
+   g_ui_ready=true;
+   ISSX_UpdateMenuState();
+   ISSX_Log("UI menu build complete");
+   return true;
+  }
+
+void ISSX_DestroyMenu()
+  {
+   if(!g_ui_ready)
+      return;
+   ObjectDelete(0,g_ui_bg);
+   ObjectDelete(0,g_ui_title);
+   for(int i=0;i<5;i++)
+     {
+      ObjectDelete(0,g_ui_btns[i]);
+      ObjectDelete(0,g_ui_subs[i]);
+     }
+   g_ui_ready=false;
+  }
 
 string ISSX_LongIdPart(const long value)
   {
@@ -460,48 +688,67 @@ void ISSX_ProjectEA5(const string export_json,
 
 bool ISSX_RunKernelCycle()
   {
-   Print("ISSX: KERNEL ENTER");
+   ISSX_Log("KERNEL enter");
    g_runtime.OnPulse();
 
    string stage_json="";
    string broker_dump_json="";
    string debug_json="";
 
+   if(!g_module_enabled[0])
+     {
+      ISSX_Log("KERNEL skipped: EA1 disabled");
+      return true;
+     }
+
    if(!g_bootstrapped)
      {
-      Print("ISSX: EA1 StageBoot");
+      ISSX_Log("EA1 StageBoot");
       g_ea1.Reset();
       ISSX_MarketEngine::StageBoot(g_ea1);
      }
 
-   Print("ISSX: EA1 StageSlice ENTER");
+   ISSX_Log("EA1 StageSlice enter");
    if(!ISSX_MarketEngine::StageSlice(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,InpEA1MaxSymbols))
      {
-      Print("ISSX: EA1 StageSlice FAILED");
+      ISSX_Log("EA1 StageSlice failed");
       return false;
      }
 
-   Print("ISSX: EA1 StageSlice OK symbols=",ArraySize(g_ea1.symbols));
+   ISSX_Log("EA1 StageSlice ok symbols="+IntegerToString(ArraySize(g_ea1.symbols)));
 
    if(ArraySize(g_ea1.symbols)<=0)
      {
-      Print("ISSX: EA1 produced zero symbols, skipping downstream stages");
+      ISSX_Log("EA1 produced zero symbols; skipping downstream stages");
       g_bootstrapped=true;
       return true;
      }
 
-   Print("ISSX: EA1 StagePublish");
+   ISSX_Log("EA1 StagePublish");
    ISSX_MarketEngine::StagePublish(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,stage_json,debug_json);
    ISSX_MarketEngine::BuildUniverseDump(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,broker_dump_json);
    ISSX_ProjectEA1(stage_json,broker_dump_json,debug_json);
 
    string ea1_symbols[];
    const int ea1_count=ISSX_CopyEA1Symbols(ea1_symbols);
-   Print("ISSX: EA1 symbol copy count=",ea1_count);
+   ISSX_Log("EA1 symbol copy count="+IntegerToString(ea1_count));
 
    if(ea1_count<=0)
      {
-      Print("ISSX: no EA1 symbols copied, ending cycle safely");
+      ISSX_Log("EA1 symbol copy empty; ending cycle safely");
+      g_bootstrapped=true;
+      return true;
+     }
+
+   if(!g_module_enabled[1] && !g_module_enabled[2] && !g_module_enabled[3] && !g_module_enabled[4])
+     {
+      ISSX_Log("EA2-EA5 disabled; EA1-only mode active");
+      ISSX_DebugAggregate agg_ea1=ISSX_UI_Test::BuildAggregate(g_firm_id,g_runtime.State(),g_ea1,g_ea2,g_ea3,g_ea4,g_ea5);
+      if(InpProjectStageStatusRoot)
+         ISSX_UI_Test::ProjectStageStatusRoot(g_firm_id,agg_ea1);
+      if(InpProjectUniverseSnapshot)
+         ISSX_UI_Test::ProjectUniverseSnapshotRoot(g_firm_id,g_runtime.State());
+      Comment("ISSX EA1-only mode | firm="+g_firm_id);
       g_bootstrapped=true;
       return true;
      }
@@ -585,13 +832,31 @@ bool ISSX_RunKernelCycle()
 
    Comment(ISSX_UI_Test::BuildHudText(agg));
    g_bootstrapped=true;
-   Print("ISSX: KERNEL EXIT OK");
+   ISSX_Log("KERNEL exit ok");
    return true;
   }
 
 int OnInit()
   {
-   Print("ISSX: INIT ENTER");
+   g_module_enabled[0]=InpEnableEA1;
+   g_module_enabled[1]=InpEnableEA2;
+   g_module_enabled[2]=InpEnableEA3;
+   g_module_enabled[3]=InpEnableEA4;
+   g_module_enabled[4]=InpEnableEA5;
+
+   g_module_locked[0]=false;
+   g_module_locked[1]=true;
+   g_module_locked[2]=true;
+   g_module_locked[3]=true;
+   g_module_locked[4]=true;
+
+   g_module_enabled[1]=false;
+   g_module_enabled[2]=false;
+   g_module_enabled[3]=false;
+   g_module_enabled[4]=false;
+
+   ISSX_BeginDebugReport();
+   ISSX_Log("INIT enter");
 
    MathSrand((uint)TimeLocal());
 
@@ -600,10 +865,13 @@ int OnInit()
    g_writer_nonce   = ISSX_WrapperNonce();
    g_firm_id        = ISSX_ResolveFirmId();
 
-   Print("ISSX: boot_id=",g_boot_id);
-   Print("ISSX: instance_guid=",g_instance_guid);
-   Print("ISSX: writer_nonce=",g_writer_nonce);
-   Print("ISSX: firm_id=",g_firm_id);
+   ISSX_Log("INIT boot_id="+g_boot_id);
+   ISSX_Log("INIT instance_guid="+g_instance_guid);
+   ISSX_Log("INIT writer_nonce="+g_writer_nonce);
+   ISSX_Log("INIT firm_id="+g_firm_id);
+
+   g_trade.SetExpertMagicNumber(InpMagicNumber);
+   ISSX_Log("INIT trade magic="+IntegerToString((int)InpMagicNumber));
 
    // registry + runtime
    g_registry.SeedBlueprintV170();
@@ -614,12 +882,17 @@ int OnInit()
    g_first_cycle_done = false;
    g_kernel_busy      = false;
 
-   if(!EventSetTimer(ISSX_EVENT_TIMER_SEC))
+   ISSX_BuildMenu();
+   ISSX_WriteStartupDiagnostics();
+
+   const int timer_sec=ISSX_Runtime_NormalizeTimerSeconds(ISSX_EVENT_TIMER_SEC);
+   if(!EventSetTimer(timer_sec))
      {
-      Print("ISSX: EventSetTimer failed err=",GetLastError());
+      ISSX_Log("INIT failed EventSetTimer err="+IntegerToString(GetLastError()));
+      return INIT_FAILED;
      }
 
-   Print("ISSX: INIT EXIT");
+   ISSX_Log("INIT exit success");
    Comment("ISSX attached - waiting for timer");
 
    return INIT_SUCCEEDED;
@@ -629,32 +902,40 @@ void OnDeinit(const int reason)
   {
    EventKillTimer();
    g_kernel_busy=false;
+   ISSX_DestroyMenu();
 
-   Print("ISSX: DEINIT reason=",reason);
+   ISSX_Log("DEINIT reason="+IntegerToString(reason)+" "+ISSX_Core_DeinitReasonToString(reason));
+   ISSX_Log("SESSION SUMMARY attached="+(g_first_cycle_done?"true":"false")+" last_kernel_busy="+(g_kernel_busy?"true":"false"));
    Comment("");
   }
 
 void OnTimer()
   {
+   if(InpSafeMode)
+     {
+      ISSX_Log("TIMER safe mode heartbeat");
+      return;
+     }
+
    if(!g_runtime_ready)
      {
-      Print("ISSX: TIMER skipped runtime not ready");
+      ISSX_Log("TIMER skipped runtime not ready");
       return;
      }
 
    if(g_kernel_busy)
      {
-      Print("ISSX: TIMER skipped kernel busy");
+      ISSX_Log("TIMER skipped kernel busy");
       return;
      }
 
    g_kernel_busy=true;
 
-   Print("ISSX: TIMER START first_cycle=",(!g_first_cycle_done));
+   ISSX_Log("TIMER start first_cycle="+((!g_first_cycle_done)?"true":"false"));
 
    bool ok=ISSX_RunKernelCycle();
 
-   Print("ISSX: TIMER kernel result=",ok);
+   ISSX_Log("TIMER kernel result="+(ok?"ok":"fail"));
 
    g_first_cycle_done=true;
    g_kernel_busy=false;
@@ -667,5 +948,31 @@ void OnTimer()
 
 void OnTick()
   {
-   // timer-driven wrapper by design
+   g_tick_count++;
+   if(InpHeartbeatTickModulo>0 && (g_tick_count%InpHeartbeatTickModulo)==0)
+      ISSX_Log("TICK heartbeat symbol="+_Symbol+" bid="+DoubleToString(SymbolInfoDouble(_Symbol,SYMBOL_BID),_Digits)+" ask="+DoubleToString(SymbolInfoDouble(_Symbol,SYMBOL_ASK),_Digits),false);
+  }
+
+void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
+  {
+   if(id!=CHARTEVENT_OBJECT_CLICK || !g_ui_ready)
+      return;
+
+   for(int i=0;i<5;i++)
+     {
+      if(sparam!=g_ui_btns[i])
+         continue;
+
+      if(g_module_locked[i])
+        {
+         ISSX_Log("UI click ignored: "+g_module_name[i]+" locked off");
+         ISSX_UpdateMenuState();
+         return;
+        }
+
+      g_module_enabled[i]=!g_module_enabled[i];
+      ISSX_Log("UI toggle "+g_module_name[i]+" -> "+(g_module_enabled[i]?"on":"off"));
+      ISSX_UpdateMenuState();
+      return;
+     }
   }

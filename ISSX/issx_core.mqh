@@ -3212,4 +3212,24 @@ public:
      }
   };
 
+
+// Wrapper safety helper: textual deinit mapping for diagnostics.
+static string ISSX_Core_DeinitReasonToString(const int reason)
+  {
+   switch(reason)
+     {
+      case REASON_PROGRAM:    return "REASON_PROGRAM";
+      case REASON_REMOVE:     return "REASON_REMOVE";
+      case REASON_RECOMPILE:  return "REASON_RECOMPILE";
+      case REASON_CHARTCHANGE:return "REASON_CHARTCHANGE";
+      case REASON_CHARTCLOSE: return "REASON_CHARTCLOSE";
+      case REASON_PARAMETERS: return "REASON_PARAMETERS";
+      case REASON_ACCOUNT:    return "REASON_ACCOUNT";
+      case REASON_TEMPLATE:   return "REASON_TEMPLATE";
+      case REASON_INITFAILED: return "REASON_INITFAILED";
+      case REASON_CLOSE:      return "REASON_CLOSE";
+     }
+   return "REASON_UNKNOWN";
+  }
+
 #endif // __ISSX_CORE_MQH__

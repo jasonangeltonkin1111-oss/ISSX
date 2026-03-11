@@ -1603,4 +1603,15 @@ public:
      }
   };
 
+
+
+// Wrapper safety helper: normalize timer request into MT5-safe range.
+static int ISSX_Runtime_NormalizeTimerSeconds(const int requested_sec)
+  {
+   if(requested_sec<=0)
+      return 1;
+   if(requested_sec>3600)
+      return 3600;
+   return requested_sec;
+  }
 #endif // __ISSX_RUNTIME_MQH__

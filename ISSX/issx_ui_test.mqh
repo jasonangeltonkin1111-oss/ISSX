@@ -1349,4 +1349,13 @@ public:
      }
   };
 
+
+
+// Wrapper UI helper: compact state label for top-level 5-EA control panel.
+static string ISSX_UI_ModuleStateLabel(const string module_name,const bool enabled,const bool locked)
+  {
+   if(locked)
+      return module_name+" LOCKED OFF";
+   return module_name+(enabled?" ON":" OFF");
+  }
 #endif // __ISSX_UI_TEST_MQH__

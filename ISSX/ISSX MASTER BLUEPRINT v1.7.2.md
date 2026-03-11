@@ -8410,10 +8410,311 @@ Only then chase remaining local defects.
 
 END OF OPERATIONAL PATCH WORKFLOW + ARCHITECTURAL ENFORCEMENT ADDON
 
+======================================================================
+
+25. SYSTEM-COMPLETE EXPANSION PACK (v1.7.2+)
+
+======================================================================
+
+PURPOSE
+
+This section closes practical execution gaps between architectural doctrine and the shipped ISSX module set.
+
+It defines concrete ownership maps, stage I/O contracts, lifecycle checkpoints, and failure playbooks that must be present for a truly complete ISSX build.
+
+If any item below is missing in implementation, ISSX is considered architecturally partial even when compile succeeds.
+
+
+25.1 AUTHORITATIVE REPOSITORY-TO-BLUEPRINT MAP
+
+======================================================================
+
+REQUIRED HUMAN-FACING WRAPPER
+
+- ISSX.mq5
+
+REQUIRED SHARED CONTRACT SURFACES
+
+- issx_contracts.mqh (types, enums, DTOs, key constants)
+- issx_registry.mqh (shared key registration / symbol tables / alias bridges)
+
+REQUIRED SHARED KERNEL SERVICES
+
+- issx_runtime.mqh (timer cadence, stage scheduling, budget guards)
+- issx_persistence.mqh (snapshots, manifests, atomic candidate/current handoff)
+- issx_core.mqh (composition, top-level orchestration glue)
+
+REQUIRED STAGE ENGINES
+
+- issx_market_engine.mqh (EA1)
+- issx_history_engine.mqh (EA2)
+- issx_selection_engine.mqh (EA3)
+- issx_correlation_engine.mqh (EA4)
+
+REQUIRED UI/INSPECTION SURFACE
+
+- issx_ui_test.mqh (inspection-only panel/test render)
+
+COMPLETENESS RULE
+
+- If a new stage or service exists, blueprint ownership section must be updated first.
+- If file set changes without blueprint map change, release is invalid.
+
+
+25.2 STAGE INPUT/OUTPUT CONTRACT MATRIX (MANDATORY)
+
+======================================================================
+
+EA1 MARKETSTATECORE
+
+- Inputs:
+  - Terminal symbol roster and broker metadata
+  - Session/tradeability probes
+  - Visibility/selection observability
+- Authoritative outputs:
+  - Universe membership truth per symbol
+  - Broker/spec/session/tradeability snapshot
+  - Identity normalization / family linkage / alias confidence
+  - Freshness stamps and unresolved-state reasons
+
+EA2 HISTORYSTATECORE
+
+- Inputs:
+  - EA1 accepted universe and symbol identity mapping
+  - MT5 bar series pulls (multi-timeframe)
+- Authoritative outputs:
+  - Rolling OHLC warehouse with continuity truth
+  - Per-timeframe depth, gaps, stale windows, hydration quality
+  - History integrity grades and reload advice
+
+EA3 SELECTIONCORE
+
+- Inputs:
+  - EA1 tradability + friction + observability facts
+  - EA2 continuity + freshness + usable-depth facts
+- Authoritative outputs:
+  - Bucketed top candidates (target top 5/bucket)
+  - Rankability lane and exclusion reason taxonomy
+  - Diversity/context metadata for downstream EA5 handoff
+
+EA4 INTELLIGENCECORE
+
+- Inputs:
+  - EA3 accepted winners/frontier
+  - EA2 synchronized history windows
+- Authoritative outputs:
+  - Sparse overlap/correlation structure on bounded frontier
+  - Regime/context descriptors that remain non-directional
+  - Confidence/explainability metadata for each derived metric
+
+EA5 CONSOLIDATIONCORE
+
+- Inputs:
+  - EA1..EA4 accepted current only
+- Authoritative outputs:
+  - Exported winner-focused JSON/snapshot package
+  - Strict health envelope (degradation flags, staleness, fallback usage)
+  - Trader-handoff context without signal/entry semantics
+
+MATRIX RULE
+
+- No stage may read a downstream stage.
+- No stage may consume another stage's candidate state as truth.
+- Every consumed field must cite owner stage in contracts.
+
+
+25.3 MINIMUM FIELD GROUPS REQUIRED FOR EA5 COMPLETENESS
+
+======================================================================
+
+Each exported winner record must contain, at minimum:
+
+- Identity
+  - canonical symbol
+  - broker symbol
+  - normalized alias/family tags
+- Market usability
+  - spread/friction posture
+  - session state + near-session transitions
+  - execution observability notes
+- Data integrity
+  - per-timeframe freshness and continuity grade
+  - hydration depth + recent gap indicators
+- Selection rationale
+  - bucket id
+  - rank score decomposition (components, weights, clamps)
+  - lane/exclusion code if degraded
+- Intelligence context
+  - bounded overlap measures (where available)
+  - regime/context tags and confidence
+  - computation horizon and sample sufficiency flags
+- Health envelope
+  - per-stage generation ids
+  - fallback flags + reason codes
+  - publish age in seconds
+
+FIELD INTEGRITY RULE
+
+- Missing values must be encoded as unknown/na, never silently coerced to healthy defaults.
+
+
+25.4 TIMER-DRIVEN LIFECYCLE CHECKPOINTS
+
+======================================================================
+
+Every timer cycle must explicitly pass these checkpoints:
+
+1) TICK START SNAPSHOT
+- capture now, cycle id, prior publish id, and carry-over work queues.
+
+2) BUDGET ADMISSION
+- assign per-stage budget slices before work begins.
+- if timer lag exists, adjust quotas but do not skip health accounting.
+
+3) STAGE WORK EXECUTION
+- stage executes resumable units only.
+- each unit records progress marker and partial diagnostics.
+
+4) ACCEPTANCE GATE
+- structural validity, semantic validity, continuity validity.
+- candidate promoted to current only on full gate pass.
+
+5) PERSISTENCE FLUSH
+- write candidate artifacts first, then manifest, then atomic current handoff.
+- record write status and checksum/hash evidence.
+
+6) EA5 CONSOLIDATION + PUBLISH
+- consume accepted current from EA1..EA4.
+- attach freshness and fallback envelope.
+
+7) POST-CYCLE HEALTH LOG
+- emit stage timings, skipped work counts, and debt backlog.
+
+CHECKPOINT RULE
+
+- If any checkpoint is bypassed, cycle must be marked degraded and published health must say why.
+
+
+25.5 FAILURE-CLASS PLAYBOOK (REQUIRED)
+
+======================================================================
+
+F1 CONTRACT DRIFT FAILURE
+
+- Signal: compile/type mismatch on shared DTO/enums/keys.
+- Mandatory response order:
+  1. repair owner declaration
+  2. add compatibility alias/shim if rename happened
+  3. update consumers
+  4. update manifest/version notes
+
+F2 INCLUDE IDENTITY FAILURE
+
+- Signal: duplicate path forms or accidental compile-by-order behavior.
+- Mandatory response:
+  - canonicalize includes to blueprint-approved path identity
+  - remove duplicate local symbol shadows
+
+F3 HISTORY CONTINUITY FAILURE
+
+- Signal: depth present but gaps/staleness break usable continuity.
+- Mandatory response:
+  - degrade rankability lane honestly
+  - trigger hydration catch-up windows
+  - avoid false healthy promotion
+
+F4 PERSISTENCE INTEGRITY FAILURE
+
+- Signal: write interruption, orphan candidate, manifest mismatch.
+- Mandatory response:
+  - quarantine broken candidate
+  - recover from last valid current
+  - emit persistence error class in health envelope
+
+F5 TIMER OVERRUN FAILURE
+
+- Signal: repeated cycle budget exhaustion.
+- Mandatory response:
+  - cap expensive operations
+  - prioritize continuity-critical units
+  - carry debt forward with explicit counters
+
+PLAYBOOK RULE
+
+- Every failure class must map to machine-readable reason codes in the exported health envelope.
+
+
+25.6 OBSERVABILITY PACK REQUIREMENTS
+
+======================================================================
+
+The following debug channels are mandatory:
+
+- Stage cycle timing table (avg, p95, max)
+- Queue debt table (units pending by stage)
+- Acceptance table (pass/fail counts by taxonomy)
+- Fallback table (class, frequency, duration)
+- Persistence table (last successful write, last recover event)
+- Publish table (age, generation coherence, envelope status)
+
+OBSERVABILITY RULE
+
+- If diagnostics are unavailable, exported health must include diagnostics_unavailable=true.
+
+
+25.7 VERSIONING, MIGRATION, AND COMPATIBILITY COVENANT
+
+======================================================================
+
+- Blueprint version increments are mandatory when:
+  - owner field names change
+  - enum members change
+  - reason-code taxonomy changes
+  - manifest schema changes
+
+- Backward bridge window must be defined for every external rename.
+
+- Compatibility aliases must have:
+  - introduction version
+  - planned sunset version
+  - migration completion criterion
+
+- No alias may be removed unless consumer scan proves zero remaining dependency.
+
+
+25.8 DEFINITION OF DONE FOR ANY FUTURE ISSX PATCH
+
+======================================================================
+
+A patch is complete only if all are true:
+
+- Compile cleanly with warnings handled or explicitly justified.
+- Stage boundaries unchanged unless blueprint explicitly revised.
+- Owner/consumer contract map updated for every shared change.
+- Persistence manifest version and migration note updated when required.
+- Health envelope contains truthful fallback/degradation state.
+- EA5 export remains non-directional and trader-handoff ready.
+- Blueprint text updated where governance changed.
+
+DONE RULE
+
+- “Compiles” alone is never accepted as completion proof.
+
+
+25.9 BLUEPRINT SELF-CONSISTENCY AUDIT BLOCK
+
+======================================================================
+
+Before release of any blueprint revision, perform this audit:
+
+- Verify section references resolve to existing sections.
+- Verify every mandatory rule has at least one owner module.
+- Verify every owner module appears in repository map.
+- Verify no contradictory instructions about fallback vs compatibility.
+- Verify no instruction requires impossible MT5 guarantees.
+
+If audit fails, blueprint is draft-only and cannot govern production patching.
 
 
 END OF MASTER BLUEPRINT v1.7.2
-
-
-Study the blueprint, then update this mqh perfectly according to the blueprint. Give me exact replacement blocks
 
