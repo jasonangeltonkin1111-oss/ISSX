@@ -3212,4 +3212,17 @@ public:
      }
   };
 
+
+
+string ISSX_CoreDiagTag()
+  {
+   return "core_diag_v172f";
+  }
+
+
+string ISSX_CoreDebugSignature()
+  {
+   return ISSX_CoreDiagTag();
+  }
+
 #endif // __ISSX_CORE_MQH__

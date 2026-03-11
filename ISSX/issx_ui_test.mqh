@@ -928,32 +928,40 @@ private:
       agg.weak_link_severity=ComputeSeverityFromWeights(DeriveWeightsForRow(row));
      }
 
+
+   static string StageLongName(const ISSX_StageId stage_id)
+     {
+      if(stage_id==issx_stage_ea1) return "MarketStateCore";
+      if(stage_id==issx_stage_ea2) return "HistoryStateCore";
+      if(stage_id==issx_stage_ea3) return "SelectionCore";
+      if(stage_id==issx_stage_ea4) return "IntelligenceCore";
+      if(stage_id==issx_stage_ea5) return "ConsolidationCore";
+      return ISSX_UI_Text::StageIdToShortString(stage_id);
+     }
+
    static string BuildHudIdentityRow(const ISSX_DebugAggregate &agg)
      {
-      return "Identity | "+agg.engine_name+" v"+agg.engine_version+" | firm="+ISSX_UI_Text::NonEmptyOrNA(agg.firm_id,"na");
+      return "[ISSX] "+agg.engine_name+" v"+agg.engine_version+" | firm="+ISSX_UI_Text::NonEmptyOrNA(agg.firm_id,"na");
      }
 
    static string BuildHudRuntimeRow(const ISSX_DebugAggregate &agg)
      {
-      string s="Runtime | minute="+LongToString(agg.kernel_minute_id);
-      s+=" cycle="+LongToString(agg.scheduler_cycle_no);
-      s+=" late_ms="+ISSX_UI_Text::LongToStringSafe(agg.scheduler_late_by_ms);
-      s+=" gap_ms="+ISSX_UI_Text::LongToStringSafe(agg.timer_gap_ms_now);
-      s+=" degraded="+ISSX_UI_Text::BoolToWord(agg.kernel_degraded_cycle_flag);
+      string s="Kernel: minute="+LongToString(agg.kernel_minute_id);
+      s+=" | cycle="+LongToString(agg.scheduler_cycle_no);
+      s+=" | late_ms="+ISSX_UI_Text::LongToStringSafe(agg.scheduler_late_by_ms);
+      s+=" | gap_ms="+ISSX_UI_Text::LongToStringSafe(agg.timer_gap_ms_now);
+      s+=" | degraded="+ISSX_UI_Text::BoolToWord(agg.kernel_degraded_cycle_flag);
       return s;
      }
 
    static string BuildHudStageRow(const ISSX_StageLadderRow &row)
      {
-      string s=ISSX_UI_Text::StageIdToShortString(row.stage_id);
+      string s=StageLongName(row.stage_id)+" ("+ISSX_UI_Text::StageIdToShortString(row.stage_id)+")";
       s+=" | pub="+row.publishability_state;
-      s+=" last_pub_ms="+ISSX_UI_Text::LongToStringSafe(row.stage_last_publish_age);
-      s+=" backlog="+ISSX_UI_Text::DoubleToStringSafe(row.stage_backlog_score,1);
-      s+=" starve="+ISSX_UI_Text::DoubleToStringSafe(row.stage_starvation_score,1);
-      s+=" dep="+ValueOrNA(row.dependency_block_reason);
-      s+=" phase="+ValueOrNA(row.phase_id);
-      s+=" weak="+ValueOrNA(row.weak_link_code);
-      s+=" fb="+IntegerToString(row.fallback_depth);
+      s+=" | backlog="+ISSX_UI_Text::DoubleToStringSafe(row.stage_backlog_score,1);
+      s+=" | starve="+ISSX_UI_Text::DoubleToStringSafe(row.stage_starvation_score,1);
+      s+=" | last_pub_ms="+ISSX_UI_Text::LongToStringSafe(row.stage_last_publish_age);
+      s+=" | dep="+ValueOrNA(row.dependency_block_reason);
       return s;
      }
 
@@ -1094,11 +1102,19 @@ public:
 
       const int n0=ArraySize(lines);
       ArrayResize(lines,n0+1);
-      lines[n0]=BuildHudIdentityRow(agg);
+      lines[n0]="================ ISSX KERNEL HUD ================";
 
       const int n1=ArraySize(lines);
       ArrayResize(lines,n1+1);
-      lines[n1]=BuildHudRuntimeRow(agg);
+      lines[n1]=BuildHudIdentityRow(agg);
+
+      const int n2=ArraySize(lines);
+      ArrayResize(lines,n2+1);
+      lines[n2]=BuildHudRuntimeRow(agg);
+
+      const int n3=ArraySize(lines);
+      ArrayResize(lines,n3+1);
+      lines[n3]="---------------- Stage Ladder ----------------";
 
       const int stage_n=ArraySize(agg.stage_rows);
       for(int i=0;i<stage_n && i<5;i++)
@@ -1108,17 +1124,21 @@ public:
          lines[n]=BuildHudStageRow(agg.stage_rows[i]);
         }
 
-      const int n2=ArraySize(lines);
-      ArrayResize(lines,n2+1);
-      lines[n2]=BuildHudQueuesRow(agg);
-
-      const int n3=ArraySize(lines);
-      ArrayResize(lines,n3+1);
-      lines[n3]=BuildHudWeakLinksRow(agg);
-
       const int n4=ArraySize(lines);
       ArrayResize(lines,n4+1);
-      lines[n4]=BuildHudWarningsRow(agg.warnings);
+      lines[n4]="---------------- Diagnostics ----------------";
+
+      const int n5=ArraySize(lines);
+      ArrayResize(lines,n5+1);
+      lines[n5]=BuildHudQueuesRow(agg);
+
+      const int n6=ArraySize(lines);
+      ArrayResize(lines,n6+1);
+      lines[n6]=BuildHudWeakLinksRow(agg);
+
+      const int n7=ArraySize(lines);
+      ArrayResize(lines,n7+1);
+      lines[n7]=BuildHudWarningsRow(agg.warnings);
 
       string out="";
       const int total=ArraySize(lines);
@@ -1348,5 +1368,18 @@ public:
       return ISSX_FileIO::WriteAllTextUtf8(ISSX_PersistencePath::RootUniverseSnapshot(firm_id),j);
      }
   };
+
+
+
+string ISSX_UITestDiagTag()
+  {
+   return "ui_diag_v172f";
+  }
+
+
+string ISSX_UITestDebugSignature()
+  {
+   return ISSX_UITestDiagTag();
+  }
 
 #endif // __ISSX_UI_TEST_MQH__

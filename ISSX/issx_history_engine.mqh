@@ -2467,6 +2467,16 @@ public:
                          const bool deep_profile_default,
                          const string firm_id="")
      {
+      if(ArraySize(symbols)<=0)
+        {
+         st.Reset();
+         st.stage_minimum_ready_flag=false;
+         st.stage_publishability_state="blocked";
+         st.dependency_block_reason="ea1_symbols_unavailable";
+         st.debug_weak_link_code="ea2_boot_empty";
+         return false;
+        }
+
       const bool ok=RebuildStateFromSymbolList(st,symbols,deep_profile_default,firm_id);
       if(!ok)
         {
@@ -2484,9 +2494,36 @@ public:
                           const int max_symbols_per_slice,
                           const string firm_id="")
      {
-      const int n=MathMin(ArraySize(symbols),MathMax(1,max_symbols_per_slice));
+      const int source_count=ArraySize(symbols);
+      if(source_count<=0)
+        {
+         st.stage_minimum_ready_flag=false;
+         st.stage_publishability_state="blocked";
+         st.dependency_block_reason="history_not_ready";
+         st.debug_weak_link_code="ea2_slice_empty";
+         return false;
+        }
+
+      const int slice_limit=(max_symbols_per_slice>0 ? max_symbols_per_slice : source_count);
+      const int n=MathMin(source_count,slice_limit);
+      if(n<=0)
+        {
+         st.stage_minimum_ready_flag=false;
+         st.stage_publishability_state="blocked";
+         st.dependency_block_reason="history_not_ready";
+         st.debug_weak_link_code="ea2_slice_empty";
+         return false;
+        }
+
       string slice_symbols[];
-      ArrayResize(slice_symbols,n);
+      if(ArrayResize(slice_symbols,n)!=n)
+        {
+         st.stage_minimum_ready_flag=false;
+         st.stage_publishability_state="blocked";
+         st.dependency_block_reason="slice_resize_failed";
+         st.debug_weak_link_code="ea2_slice_resize_failed";
+         return false;
+        }
 
       for(int i=0;i<n;i++)
          slice_symbols[i]=symbols[i];
@@ -2557,5 +2594,18 @@ public:
       return BuildStageRootJson(st);
      }
   };
+
+
+
+string ISSX_HistoryDiagTag()
+  {
+   return "history_diag_v172f";
+  }
+
+
+string ISSX_HistoryEngineDebugSignature()
+  {
+   return ISSX_HistoryDiagTag();
+  }
 
 #endif // __ISSX_HISTORY_ENGINE_MQH__

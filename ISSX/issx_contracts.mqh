@@ -1710,4 +1710,17 @@ public:
      }
   };
 
+
+
+string ISSX_ContractsDiagTag()
+  {
+   return "contracts_diag_v172f";
+  }
+
+
+string ISSX_ContractsDebugSignature()
+  {
+   return ISSX_ContractsDiagTag();
+  }
+
 #endif // __ISSX_CONTRACTS_MQH__

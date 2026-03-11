@@ -1704,4 +1704,17 @@ public:
      }
   };
 
+
+
+string ISSX_CorrelationDiagTag()
+  {
+   return "correlation_diag_v172f";
+  }
+
+
+string ISSX_CorrelationEngineDebugSignature()
+  {
+   return ISSX_CorrelationDiagTag();
+  }
+
 #endif // __ISSX_CORRELATION_ENGINE_MQH__

@@ -2589,4 +2589,17 @@ public:
      }
   };
 
+
+
+string ISSX_MarketDiagTag()
+  {
+   return "market_diag_v172f";
+  }
+
+
+string ISSX_MarketEngineDebugSignature()
+  {
+   return ISSX_MarketDiagTag();
+  }
+
 #endif // __ISSX_MARKET_ENGINE_MQH__

@@ -264,13 +264,15 @@ public:
       return EnsureFolder(StringSubstr(relative_file_path,0,last));
      }
 
-   static bool WriteText(const string relative_path,const string text)
+   static bool WriteTextAtomic(const string relative_path,const string text)
      {
       if(!EnsureParentFolder(relative_path))
          return false;
 
+      const string tmp_path=relative_path+".tmp";
+
       ResetLastError();
-      const int h=FileOpen(relative_path,
+      const int h=FileOpen(tmp_path,
                            FILE_WRITE|FILE_TXT|FILE_COMMON|FILE_ANSI,
                            NoDelimiter(),
                            Utf8Codepage());
@@ -286,13 +288,36 @@ public:
       FileClose(h);
 
       if(((int)written!=wanted) || flush_error!=0)
+        {
+         FileDelete(tmp_path,FILE_COMMON);
          return false;
+        }
 
       string verify="";
-      if(!ReadText(relative_path,verify))
+      if(!ReadText(tmp_path,verify) || verify!=text)
+        {
+         FileDelete(tmp_path,FILE_COMMON);
          return false;
+        }
 
-      return (verify==text);
+      FileDelete(relative_path,FILE_COMMON);
+      if(!FileMove(tmp_path,0,relative_path,FILE_COMMON))
+        {
+         // fallback copy + delete when FileMove is unavailable/blocked.
+         if(!FileCopy(tmp_path,0,relative_path,FILE_COMMON))
+           {
+            FileDelete(tmp_path,FILE_COMMON);
+            return false;
+           }
+         FileDelete(tmp_path,FILE_COMMON);
+        }
+
+      return true;
+     }
+
+   static bool WriteText(const string relative_path,const string text)
+     {
+      return WriteTextAtomic(relative_path,text);
      }
 
    static bool ReadText(const string relative_path,string &out_text)
@@ -315,8 +340,12 @@ public:
         }
 
       out_text=FileReadString(h,(int)sz);
+      if(GetLastError()!=0)
+        {
+         FileClose(h);
+         return false;
+        }
 
-      out_text=FileReadString(h,(int)sz);
       FileClose(h);
       return true;
      }
@@ -1912,5 +1941,18 @@ public:
       return manifest.accepted_promotion_verified;
      }
   };
+
+
+
+string ISSX_PersistenceDiagTag()
+  {
+   return "persistence_diag_v172f";
+  }
+
+
+string ISSX_PersistenceDebugSignature()
+  {
+   return ISSX_PersistenceDiagTag();
+  }
 
 #endif // __ISSX_PERSISTENCE_MQH__
