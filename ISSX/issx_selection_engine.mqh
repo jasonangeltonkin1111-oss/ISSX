@@ -1605,6 +1605,12 @@ private:
          for(int i=0;i<topn;i++)
            {
             const int idx=state.buckets[b].top5_indices[i];
+            if(idx<0 || idx>=ArraySize(state.symbols))
+              {
+               Print("ISSX_EA3 BuildFrontier: skipping invalid top5 index=",idx," bucket=",b);
+               continue;
+              }
+
             const int out=ArraySize(state.frontier);
             ArrayResize(state.frontier,out+1);
             state.frontier[out].Reset();
@@ -1631,6 +1637,12 @@ private:
          for(int j=0;j<resn && ArraySize(state.frontier)<ISSX_EA3_FRONTIER_SOFT_LIMIT;j++)
            {
             const int idx=state.buckets[b].reserve_indices[j];
+            if(idx<0 || idx>=ArraySize(state.symbols))
+              {
+               Print("ISSX_EA3 BuildFrontier: skipping invalid reserve index=",idx," bucket=",b);
+               continue;
+              }
+
             const int out=ArraySize(state.frontier);
             ArrayResize(state.frontier,out+1);
             state.frontier[out].Reset();
@@ -2323,5 +2335,18 @@ public:
       return BuildStageJsonInternal(state);
      }
   };
+
+
+
+string ISSX_SelectionDiagTag()
+  {
+   return "selection_diag_v172f";
+  }
+
+
+string ISSX_SelectionEngineDebugSignature()
+  {
+   return ISSX_SelectionDiagTag();
+  }
 
 #endif // __ISSX_SELECTION_ENGINE_MQH__

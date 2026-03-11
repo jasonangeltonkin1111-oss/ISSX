@@ -1603,4 +1603,17 @@ public:
      }
   };
 
+
+
+string ISSX_RuntimeDiagTag()
+  {
+   return "runtime_diag_v172f";
+  }
+
+
+string ISSX_RuntimeDebugSignature()
+  {
+   return ISSX_RuntimeDiagTag();
+  }
+
 #endif // __ISSX_RUNTIME_MQH__

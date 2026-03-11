@@ -1854,4 +1854,17 @@ public:
      }
   };
 
+
+
+string ISSX_RegistryDiagTag()
+  {
+   return "registry_diag_v172f";
+  }
+
+
+string ISSX_RegistryDebugSignature()
+  {
+   return ISSX_RegistryDiagTag();
+  }
+
 #endif // __ISSX_REGISTRY_MQH__
