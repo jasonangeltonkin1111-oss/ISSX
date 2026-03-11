@@ -12,6 +12,8 @@
 #include <ISSX/issx_correlation_engine.mqh>
 #include <ISSX/issx_contracts.mqh>
 #include <ISSX/issx_ui_test.mqh>
+#include <ISSX/issx_debug_engine.mqh>
+#include <ISSX/issx_menu.mqh>
 
 input string InpFirmId                  = "default_firm";
 input bool   InpIncludeCustomSymbols    = false;
@@ -27,6 +29,12 @@ input int    InpLockStaleAfterSec       = 90;
 input bool   InpSafeMode                = false; // true = attach + timer only, no kernel
 input bool   InpRunFirstCycleInOnInit   = false; // keep false
 input bool   InpBypassLocks             = true;  // keep true until lock logic is fixed
+input bool   InpEnableEA1               = true;
+input bool   InpEnableEA2               = false;
+input bool   InpEnableEA3               = false;
+input bool   InpEnableEA4               = false;
+input bool   InpEnableEA5               = false;
+input bool   InpIsolationMode            = true;  // force EA1-only during forensic pass
 
 ISSX_RegistryBundle g_registry;
 ISSX_StageRuntime   g_runtime;
@@ -49,6 +57,14 @@ bool                g_kernel_busy               = false;
 long                g_writer_generation         = 0;
 long                g_sequence_seed             = 0;
 long                g_last_ea5_export_minute_id = 0;
+ISSX_DebugEngine    g_debug;
+ISSX_MenuEngine     g_menu;
+bool                g_ea_enabled[5]={true,false,false,false,false};
+string              g_menu_prefix               = "";
+string              g_last_checkpoint           = "boot";
+bool                g_first_tick_logged         = false;
+bool                g_first_timer_logged        = false;
+bool                g_first_chart_event_logged  = false;
 
 string ISSX_LongIdPart(const long value)
   {
@@ -458,114 +474,30 @@ void ISSX_ProjectEA5(const string export_json,
       ISSX_UI_Test::ProjectStageSnapshot(g_firm_id,issx_stage_ea5,debug_json);
   }
 
-bool ISSX_RunKernelCycle()
+
+void ISSX_SetCheckpoint(const string cp)
   {
-   Print("ISSX: KERNEL ENTER");
-   g_runtime.OnPulse();
+   g_last_checkpoint=cp;
+   g_debug.Write("INFO","checkpoint","set",cp);
+  }
 
-   string stage_json="";
-   string broker_dump_json="";
-   string debug_json="";
+bool ISSX_RunUiProjectionSafe()
+  {
+   ISSX_SetCheckpoint("ui_projection_enter");
 
-   if(!g_bootstrapped)
+   if(!InpProjectStageStatusRoot && !InpProjectUniverseSnapshot && !InpProjectDebugSnapshots)
      {
-      Print("ISSX: EA1 StageBoot");
-      g_ea1.Reset();
-      ISSX_MarketEngine::StageBoot(g_ea1);
-     }
-
-   Print("ISSX: EA1 StageSlice ENTER");
-   if(!ISSX_MarketEngine::StageSlice(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,InpEA1MaxSymbols))
-     {
-      Print("ISSX: EA1 StageSlice FAILED");
-      return false;
-     }
-
-   Print("ISSX: EA1 StageSlice OK symbols=",ArraySize(g_ea1.symbols));
-
-   if(ArraySize(g_ea1.symbols)<=0)
-     {
-      Print("ISSX: EA1 produced zero symbols, skipping downstream stages");
-      g_bootstrapped=true;
+      g_debug.Write("INFO","ui","projection_skipped","all ui projections disabled");
       return true;
      }
 
-   Print("ISSX: EA1 StagePublish");
-   ISSX_MarketEngine::StagePublish(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,stage_json,debug_json);
-   ISSX_MarketEngine::BuildUniverseDump(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,broker_dump_json);
-   ISSX_ProjectEA1(stage_json,broker_dump_json,debug_json);
-
-   string ea1_symbols[];
-   const int ea1_count=ISSX_CopyEA1Symbols(ea1_symbols);
-   Print("ISSX: EA1 symbol copy count=",ea1_count);
-
-   if(ea1_count<=0)
+   // Avoid high-risk aggregate calls when modules are intentionally disabled during isolation.
+   if(InpIsolationMode)
      {
-      Print("ISSX: no EA1 symbols copied, ending cycle safely");
-      g_bootstrapped=true;
+      g_debug.Write("INFO","ui","projection_isolation_mode","skipping BuildAggregate heavy projection");
       return true;
      }
 
-   if(!g_bootstrapped)
-     {
-      Print("ISSX: EA2 StageBoot");
-      ISSX_HistoryEngine::StageBoot(g_ea2,ea1_symbols,InpEA2DeepProfileDefault);
-     }
-
-   Print("ISSX: EA2 StageSlice");
-   ISSX_HistoryEngine::StageSlice(g_ea2,ea1_symbols,InpEA2DeepProfileDefault,InpEA2MaxSymbolsPerSlice);
-   stage_json=ISSX_HistoryEngine::StagePublish(g_ea2);
-   debug_json=ISSX_HistoryEngine::BuildDebugSnapshot(g_ea2);
-   ISSX_ProjectEA2(stage_json,debug_json);
-
-   if(!g_bootstrapped)
-     {
-      Print("ISSX: EA3 StageBoot");
-      ISSX_SelectionEngine::StageBoot(g_firm_id,g_ea1,g_ea2,g_ea3);
-     }
-
-   Print("ISSX: EA3 StageSlice");
-   ISSX_SelectionEngine::StageSlice(g_firm_id,g_ea1,g_ea2,g_ea3);
-   string ea3_debug="";
-   ISSX_SelectionEngine::StagePublish(g_ea3,stage_json,ea3_debug);
-   ISSX_ProjectEA3(stage_json,ea3_debug);
-
-   if(!g_bootstrapped)
-     {
-      Print("ISSX: EA4 StageBoot");
-      ISSX_CorrelationEngine::StageBoot(g_ea4,g_firm_id);
-     }
-
-   Print("ISSX: EA4 StageSlice");
-   ISSX_CorrelationEngine::StageSlice(g_ea4,g_firm_id,g_ea1,g_ea3,ISSX_CurrentKernelMinuteId());
-   string ea4_debug="";
-   ISSX_CorrelationEngine::StagePublish(g_ea4,stage_json,ea4_debug);
-   ISSX_ProjectEA4(stage_json,ea4_debug);
-
-   ISSX_EA4_OptionalIntelligenceExport ea4_optional_intel[];
-   ISSX_EA5_OptionalIntelligence optional_intel[];
-   ArrayResize(ea4_optional_intel,0);
-   ArrayResize(optional_intel,0);
-
-   ISSX_CorrelationEngine::ExportOptionalIntelligence(g_ea4,ea4_optional_intel);
-   ISSX_ConvertEA4OptionalIntelligence(ea4_optional_intel,optional_intel);
-
-   Print("ISSX: EA5 BuildFromInputs");
-   ISSX_Contracts::BuildFromInputs(g_ea5,g_ea1,g_ea2,g_ea3,optional_intel);
-
-   const long current_minute_id=ISSX_CurrentKernelMinuteId();
-   const bool ea5_export_due=(!g_bootstrapped || ISSX_IsEA5ExportDue(current_minute_id));
-
-   if(ea5_export_due)
-     {
-      Print("ISSX: EA5 export due");
-      string export_json=ISSX_Contracts::ToStageJson(g_ea5,g_registry.fields,g_registry.enums);
-      string ea5_debug=ISSX_Contracts::ToDebugJson(g_ea5);
-      ISSX_ProjectEA5(export_json,ea5_debug);
-      g_last_ea5_export_minute_id=current_minute_id;
-     }
-
-   Print("ISSX: UI aggregate");
    ISSX_DebugAggregate agg=ISSX_UI_Test::BuildAggregate(g_firm_id,g_runtime.State(),g_ea1,g_ea2,g_ea3,g_ea4,g_ea5);
    ISSX_UI_Test::ProjectDebugRoot(g_firm_id,agg);
 
@@ -584,14 +516,163 @@ bool ISSX_RunKernelCycle()
      }
 
    Comment(ISSX_UI_Test::BuildHudText(agg));
+   ISSX_SetCheckpoint("ui_projection_ok");
+   return true;
+  }
+
+bool ISSX_RunKernelCycle()
+  {
+   ISSX_SetCheckpoint("kernel_cycle_enter");
+   g_debug.Write("INFO","kernel","cycle_enter","bootstrapped="+(g_bootstrapped?"true":"false"));
+   g_runtime.OnPulse();
+
+   string stage_json="";
+   string broker_dump_json="";
+   string debug_json="";
+
+   if(g_ea_enabled[0] && !g_bootstrapped)
+     {
+      ISSX_SetCheckpoint("ea1_stage_boot");
+      g_debug.Write("INFO","ea1","stage_boot","start");
+      g_ea1.Reset();
+      ISSX_MarketEngine::StageBoot(g_ea1);
+     }
+
+   if(!g_ea_enabled[0])
+     {
+      g_debug.Write("WARN","ea1","disabled","EA1 disabled - no critical module active");
+      return false;
+     }
+
+   ISSX_SetCheckpoint("ea1_stage_slice_enter");
+   g_debug.Write("INFO","ea1","stage_slice","enter");
+   if(!ISSX_MarketEngine::StageSlice(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,InpEA1MaxSymbols))
+     {
+      g_debug.Write("ERROR","ea1","stage_slice_failed","returned false");
+      return false;
+     }
+
+   g_debug.Write("INFO","ea1","stage_slice_ok","symbols="+IntegerToString(ArraySize(g_ea1.symbols)));
+
+   if(ArraySize(g_ea1.symbols)<=0)
+     {
+      g_debug.Write("WARN","ea1","zero_symbols","skipping downstream stages");
+      g_bootstrapped=true;
+      return true;
+     }
+
+   g_debug.Write("INFO","ea1","stage_publish","start");
+   ISSX_MarketEngine::StagePublish(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,stage_json,debug_json);
+   ISSX_MarketEngine::BuildUniverseDump(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,broker_dump_json);
+   ISSX_ProjectEA1(stage_json,broker_dump_json,debug_json);
+
+   string ea1_symbols[];
+   const int ea1_count=ISSX_CopyEA1Symbols(ea1_symbols);
+   g_debug.Write("INFO","ea1","symbol_copy","count="+IntegerToString(ea1_count));
+
+   if(ea1_count<=0)
+     {
+      g_debug.Write("WARN","ea1","symbol_copy_empty","ending cycle safely");
+      g_bootstrapped=true;
+      return true;
+     }
+
+   if(g_ea_enabled[1] && !g_bootstrapped)
+     {
+      g_debug.Write("INFO","ea2","stage_boot","start");
+      ISSX_HistoryEngine::StageBoot(g_ea2,ea1_symbols,InpEA2DeepProfileDefault);
+     }
+
+   if(g_ea_enabled[1])
+     {
+      ISSX_SetCheckpoint("ea2_stage_slice_start");
+      g_debug.Write("INFO","ea2","stage_slice","start");
+      ISSX_HistoryEngine::StageSlice(g_ea2,ea1_symbols,InpEA2DeepProfileDefault,InpEA2MaxSymbolsPerSlice);
+      stage_json=ISSX_HistoryEngine::StagePublish(g_ea2);
+      debug_json=ISSX_HistoryEngine::BuildDebugSnapshot(g_ea2);
+      ISSX_ProjectEA2(stage_json,debug_json);
+     }
+   else
+      g_debug.Write("INFO","ea2","disabled","stage skipped");
+
+   if(g_ea_enabled[2] && !g_bootstrapped)
+     {
+      g_debug.Write("INFO","ea3","stage_boot","start");
+      ISSX_SelectionEngine::StageBoot(g_firm_id,g_ea1,g_ea2,g_ea3);
+     }
+
+   if(g_ea_enabled[2])
+     {
+      ISSX_SetCheckpoint("ea3_stage_slice_start");
+      g_debug.Write("INFO","ea3","stage_slice","start");
+      ISSX_SelectionEngine::StageSlice(g_firm_id,g_ea1,g_ea2,g_ea3);
+      string ea3_debug="";
+      ISSX_SelectionEngine::StagePublish(g_ea3,stage_json,ea3_debug);
+      ISSX_ProjectEA3(stage_json,ea3_debug);
+     }
+   else
+      g_debug.Write("INFO","ea3","disabled","stage skipped");
+
+   if(g_ea_enabled[3] && !g_bootstrapped)
+     {
+      g_debug.Write("INFO","ea4","stage_boot","start");
+      ISSX_CorrelationEngine::StageBoot(g_ea4,g_firm_id);
+     }
+
+   if(g_ea_enabled[3])
+     {
+      ISSX_SetCheckpoint("ea4_stage_slice_start");
+      g_debug.Write("INFO","ea4","stage_slice","start");
+      ISSX_CorrelationEngine::StageSlice(g_ea4,g_firm_id,g_ea1,g_ea3,ISSX_CurrentKernelMinuteId());
+      string ea4_debug="";
+      ISSX_CorrelationEngine::StagePublish(g_ea4,stage_json,ea4_debug);
+      ISSX_ProjectEA4(stage_json,ea4_debug);
+     }
+   else
+      g_debug.Write("INFO","ea4","disabled","stage skipped");
+
+   ISSX_EA4_OptionalIntelligenceExport ea4_optional_intel[];
+   ISSX_EA5_OptionalIntelligence optional_intel[];
+   ArrayResize(ea4_optional_intel,0);
+   ArrayResize(optional_intel,0);
+
+   if(g_ea_enabled[4])
+     {
+      ISSX_CorrelationEngine::ExportOptionalIntelligence(g_ea4,ea4_optional_intel);
+      ISSX_ConvertEA4OptionalIntelligence(ea4_optional_intel,optional_intel);
+
+      ISSX_SetCheckpoint("ea5_build_from_inputs");
+      g_debug.Write("INFO","ea5","build_from_inputs","start");
+      ISSX_Contracts::BuildFromInputs(g_ea5,g_ea1,g_ea2,g_ea3,optional_intel);
+
+      const long current_minute_id=ISSX_CurrentKernelMinuteId();
+      const bool ea5_export_due=(!g_bootstrapped || ISSX_IsEA5ExportDue(current_minute_id));
+
+      if(ea5_export_due)
+        {
+         g_debug.Write("INFO","ea5","export_due","true");
+         string export_json=ISSX_Contracts::ToStageJson(g_ea5,g_registry.fields,g_registry.enums);
+         string ea5_debug=ISSX_Contracts::ToDebugJson(g_ea5);
+         ISSX_ProjectEA5(export_json,ea5_debug);
+         g_last_ea5_export_minute_id=current_minute_id;
+        }
+     }
+   else
+      g_debug.Write("INFO","ea5","disabled","stage skipped");
+
+   g_debug.Write("INFO","ui","aggregate","building snapshots");
+   if(!ISSX_RunUiProjectionSafe())
+      g_debug.Write("WARN","ui","projection_failed","non-critical; continuing");
    g_bootstrapped=true;
-   Print("ISSX: KERNEL EXIT OK");
+   g_debug.Write("INFO","kernel","cycle_exit","ok=true");
    return true;
   }
 
 int OnInit()
   {
-   Print("ISSX: INIT ENTER");
+   g_debug.BeginSession("ISSX",_Symbol,_Period);
+   ISSX_SetCheckpoint("oninit_enter");
+   g_debug.Write("INFO","lifecycle","oninit_start","build="+IntegerToString((int)__MQLBUILD__));
 
    MathSrand((uint)TimeLocal());
 
@@ -600,10 +681,29 @@ int OnInit()
    g_writer_nonce   = ISSX_WrapperNonce();
    g_firm_id        = ISSX_ResolveFirmId();
 
-   Print("ISSX: boot_id=",g_boot_id);
-   Print("ISSX: instance_guid=",g_instance_guid);
-   Print("ISSX: writer_nonce=",g_writer_nonce);
-   Print("ISSX: firm_id=",g_firm_id);
+   g_debug.Write("INFO","context","identity","boot_id="+g_boot_id+" instance="+g_instance_guid+" nonce="+g_writer_nonce+" firm_id="+g_firm_id);
+   g_debug.Write("INFO","context","terminal","company="+TerminalInfoString(TERMINAL_COMPANY)+" name="+TerminalInfoString(TERMINAL_NAME));
+   g_debug.Write("INFO","context","account","server="+AccountInfoString(ACCOUNT_SERVER)+" login="+IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN)));
+
+   g_ea_enabled[0]=true;
+   g_ea_enabled[1]=false;
+   g_ea_enabled[2]=false;
+   g_ea_enabled[3]=false;
+   g_ea_enabled[4]=false;
+   if(!InpIsolationMode)
+     {
+      g_ea_enabled[0]=InpEnableEA1;
+      g_ea_enabled[1]=InpEnableEA2;
+      g_ea_enabled[2]=InpEnableEA3;
+      g_ea_enabled[3]=InpEnableEA4;
+      g_ea_enabled[4]=InpEnableEA5;
+     }
+   g_debug.Write("INFO","modules","states_forced",
+                 "ea1="+(g_ea_enabled[0]?"on":"off")+
+                 " ea2="+(g_ea_enabled[1]?"on":"off")+
+                 " ea3="+(g_ea_enabled[2]?"on":"off")+
+                 " ea4="+(g_ea_enabled[3]?"on":"off")+
+                 " ea5="+(g_ea_enabled[4]?"on":"off")+" isolation="+(InpIsolationMode?"true":"false"));
 
    // registry + runtime
    g_registry.SeedBlueprintV170();
@@ -614,12 +714,22 @@ int OnInit()
    g_first_cycle_done = false;
    g_kernel_busy      = false;
 
+   g_menu_prefix="ISSX_MENU_"+ISSX_LongIdPart((long)ChartID())+"_"+ISSX_LongIdPart((long)TimeLocal());
+   g_menu.Init(g_menu_prefix);
+   if(!g_menu.Build(g_ea_enabled))
+      g_debug.Write("WARN","ui","menu_build_failed","non-critical UI failure, continuing | "+g_menu.LastError());
+   else
+      g_debug.Write("INFO","ui","menu_build_ok","prefix="+g_menu_prefix);
+
    if(!EventSetTimer(ISSX_EVENT_TIMER_SEC))
      {
-      Print("ISSX: EventSetTimer failed err=",GetLastError());
+      g_debug.Write("ERROR","timer","event_set_failed","err="+IntegerToString(GetLastError()));
+      g_debug.Write("ERROR","lifecycle","oninit_end","result=INIT_FAILED (critical timer failure)");
+      return INIT_FAILED;
      }
 
-   Print("ISSX: INIT EXIT");
+   g_debug.Write("INFO","timer","event_set_ok","sec="+IntegerToString(ISSX_EVENT_TIMER_SEC));
+   g_debug.Write("INFO","lifecycle","oninit_end","result=INIT_SUCCEEDED");
    Comment("ISSX attached - waiting for timer");
 
    return INIT_SUCCEEDED;
@@ -629,8 +739,9 @@ void OnDeinit(const int reason)
   {
    EventKillTimer();
    g_kernel_busy=false;
-
-   Print("ISSX: DEINIT reason=",reason);
+   g_menu.Destroy();
+   g_debug.Write("INFO","lifecycle","ondeinit","reason="+IntegerToString(reason)+" last_checkpoint="+g_last_checkpoint);
+   g_debug.Close(reason,"last_checkpoint="+g_last_checkpoint+" file_mode="+g_debug.ActiveMode()+" file_path="+g_debug.ActivePath());
    Comment("");
   }
 
@@ -639,22 +750,30 @@ void OnTimer()
    if(!g_runtime_ready)
      {
       Print("ISSX: TIMER skipped runtime not ready");
+      g_debug.Write("WARN","timer","skip","runtime_not_ready");
       return;
      }
 
    if(g_kernel_busy)
      {
       Print("ISSX: TIMER skipped kernel busy");
+      g_debug.Write("WARN","timer","skip","kernel_busy");
       return;
      }
 
    g_kernel_busy=true;
 
-   Print("ISSX: TIMER START first_cycle=",(!g_first_cycle_done));
+   ISSX_SetCheckpoint("ontimer_enter");
+   if(!g_first_timer_logged)
+     {
+      g_debug.Write("INFO","timer","first_heartbeat","first timer heartbeat reached");
+      g_first_timer_logged=true;
+     }
+   g_debug.Write("INFO","timer","heartbeat","first_cycle="+(!g_first_cycle_done?"true":"false"));
 
    bool ok=ISSX_RunKernelCycle();
 
-   Print("ISSX: TIMER kernel result=",ok);
+   g_debug.Write("INFO","timer","kernel_result",(ok?"ok":"degraded"));
 
    g_first_cycle_done=true;
    g_kernel_busy=false;
@@ -667,5 +786,38 @@ void OnTimer()
 
 void OnTick()
   {
-   // timer-driven wrapper by design
+   static long tick_count=0;
+   tick_count++;
+   if(!g_first_tick_logged)
+     {
+      g_debug.Write("INFO","tick","first_heartbeat","first tick heartbeat reached");
+      g_first_tick_logged=true;
+     }
+   if((tick_count%50)==0)
+      g_debug.Write("INFO","tick","heartbeat","count="+IntegerToString((int)tick_count));
+  }
+
+void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
+  {
+   if(!g_first_chart_event_logged)
+     {
+      g_debug.Write("INFO","chart_event","first_heartbeat","first chart event reached");
+      g_first_chart_event_logged=true;
+     }
+   g_debug.Write("INFO","chart_event","event","id="+IntegerToString(id)+" obj="+sparam);
+   if(id==CHARTEVENT_OBJECT_CLICK)
+     {
+      if(g_menu.HandleClick(sparam,g_ea_enabled,!InpIsolationMode))
+        {
+         g_menu.Build(g_ea_enabled);
+         g_debug.Write("INFO","ui","menu_toggle",
+                       "ea1="+(g_ea_enabled[0]?"on":"off")+
+                       " ea2="+(g_ea_enabled[1]?"on":"off")+
+                       " ea3="+(g_ea_enabled[2]?"on":"off")+
+                       " ea4="+(g_ea_enabled[3]?"on":"off")+
+                       " ea5="+(g_ea_enabled[4]?"on":"off")+" isolation="+(InpIsolationMode?"true":"false"));
+        }
+      else
+         g_debug.Write("WARN","ui","menu_click_ignored",g_menu.LastError());
+     }
   }
