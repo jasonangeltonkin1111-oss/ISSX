@@ -1,8 +1,9 @@
 ﻿#property strict
-#property version   "1.717"
+#property version   "1.718"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
+#include <ISSX/issx_memory_guard.mqh>
 #include <ISSX/issx_config.mqh>
 #include <ISSX/issx_registry.mqh>
 #include <ISSX/issx_runtime.mqh>
@@ -51,6 +52,7 @@ input bool   InpGateUiProjection        = true;  // foundation default: enable H
 input bool   InpEnableRuntimeSchedulerLayer = false;
 input int    InpSchedulerCycleBudgetMs  = 25;
 
+ISSX_MemoryGuard   g_memory_guard;
 ISSX_RegistryBundle   g_registry;
 ISSX_StageRuntime     g_runtime;
 ISSX_StageStateRegistry StageRegistry;
@@ -1430,6 +1432,8 @@ void OnTimer()
 
    g_kernel_busy=true;
 
+   g_memory_guard.ResetCycle();
+
    ISSX_SetCheckpoint("ontimer_enter");
    g_telemetry.Event("timer_heartbeat","timer_heartbeat");
    g_timer_pulse_count++;
@@ -1529,7 +1533,7 @@ void OnTimer()
       g_debug.Write("INFO","timer","elapsed_us","value="+ISSX_Util::ULongToStringX(elapsed_us));
 
 
-   g_ui.Render(g_debug,"1.717",g_boot_id,g_timer_pulse_count,
+   g_ui.Render(g_debug,"1.718",g_boot_id,g_timer_pulse_count,
                Config.GetBool("minimal_debug_mode"),
                Config.GetBool("isolation_mode"),
                (Config.GetBool("runtime_scheduler_enabled")?"on":"off"),
