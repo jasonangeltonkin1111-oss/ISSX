@@ -4,7 +4,7 @@
 #include <ISSX/issx_core.mqh>
 #include <ISSX/issx_runtime.mqh>
 
-// ISSX SYSTEM SNAPSHOT v1.726
+// ISSX SYSTEM SNAPSHOT v1.727
 
 class ISSX_SystemSnapshot
   {
@@ -33,28 +33,38 @@ public:
             hydration_progress=1.0;
         }
 
-      string s="{";
-      s+="\"cycle\":"+IntegerToString((int)runtime_state.scheduler_cycle_no)+",";
-      s+="\"kernel_minute\":"+IntegerToString((int)runtime_state.kernel.kernel_minute_id)+",";
-      s+="\"stage_states\":{";
-      s+="\"scheduler_stage\":"+IntegerToString((int)runtime_state.scheduler.stage_slot)+",";
-      s+="\"stage_finished_this_minute\":"+(runtime_state.scheduler.stage_finished_this_minute ? "true" : "false")+",";
-      s+="\"current_phase\":"+IntegerToString((int)runtime_state.current_phase)+"},";
-      s+="\"symbol_counts\":{";
-      s+="\"ea1_symbols\":"+IntegerToString(ea1_symbols)+",";
-      s+="\"ea2_hydrated\":"+IntegerToString(ea2_hydrated)+",";
-      s+="\"ea3_frontier\":"+IntegerToString(ea3_frontier)+",";
-      s+="\"ea4_pairs\":"+IntegerToString(ea4_pairs)+",";
-      s+="\"ea5_exports\":"+IntegerToString(ea5_exports)+"},";
-      s+="\"memory_bytes\":"+LongToString(estimated_memory_bytes)+",";
-      s+="\"runtime_flags\":{";
-      s+="\"forced_service_due\":"+(runtime_state.forced_service_due_flag ? "true" : "false")+",";
-      s+="\"degraded_cycle\":"+(runtime_state.budgets.degraded_cycle_flag ? "true" : "false")+",";
-      s+="\"quote_clock_idle\":"+(runtime_state.quote_clock_idle_flag ? "true" : "false")+"},";
-      s+="\"hydration_progress\":"+ISSX_Util::DoubleToStringX(hydration_progress,4)+",";
-      s+="\"last_error\":\""+ISSX_Util::EscapeJson(bounded_error)+"\"";
-      s+="}";
-      return s;
+      ISSX_JsonWriter j;
+      j.Reset();
+      j.BeginObject();
+      j.NameLong("cycle",runtime_state.scheduler_cycle_no);
+      j.NameLong("kernel_minute",runtime_state.kernel.kernel_minute_id);
+
+      j.BeginNamedObject("stage_states");
+      j.NameInt("scheduler_stage",runtime_state.scheduler.stage_slot);
+      j.NameBool("stage_finished_this_minute",runtime_state.scheduler.stage_finished_this_minute);
+      j.NameInt("current_phase",runtime_state.current_phase);
+      j.EndObject();
+
+      j.BeginNamedObject("symbol_counts");
+      j.NameInt("ea1_symbols",MathMax(0,ea1_symbols));
+      j.NameInt("ea2_hydrated",MathMax(0,ea2_hydrated));
+      j.NameInt("ea3_frontier",MathMax(0,ea3_frontier));
+      j.NameInt("ea4_pairs",MathMax(0,ea4_pairs));
+      j.NameInt("ea5_exports",MathMax(0,ea5_exports));
+      j.EndObject();
+
+      j.NameLong("memory_bytes",MathMax((long)0,estimated_memory_bytes));
+
+      j.BeginNamedObject("runtime_flags");
+      j.NameBool("forced_service_due",runtime_state.forced_service_due_flag);
+      j.NameBool("degraded_cycle",runtime_state.budgets.degraded_cycle_flag);
+      j.NameBool("quote_clock_idle",runtime_state.quote_clock_idle_flag);
+      j.EndObject();
+
+      j.NameDouble("hydration_progress",hydration_progress,4);
+      j.NameString("last_error",bounded_error);
+      j.EndObject();
+      return j.ToString();
      }
   };
 

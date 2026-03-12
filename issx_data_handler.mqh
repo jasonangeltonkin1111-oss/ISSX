@@ -4,14 +4,47 @@
 #include <ISSX/issx_core.mqh>
 
 // ============================================================================
-// ISSX DATA HANDLER v1.716
+// ISSX DATA HANDLER v1.717
 // Shared JSON/payload/file-commit safety layer for ISSX stages.
 // ============================================================================
 
-#define ISSX_DATA_HANDLER_MODULE_VERSION "1.716"
+#define ISSX_DATA_HANDLER_MODULE_VERSION "1.717"
+#define ISSX_DATA_HANDLER_MAX_PAYLOAD_BYTES 7864320
+#define ISSX_DATA_HANDLER_WRITE_RETRY_MAX   3
 
 namespace ISSX_DataHandler
   {
+   bool IsSafeRelativePath(const string relative_path)
+     {
+      if(ISSX_Util::IsEmpty(relative_path))
+         return false;
+      if(StringSubstr(relative_path,0,1)=="/" || StringSubstr(relative_path,0,1)=="\\")
+         return false;
+      if(StringFind(relative_path,":",0)>=0)
+         return false;
+      if(StringFind(relative_path,"..",0)>=0)
+         return false;
+      return true;
+     }
+
+   string BuildTempPath(const string relative_path,const int attempt)
+     {
+      return relative_path+".tmp."+IntegerToString((int)GetTickCount())+"."+IntegerToString(attempt);
+     }
+
+   bool VerifyFinalPayload(const string relative_path,const int expected_utf8_bytes)
+     {
+      ResetLastError();
+      const int h=FileOpen(relative_path,FILE_READ|FILE_TXT|FILE_COMMON|FILE_ANSI,"\n",CP_UTF8);
+      if(h==INVALID_HANDLE)
+         return false;
+      const ulong sz=FileSize(h);
+      FileClose(h);
+      if(expected_utf8_bytes<=0)
+         return true;
+      return (sz>0);
+     }
+
    struct ForensicState
      {
       string checkpoint;
@@ -141,78 +174,124 @@ namespace ISSX_DataHandler
                                   const bool allow_copy_fallback=true)
      {
       io_state.final_path=relative_path;
-      io_state.temp_path=relative_path+".tmp";
       io_state.payload_bytes_attempted=EstimateUtf8Bytes(payload);
       io_state.payload_bytes_written=0;
 
-      io_state.checkpoint="json_write_tmp_start";
-      ResetLastError();
-      const int h=FileOpen(io_state.temp_path,
-                           FILE_WRITE|FILE_TXT|FILE_COMMON|FILE_ANSI,
-                           "\n",
-                           CP_UTF8);
-      io_state.open_error=GetLastError();
-      if(h==INVALID_HANDLE)
+      if(!IsSafeRelativePath(relative_path))
         {
-         JsonFail(io_state,"json_fail","tmp_open_failed",io_state.open_error);
+         JsonFail(io_state,"json_fail","unsafe_relative_path",0);
+         return false;
+        }
+
+      if(io_state.payload_bytes_attempted>ISSX_DATA_HANDLER_MAX_PAYLOAD_BYTES)
+        {
+         JsonFail(io_state,"json_fail","payload_too_large",0);
          return false;
         }
 
       const int wanted=StringLen(payload);
-      ResetLastError();
-      const uint written=FileWriteString(h,payload,wanted);
-      io_state.write_error=GetLastError();
-
-      ResetLastError();
-      FileFlush(h);
-      const int flush_error=GetLastError();
-      FileClose(h);
-
-      if(((int)written!=wanted) || io_state.write_error!=0 || flush_error!=0)
+      const int attempts=MathMax(1,ISSX_DATA_HANDLER_WRITE_RETRY_MAX);
+      for(int attempt=1;attempt<=attempts;attempt++)
         {
+         io_state.temp_path=BuildTempPath(relative_path,attempt);
+
+         io_state.checkpoint="json_write_tmp_start";
          ResetLastError();
-         FileDelete(io_state.temp_path,FILE_COMMON);
-         io_state.delete_error=GetLastError();
-         JsonFail(io_state,"json_fail","tmp_write_or_flush_failed",(io_state.write_error!=0?io_state.write_error:flush_error));
-         return false;
-        }
-
-      io_state.payload_bytes_written=EstimateUtf8Bytes(payload);
-      io_state.checkpoint="json_write_tmp_complete";
-
-      io_state.checkpoint="json_commit_start";
-      ResetLastError();
-      FileDelete(relative_path,FILE_COMMON);
-      io_state.delete_error=GetLastError();
-
-      ResetLastError();
-      if(!FileMove(io_state.temp_path,0,relative_path,FILE_COMMON))
-        {
-         io_state.move_error=GetLastError();
-         if(!allow_copy_fallback)
+         const int h=FileOpen(io_state.temp_path,
+                              FILE_WRITE|FILE_TXT|FILE_COMMON|FILE_ANSI,
+                              "\n",
+                              CP_UTF8);
+         io_state.open_error=GetLastError();
+         if(h==INVALID_HANDLE)
            {
-            JsonFail(io_state,"json_fail","commit_move_failed",io_state.move_error);
-            return false;
+            if(attempt==attempts)
+              {
+               JsonFail(io_state,"json_fail","tmp_open_failed",io_state.open_error);
+               return false;
+              }
+            continue;
            }
 
          ResetLastError();
-         if(!FileCopy(io_state.temp_path,0,relative_path,FILE_COMMON))
+         const uint written=FileWriteString(h,payload,wanted);
+         io_state.write_error=GetLastError();
+
+         ResetLastError();
+         FileFlush(h);
+         const int flush_error=GetLastError();
+         FileClose(h);
+
+         if(((int)written!=wanted) || io_state.write_error!=0 || flush_error!=0)
            {
-            io_state.copy_error=GetLastError();
             ResetLastError();
             FileDelete(io_state.temp_path,FILE_COMMON);
             io_state.delete_error=GetLastError();
-            JsonFail(io_state,"json_fail","commit_copy_failed",io_state.copy_error);
-            return false;
+            if(attempt==attempts)
+              {
+               JsonFail(io_state,"json_fail","tmp_write_or_flush_failed",(io_state.write_error!=0?io_state.write_error:flush_error));
+               return false;
+              }
+            continue;
            }
 
+         io_state.payload_bytes_written=EstimateUtf8Bytes(payload);
+         io_state.checkpoint="json_write_tmp_complete";
+
+         io_state.checkpoint="json_commit_start";
          ResetLastError();
-         FileDelete(io_state.temp_path,FILE_COMMON);
+         FileDelete(relative_path,FILE_COMMON);
          io_state.delete_error=GetLastError();
+
+         ResetLastError();
+         if(!FileMove(io_state.temp_path,0,relative_path,FILE_COMMON))
+           {
+            io_state.move_error=GetLastError();
+            if(!allow_copy_fallback)
+              {
+               if(attempt==attempts)
+                 {
+                  JsonFail(io_state,"json_fail","commit_move_failed",io_state.move_error);
+                  return false;
+                 }
+               continue;
+              }
+
+            ResetLastError();
+            if(!FileCopy(io_state.temp_path,0,relative_path,FILE_COMMON))
+              {
+               io_state.copy_error=GetLastError();
+               ResetLastError();
+               FileDelete(io_state.temp_path,FILE_COMMON);
+               io_state.delete_error=GetLastError();
+               if(attempt==attempts)
+                 {
+                  JsonFail(io_state,"json_fail","commit_copy_failed",io_state.copy_error);
+                  return false;
+                 }
+               continue;
+              }
+
+            ResetLastError();
+            FileDelete(io_state.temp_path,FILE_COMMON);
+            io_state.delete_error=GetLastError();
+           }
+
+         if(!VerifyFinalPayload(relative_path,io_state.payload_bytes_attempted))
+           {
+            if(attempt==attempts)
+              {
+               JsonFail(io_state,"json_fail","commit_verify_failed",0);
+               return false;
+              }
+            continue;
+           }
+
+         io_state.checkpoint="json_commit_complete";
+         return true;
         }
 
-      io_state.checkpoint="json_commit_complete";
-      return true;
+      JsonFail(io_state,"json_fail","write_retry_exhausted",0);
+      return false;
      }
 
    bool CopyProjection(const string src_path,const string dst_path,ForensicState &io_state)
