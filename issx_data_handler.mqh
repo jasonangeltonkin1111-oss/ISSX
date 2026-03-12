@@ -1,14 +1,14 @@
-﻿#ifndef __ISSX_DATA_HANDLER_MQH__
+#ifndef __ISSX_DATA_HANDLER_MQH__
 #define __ISSX_DATA_HANDLER_MQH__
 
 #include <ISSX/issx_core.mqh>
 
 // ============================================================================
-// ISSX DATA HANDLER v1.718
+// ISSX DATA HANDLER v1.731
 // Shared JSON/payload/file-commit safety layer for ISSX stages.
 // ============================================================================
 
-#define ISSX_DATA_HANDLER_MODULE_VERSION "1.718"
+#define ISSX_DATA_HANDLER_MODULE_VERSION "1.731"
 #define ISSX_DATA_HANDLER_MAX_PAYLOAD_BYTES 7864320
 #define ISSX_DATA_HANDLER_WRITE_RETRY_MAX   3
 
@@ -32,28 +32,47 @@ namespace ISSX_DataHandler
       return relative_path+".tmp."+IntegerToString((int)GetTickCount())+"."+IntegerToString(attempt);
      }
 
+   bool EnsureParentFolder(const string relative_file_path)
+     {
+      const int sep1=StringFind(relative_file_path,"\\",0);
+      const int sep2=StringFind(relative_file_path,"/",0);
+      if(sep1<0 && sep2<0)
+         return true;
+
+      string path=relative_file_path;
+      StringReplace(path,"/","\\");
+      string parts[];
+      const int n=StringSplit(path,(ushort)StringGetCharacter("\\",0),parts);
+      if(n<=1)
+         return true;
+
+      string build="";
+      for(int i=0;i<n-1;i++)
+        {
+         if(ISSX_Util::IsEmpty(parts[i]))
+            continue;
+
+         build=(ISSX_Util::IsEmpty(build) ? parts[i] : build+"\\"+parts[i]);
+         FolderCreate(build,FILE_COMMON);
+        }
+
+      return true;
+     }
+
    bool VerifyFinalPayload(const string relative_path,const int expected_utf8_bytes)
      {
       ResetLastError();
-      const int h=FileOpen(relative_path,FILE_READ|FILE_TXT|FILE_COMMON|FILE_ANSI,"\n",CP_UTF8);
+      const int h=FileOpen(relative_path,FILE_READ|FILE_BIN|FILE_COMMON);
       if(h==INVALID_HANDLE)
          return false;
 
       const ulong sz=FileSize(h);
-      string readback="";
-      ResetLastError();
-      readback=FileReadString(h,(int)MathMin((ulong)2147483647,sz));
-      const int read_error=GetLastError();
       FileClose(h);
 
-      if(read_error!=0)
-         return false;
-
-      const int readback_utf8_bytes=EstimateUtf8Bytes(readback);
       if(expected_utf8_bytes<=0)
-         return (readback_utf8_bytes<=0 && sz==0);
+         return (sz==0);
 
-      return (readback_utf8_bytes==expected_utf8_bytes && sz>0);
+      return ((int)sz==expected_utf8_bytes);
      }
 
    struct ForensicState
@@ -200,7 +219,18 @@ namespace ISSX_DataHandler
          return false;
         }
 
-      const int wanted=StringLen(payload);
+      if(!EnsureParentFolder(relative_path))
+        {
+         JsonFail(io_state,"json_fail","parent_folder_create_failed",0);
+         return false;
+        }
+
+      uchar payload_bytes[];
+      int payload_encoded=StringToCharArray(payload,payload_bytes,0,-1,CP_UTF8);
+      if(payload_encoded<0)
+         payload_encoded=0;
+      const int wanted=MathMax(0,payload_encoded-1);
+
       const int attempts=MathMax(1,ISSX_DATA_HANDLER_WRITE_RETRY_MAX);
       for(int attempt=1;attempt<=attempts;attempt++)
         {
@@ -209,9 +239,7 @@ namespace ISSX_DataHandler
          io_state.checkpoint="json_write_tmp_start";
          ResetLastError();
          const int h=FileOpen(io_state.temp_path,
-                              FILE_WRITE|FILE_TXT|FILE_COMMON|FILE_ANSI,
-                              "\n",
-                              CP_UTF8);
+                              FILE_WRITE|FILE_BIN|FILE_COMMON);
          io_state.open_error=GetLastError();
          if(h==INVALID_HANDLE)
            {
@@ -224,7 +252,7 @@ namespace ISSX_DataHandler
            }
 
          ResetLastError();
-         const uint written=FileWriteString(h,payload,wanted);
+         const uint written=(wanted>0 ? FileWriteArray(h,payload_bytes,0,wanted) : 0);
          io_state.write_error=GetLastError();
 
          ResetLastError();
@@ -254,7 +282,7 @@ namespace ISSX_DataHandler
          io_state.delete_error=GetLastError();
 
          ResetLastError();
-         if(!FileMove(io_state.temp_path,0,relative_path,FILE_COMMON))
+         if(!FileMove(io_state.temp_path,FILE_COMMON,relative_path,FILE_COMMON))
            {
             io_state.move_error=GetLastError();
             if(!allow_copy_fallback)
@@ -268,7 +296,7 @@ namespace ISSX_DataHandler
               }
 
             ResetLastError();
-            if(!FileCopy(io_state.temp_path,0,relative_path,FILE_COMMON))
+            if(!FileCopy(io_state.temp_path,FILE_COMMON,relative_path,FILE_COMMON))
               {
                io_state.copy_error=GetLastError();
                ResetLastError();
@@ -314,7 +342,7 @@ namespace ISSX_DataHandler
       FileDelete(dst_path,FILE_COMMON);
       io_state.delete_error=GetLastError();
       ResetLastError();
-      const bool ok=FileCopy(src_path,0,dst_path,FILE_COMMON);
+      const bool ok=FileCopy(src_path,FILE_COMMON,dst_path,FILE_COMMON);
       io_state.copy_error=GetLastError();
       if(!ok)
         {
