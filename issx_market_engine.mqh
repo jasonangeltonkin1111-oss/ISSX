@@ -8,7 +8,7 @@
 #include <ISSX/issx_data_handler.mqh>
 
 // ============================================================================
-// ISSX MARKET ENGINE v1.728
+// ISSX MARKET ENGINE v1.729
 // EA1 shared engine for MarketStateCore.
 //
 // HARDENING NOTES
@@ -25,7 +25,7 @@
 //   owner runtime/persistence layer
 // ============================================================================
 
-#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.728"
+#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.729"
 #define ISSX_EA1_PUBLISH_STAGE_JSON_MAX_BYTES     262144
 #define ISSX_EA1_PUBLISH_DEBUG_JSON_MAX_BYTES     524288
 #define ISSX_EA1_PUBLISH_UNIVERSE_JSON_MAX_BYTES  6291456
@@ -3025,16 +3025,21 @@ public:
       io_state.minute_id=current_minute;
 
       const bool initial_discovery_needed=(io_state.runtime_state==EA1_STATE_DISCOVERY || io_state.sequence_no<=0 || ArraySize(io_state.symbols)<=0);
-      if(initial_discovery_needed)
+      const bool minute_cadence_due=(m_last_discovery_minute<0 || current_minute!=m_last_discovery_minute);
+      const bool ready_cadence_refresh=(io_state.runtime_state==EA1_STATE_READY && minute_cadence_due);
+      if(initial_discovery_needed || ready_cadence_refresh)
         {
          io_state.discovery_attempted=true;
          const int symbols_before=ArraySize(io_state.symbols);
+         const string fingerprint_before=io_state.universe.broker_universe_fingerprint;
          const ulong t0=GetTickCount();
          const bool discovery_ok=RefreshDiscoveryOnly(io_state);
          io_state.discovery_elapsed_ms=(int)(GetTickCount()-t0);
          io_state.discovery_minute_id=current_minute;
+         m_last_discovery_minute=current_minute;
          io_state.discovery_success=discovery_ok;
-         io_state.discovery_no_change=(ArraySize(io_state.symbols)==symbols_before);
+         io_state.discovery_no_change=(ArraySize(io_state.symbols)==symbols_before &&
+                                       io_state.universe.broker_universe_fingerprint==fingerprint_before);
          io_state.discovery_skip_streak=0;
 
          g_ea1_last_discovery_attempted=true;
@@ -3053,9 +3058,16 @@ public:
 
          io_state.discovery_status_reason="success";
          g_ea1_last_discovery_error="";
-         io_state.runtime_state=EA1_STATE_HYDRATING;
-         PrepareHydrationQueue(io_state,max_symbols);
-         BuildHydrationUniverse(io_state);
+         if(initial_discovery_needed || !io_state.discovery_no_change)
+           {
+            io_state.runtime_state=EA1_STATE_HYDRATING;
+            PrepareHydrationQueue(io_state,max_symbols);
+            BuildHydrationUniverse(io_state);
+            if(!initial_discovery_needed)
+               io_state.discovery_status_reason="cadence_refresh_changed";
+           }
+         else
+            io_state.discovery_status_reason="cadence_refresh_no_change";
         }
       else
         {
