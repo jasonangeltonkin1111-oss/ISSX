@@ -3,10 +3,11 @@
 
 #include <ISSX/issx_core.mqh>
 
-// ISSX SCHEDULER v1.722
-#define ISSX_SCHEDULER_MODULE_VERSION "1.722"
+// ISSX SCHEDULER v1.723
+#define ISSX_SCHEDULER_MODULE_VERSION "1.723"
 
 #define ISSX_SCHEDULER_MAX_STAGES 16
+#define ISSX_SCHEDULER_TIMER_GUARD_MS 1
 
 class ISSX_Scheduler
   {
@@ -98,7 +99,8 @@ public:
          return true;
       const ulong elapsed_us=(ulong)GetMicrosecondCount()-m_cycle_start_us;
       const long remaining_ms=(long)m_cycle_budget_ms-(long)(elapsed_us/1000);
-      return (remaining_ms>=MathMax(0,required_ms));
+      const long guarded_required_ms=(long)MathMax(0,required_ms)+(long)ISSX_SCHEDULER_TIMER_GUARD_MS;
+      return (remaining_ms>=guarded_required_ms);
      }
 
    bool ShouldRunStage(const string stage_name)
@@ -122,12 +124,13 @@ public:
          return true;
       if(!m_cycle_active)
          return false;
-      if(!BudgetRemaining(budget_ms))
+      const int required_ms=MathMax(0,budget_ms);
+      if(!BudgetRemaining(required_ms))
         {
          m_skipped_budget++;
          m_degraded=true;
          if(IsSampled())
-            Print("scheduler_stage_skipped_budget stage=",stage_name," required_ms=",IntegerToString(budget_ms));
+            Print("scheduler_stage_skipped_budget stage=",stage_name," required_ms=",IntegerToString(required_ms));
          return false;
         }
       if(!ShouldRunStage(stage_name))
@@ -138,8 +141,12 @@ public:
             Print("scheduler_stage_skipped_quota stage=",stage_name," reason=pacing");
          return false;
         }
+      int idx=StageIndex(stage_name);
+      if(idx>=0)
+         m_stage_last_run_us[idx]=(ulong)GetMicrosecondCount();
+
       if(IsSampled())
-         Print("scheduler_stage_allowed stage=",stage_name," budget_ms=",IntegerToString(budget_ms));
+         Print("scheduler_stage_allowed stage=",stage_name," budget_ms=",IntegerToString(required_ms));
       return true;
      }
 
@@ -153,9 +160,22 @@ public:
       if(idx<0)
          return true;
 
+      if(!ShouldRunStage(stage_name))
+        {
+         m_skipped_quota++;
+         m_degraded=true;
+         if(IsSampled())
+            Print("scheduler_stage_skipped_quota stage=",stage_name," reason=pacing");
+         return false;
+        }
+
       int bounded=item_limit;
       if(bounded<0)
          bounded=0;
+
+      int prev_limit=m_stage_last_batch_limit[idx];
+      if(prev_limit<=0)
+         prev_limit=1;
 
       const ulong elapsed_us=(ulong)GetMicrosecondCount()-m_cycle_start_us;
       const int elapsed_ms=(int)(elapsed_us/1000);
@@ -166,15 +186,27 @@ public:
          m_degraded=true;
         }
 
-      m_stage_last_batch_limit[idx]=bounded;
+      int required_ms=1;
+      if(m_stage_time_us[idx]>0 && bounded>0)
+        {
+         const double unit_us=((double)m_stage_time_us[idx])/((double)prev_limit);
+         const double estimate_us=unit_us*(double)bounded;
+         required_ms=(int)MathCeil(estimate_us/1000.0);
+         if(required_ms<1)
+            required_ms=1;
+        }
 
-      if(!BudgetRemaining(1))
+      if(!BudgetRemaining(required_ms))
         {
          m_skipped_budget++;
+         m_degraded=true;
          if(IsSampled())
-            Print("scheduler_stage_skipped_budget stage=",stage_name," reason=batch_budget_exhausted");
+            Print("scheduler_stage_skipped_budget stage=",stage_name," reason=batch_budget_exhausted required_ms=",IntegerToString(required_ms));
          return false;
         }
+
+      m_stage_last_batch_limit[idx]=bounded;
+      m_stage_last_run_us[idx]=(ulong)GetMicrosecondCount();
 
       if(IsSampled())
          Print("scheduler_stage_allowed stage=",stage_name," batch_limit=",IntegerToString(m_stage_last_batch_limit[idx]));
