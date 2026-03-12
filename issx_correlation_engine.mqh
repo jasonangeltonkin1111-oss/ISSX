@@ -9,7 +9,7 @@
 #include <ISSX/issx_selection_engine.mqh>
 
 // ============================================================================
-// ISSX CORRELATION ENGINE v1.718
+// ISSX CORRELATION ENGINE v1.720
 // EA4 shared engine for IntelligenceCore.
 //
 // OWNERSHIP IN THIS MODULE
@@ -43,7 +43,7 @@
 // - same-tick handoff is never implied here; upstream accepted truth only
 // ============================================================================
 
-#define ISSX_CORRELATION_ENGINE_MODULE_VERSION "1.718"
+#define ISSX_CORRELATION_ENGINE_MODULE_VERSION "1.720"
 #define ISSX_CORRELATION_ENGINE_STAGE_API_VERSION "1.0"
 #define ISSX_EA4_PAIR_CACHE_MAX_AGE_MINUTES    30
 #define ISSX_EA4_FRONTIER_HARD_LIMIT           64
@@ -592,6 +592,7 @@ struct ISSX_EA4_OptionalIntelligenceExport
 class ISSX_CorrelationEngine
   {
 private:
+   static int m_frontier_cursor;
    static double Clamp01(const double v)
      {
       if(v<0.0)
@@ -1532,7 +1533,12 @@ public:
       state.universe.frontier_drift_class="bounded";
 
       const int raw_frontier_count=ArraySize(ea3.frontier);
-      const int frontier_count=MathMin(raw_frontier_count,ISSX_EA4_FRONTIER_HARD_LIMIT);
+      const int frontier_count=MathMax(0,raw_frontier_count);
+      const int frontier_window_size=(frontier_count>0 ? MathMin(frontier_count,ISSX_EA4_FRONTIER_HARD_LIMIT) : 0);
+      if(m_frontier_cursor<0 || m_frontier_cursor>=MathMax(1,frontier_count))
+         m_frontier_cursor=0;
+      const int frontier_window_start=(frontier_count>0 ? m_frontier_cursor : 0);
+      const int frontier_window_end=(frontier_count>0 ? MathMin(frontier_count,frontier_window_start+frontier_window_size) : 0);
       state.universe.frontier_universe_count=frontier_count;
       state.universe.publishable_universe_count=frontier_count;
       state.universe.broker_universe_fingerprint=ea3.universe.broker_universe_fingerprint;
@@ -1544,7 +1550,9 @@ public:
       AppendForensicEvent(state,"correlation_discovery_attempt",
                           "frontier_count="+IntegerToString(frontier_count)+
                           ";raw_frontier_count="+IntegerToString(raw_frontier_count)+
-                          ";frontier_hard_limit="+IntegerToString(ISSX_EA4_FRONTIER_HARD_LIMIT));
+                          ";frontier_hard_limit="+IntegerToString(ISSX_EA4_FRONTIER_HARD_LIMIT)+
+                          ";window_start="+IntegerToString(frontier_window_start)+
+                          ";window_end="+IntegerToString(frontier_window_end));
 
       if(frontier_count<=0)
         {
@@ -1564,7 +1572,7 @@ public:
          return true;
         }
 
-      if(ArrayResize(state.symbols,frontier_count)!=frontier_count)
+      if(ArrayResize(state.symbols,frontier_window_size)!=frontier_window_size)
         {
          state.degraded_flag=true;
          state.recovery_publish_flag=true;
@@ -1579,11 +1587,11 @@ public:
          return false;
         }
 
-      state.forensic.pair_matrix_cells_estimate=frontier_count*frontier_count;
-      state.forensic.pair_generation_cap=MathMin((frontier_count*(frontier_count-1))/2,ISSX_EA4_PAIR_BATCH_SOFT_LIMIT);
+      state.forensic.pair_matrix_cells_estimate=frontier_window_size*frontier_window_size;
+      state.forensic.pair_generation_cap=MathMin((frontier_window_size*(frontier_window_size-1))/2,ISSX_EA4_PAIR_BATCH_SOFT_LIMIT);
       state.forensic.pair_batch_size_used=state.forensic.pair_generation_cap;
-      state.forensic.pair_batch_start_cursor=0;
-      state.forensic.pair_batch_end_cursor=state.forensic.pair_generation_cap;
+      state.forensic.pair_batch_start_cursor=frontier_window_start;
+      state.forensic.pair_batch_end_cursor=frontier_window_end;
       state.forensic.pair_cursor=0;
       AppendForensicEvent(state,"correlation_pair_generation",
                           "pair_cap="+IntegerToString(state.forensic.pair_generation_cap)+
@@ -1591,20 +1599,21 @@ public:
                           ";pair_batch_soft_limit="+IntegerToString(ISSX_EA4_PAIR_BATCH_SOFT_LIMIT));
       if(raw_frontier_count>ISSX_EA4_FRONTIER_HARD_LIMIT)
         {
-         state.forensic.error_conditions="frontier_clamped";
+         state.forensic.error_conditions="frontier_windowed";
          AppendForensicEvent(state,"correlation_error_conditions",
-                             "frontier_clamped_from="+IntegerToString(raw_frontier_count)+
-                             ";to="+IntegerToString(frontier_count));
+                             "frontier_windowed_total="+IntegerToString(raw_frontier_count)+
+                             ";window_size="+IntegerToString(frontier_window_size));
         }
 
       BeginStagePhase(state.runtime,issx_ea4_phase_select_pair_queue,60,"ea4_select_pair_queue");
 
-      for(int i=0;i<frontier_count;i++)
+      for(int i=0;i<frontier_window_size;i++)
         {
          state.symbols[i].Reset();
-         state.symbols[i].symbol_norm=ea3.frontier[i].symbol_norm;
-         state.symbols[i].symbol_raw=ea3.frontier[i].symbol_raw;
-         state.symbols[i].leader_bucket_id=ea3.frontier[i].bucket_id;
+         const int source_idx=frontier_window_start+i;
+         state.symbols[i].symbol_norm=ea3.frontier[source_idx].symbol_norm;
+         state.symbols[i].symbol_raw=ea3.frontier[source_idx].symbol_raw;
+         state.symbols[i].leader_bucket_id=ea3.frontier[source_idx].bucket_id;
          state.symbols[i].leader_bucket_type=issx_leader_bucket_theme_bucket;
          state.symbols[i].changed_this_cycle=true;
 
@@ -1618,28 +1627,28 @@ public:
          AppendChangedSymbol(state,state.symbols[i].symbol_norm);
         }
 
-      state.delta.changed_frontier_count=frontier_count;
+      state.delta.changed_frontier_count=frontier_window_size;
       state.delta.changed_family_count=CountDistinctFrontierFamilies(state);
 
       BeginStagePhase(state.runtime,issx_ea4_phase_compute_structural_overlap,80,"ea4_structural_overlap");
       BeginStagePhase(state.runtime,issx_ea4_phase_compute_statistical_overlap,80,"ea4_statistical_overlap");
 
       AppendForensicEvent(state,"correlation_batch_start",
-                          "batch_cursor_start=0;batch_cursor_end="+IntegerToString(state.forensic.pair_batch_end_cursor));
+                          "batch_cursor_start="+IntegerToString(state.forensic.pair_batch_start_cursor)+";batch_cursor_end="+IntegerToString(state.forensic.pair_batch_end_cursor));
 
-      for(int i=0;i<frontier_count;i++)
+      for(int i=0;i<frontier_window_size;i++)
         {
          state.forensic.heavy_loop_iterations++;
          state.forensic.pair_cursor=i;
          state.counters.pair_attempted++;
 
-         const int expected_pairs=MathMax(0,frontier_count-1);
+         const int expected_pairs=MathMax(0,frontier_window_size-1);
          AppendForensicEvent(state,"correlation_pair_start",
                              "symbol="+state.symbols[i].symbol_norm+
                              ";peer_scan_budget="+IntegerToString(expected_pairs)+
                              ";cursor="+IntegerToString(i));
 
-         if(frontier_count==1)
+         if(frontier_window_size==1)
            {
             SetUnknownIntelligence(state.symbols[i],issx_ea4_null_not_enough_overlap,false);
             state.counters.pair_abstained++;
@@ -1672,20 +1681,16 @@ public:
                           "batch_size="+IntegerToString(state.counters.pair_attempted)+
                           ";abstained="+IntegerToString(state.counters.pair_abstained));
 
-      string frontier_items[];
-      ArrayResize(frontier_items,frontier_count);
-      for(int i=0;i<frontier_count;i++)
-         frontier_items[i]=state.symbols[i].symbol_norm;
-      state.universe.frontier_universe_fingerprint=BuildStableFingerprint(frontier_items);
+      state.universe.frontier_universe_fingerprint=ea3.universe.frontier_universe_fingerprint;
       state.universe.publishable_universe_fingerprint=state.universe.frontier_universe_fingerprint;
 
       RefreshDerivedUniverseCoverage(state,frontier_count);
 
       state.degraded_flag=true;
-      state.stage_minimum_ready_flag=(frontier_count>0);
-      state.forensic.partial_ready_flag=(frontier_count>0 && state.counters.abstained_symbol_count==frontier_count);
-      state.stage_publishability_state=(frontier_count>0 ? issx_publishability_usable_degraded : issx_publishability_not_ready);
-      state.dependency_block_reason=DetermineDependencyBlockReason(frontier_count,state.counters.abstained_symbol_count);
+      state.stage_minimum_ready_flag=(frontier_window_size>0);
+      state.forensic.partial_ready_flag=(frontier_window_size>0 && state.counters.abstained_symbol_count>=frontier_window_size);
+      state.stage_publishability_state=(frontier_window_size>0 ? issx_publishability_usable_degraded : issx_publishability_not_ready);
+      state.dependency_block_reason=DetermineDependencyBlockReason(frontier_window_size,state.counters.abstained_symbol_count);
       state.debug_weak_link_code=((frontier_count<=1 || state.counters.abstained_symbol_count>=frontier_count) ?
                                   issx_weak_link_dependency_block :
                                   issx_weak_link_none);
@@ -1695,11 +1700,18 @@ public:
                           ";publishability="+PublishabilityStateToString(state.stage_publishability_state));
       if(state.forensic.partial_ready_flag)
          AppendForensicEvent(state,"correlation_partial_state",
-                             "partial_ready=true;abstained_symbol_count="+IntegerToString(state.counters.abstained_symbol_count));
+                             "partial_ready=true;abstained_symbol_count="+IntegerToString(state.counters.abstained_symbol_count)+";window_size="+IntegerToString(frontier_window_size));
       if(state.forensic.error_conditions!="none")
          AppendForensicEvent(state,"correlation_error_conditions","error_conditions="+state.forensic.error_conditions);
       AppendForensicEvent(state,"correlation_batch_complete",
                           "persistence_export=stage_json_debug_json_only");
+
+      if(frontier_count>0)
+        {
+         m_frontier_cursor=frontier_window_end;
+         if(m_frontier_cursor>=frontier_count)
+            m_frontier_cursor=0;
+        }
 
       BeginStagePhase(state.runtime,issx_ea4_phase_publish,40,"ea4_publish");
       RefreshManifest(state,firm_id);
@@ -1868,6 +1880,8 @@ public:
   };
 
 
+
+int ISSX_CorrelationEngine::m_frontier_cursor=0;
 
 string ISSX_CorrelationDiagTag()
   {

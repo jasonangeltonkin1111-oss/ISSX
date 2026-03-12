@@ -1,5 +1,5 @@
 ﻿#property strict
-#property version   "1.719"
+#property version   "1.720"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
@@ -1178,10 +1178,10 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       stage_json=ISSX_HistoryEngine::StagePublish(g_ea2);
       debug_json=ISSX_HistoryEngine::BuildDebugSnapshot(g_ea2);
       ISSX_ProjectEA2(stage_json,debug_json);
-      g_last_ea2_stage_run="success";
+      g_last_ea2_stage_run=(g_ea2.stage_minimum_ready_flag ? (g_ea2.degraded_flag?"degraded":"success") : "blocked");
       g_last_ea2_stage_reason=g_ea2.dependency_block_reason;
       g_last_ea2_stage_elapsed_ms=0;
-      g_telemetry.EndStage("ea2_history",(g_last_ea2_stage_run=="success"?"READY":"DEGRADED"));
+      g_telemetry.EndStage("ea2_history",(g_ea2.stage_minimum_ready_flag ? (g_ea2.degraded_flag?"DEGRADED":"READY") : "BLOCKED"));
      }
    else
      {
@@ -1236,10 +1236,10 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       string ea4_debug="";
       ISSX_CorrelationEngine::StagePublish(g_ea4,stage_json,ea4_debug);
       ISSX_ProjectEA4(stage_json,ea4_debug);
-      g_last_ea4_stage_run="success";
+      g_last_ea4_stage_run=(g_ea4.stage_minimum_ready_flag ? (g_ea4.degraded_flag?"degraded":"success") : "blocked");
       g_last_ea4_stage_reason=g_ea4.dependency_block_reason;
       g_last_ea4_stage_elapsed_ms=0;
-      g_telemetry.EndStage("ea4_correlation",(g_last_ea4_stage_run=="success"?"READY":"DEGRADED"));
+      g_telemetry.EndStage("ea4_correlation",(g_ea4.stage_minimum_ready_flag ? (g_ea4.degraded_flag?"DEGRADED":"READY") : "BLOCKED"));
      }
    else
      {
