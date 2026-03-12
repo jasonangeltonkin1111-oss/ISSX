@@ -3,41 +3,42 @@
 
 #include <ISSX/issx_core.mqh>
 
-// ISSX METRICS v1.723
+// ISSX METRICS v1.724
 
 struct ISSX_MetricStage
   {
    long stage_latency_ms;
-   long throughput_symbols;
-   long hydration_rate_bps;
+   long throughput_items_per_slice;
+   long hydration_bars;
    long export_size_bytes;
 
    void Reset()
      {
-      stage_latency_ms=0;
-      throughput_symbols=0;
-      hydration_rate_bps=0;
-      export_size_bytes=0;
+      stage_latency_ms=ISSX_NUMERIC_UNKNOWN_LONG;
+      throughput_items_per_slice=ISSX_NUMERIC_UNKNOWN_LONG;
+      hydration_bars=ISSX_NUMERIC_UNKNOWN_LONG;
+      export_size_bytes=ISSX_NUMERIC_UNKNOWN_LONG;
      }
+
+   // Backward-compatible field views (legacy metric naming).
+   long ThroughputSymbols() const { return throughput_items_per_slice; }
+   long HydrationRateBps() const { return hydration_bars; }
   };
 
 class ISSX_MetricsBook
   {
 private:
-   ISSX_MetricStage m_rows[5];
+   ISSX_MetricStage m_rows[ISSX_STAGE_COUNT];
 
    int Idx(const ISSX_StageId stage_id) const
      {
-      const int i=(int)stage_id-1;
-      if(i<0 || i>=5)
-         return -1;
-      return i;
+      return ISSX_Stage::ToStageIndex(stage_id);
      }
 
 public:
    void Reset()
      {
-      for(int i=0;i<5;i++)
+      for(int i=0;i<ISSX_STAGE_COUNT;i++)
          m_rows[i].Reset();
      }
 
@@ -48,18 +49,18 @@ public:
          m_rows[i].stage_latency_ms=ms;
      }
 
-   void RecordThroughput(const ISSX_StageId stage_id,const long symbols)
+   void RecordThroughput(const ISSX_StageId stage_id,const long items_per_slice)
      {
       const int i=Idx(stage_id);
       if(i>=0)
-         m_rows[i].throughput_symbols=symbols;
+         m_rows[i].throughput_items_per_slice=items_per_slice;
      }
 
-   void RecordHydrationRateBps(const ISSX_StageId stage_id,const long bps)
+   void RecordHydrationBars(const ISSX_StageId stage_id,const long bars)
      {
       const int i=Idx(stage_id);
       if(i>=0)
-         m_rows[i].hydration_rate_bps=bps;
+         m_rows[i].hydration_bars=bars;
      }
 
    void RecordExportSize(const ISSX_StageId stage_id,const long bytes)
@@ -70,7 +71,8 @@ public:
      }
 
    // Backward-compatible aliases.
-   void RecordCopyRates(const ISSX_StageId stage_id,const long bars) { RecordHydrationRateBps(stage_id,bars); }
+   void RecordHydrationRateBps(const ISSX_StageId stage_id,const long bars) { RecordHydrationBars(stage_id,bars); }
+   void RecordCopyRates(const ISSX_StageId stage_id,const long bars) { RecordHydrationBars(stage_id,bars); }
    void RecordPayloadSize(const ISSX_StageId stage_id,const long bytes) { RecordExportSize(stage_id,bytes); }
 
    ISSX_MetricStage Get(const ISSX_StageId stage_id) const
