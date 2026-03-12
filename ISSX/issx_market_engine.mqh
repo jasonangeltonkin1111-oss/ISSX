@@ -752,6 +752,13 @@ struct ISSX_EA1_State
    int                      dump_sequence_no;
    int                      dump_minute_id;
    int                      discovery_minute_id;
+   bool                     discovery_attempted;
+   bool                     discovery_skipped;
+   bool                     discovery_success;
+   bool                     discovery_no_change;
+   int                      discovery_elapsed_ms;
+   int                      discovery_skip_streak;
+   string                   discovery_status_reason;
    bool                     stage_minimum_ready_flag;
    string                   stage_publishability_state;
    string                   dependency_block_reason;
@@ -779,6 +786,13 @@ struct ISSX_EA1_State
       dump_sequence_no=0;
       dump_minute_id=0;
       discovery_minute_id=-1;
+      discovery_attempted=false;
+      discovery_skipped=false;
+      discovery_success=false;
+      discovery_no_change=false;
+      discovery_elapsed_ms=0;
+      discovery_skip_streak=0;
+      discovery_status_reason="none";
       stage_minimum_ready_flag=false;
       stage_publishability_state="not_ready";
       dependency_block_reason="none";
@@ -971,9 +985,20 @@ public:
 // SECTION 05: MARKET ENGINE
 // ============================================================================
 
+int g_ea1_last_discovery_minute;
+int g_ea1_last_skip_log_minute;
+bool g_ea1_last_discovery_attempted;
+bool g_ea1_last_discovery_skipped;
+bool g_ea1_last_discovery_no_change;
+int g_ea1_last_discovery_symbols;
+long g_ea1_last_discovery_elapsed_ms;
+string g_ea1_last_discovery_error;
+
 class ISSX_MarketEngine
   {
 private:
+   static int m_last_discovery_minute;
+
    static string SafeUpper(const string s)
      {
       string r=s;
@@ -2227,6 +2252,7 @@ public:
       io_state.comparator_registry_hash=ISSX_Hash::HashStringHex("ea1_registry_"+ISSX_MARKET_ENGINE_MODULE_VERSION);
       io_state.policy_fingerprint=ISSX_Hash::HashStringHex("ea1_policy_"+ISSX_MARKET_ENGINE_MODULE_VERSION);
       io_state.fingerprint_algorithm_version="sha256_hex_v1";
+      m_last_discovery_minute=-1;
      }
 
    static bool DiscoverUniverse(ISSX_EA1_State &io_state,
@@ -2428,7 +2454,14 @@ public:
 
    static void AdvanceOneCycle(ISSX_EA1_State &io_state)
      {
-      RefreshDiscoveryOnly(io_state);
+      io_state.minute_id=(int)(TimeCurrent()/60);
+      const bool discovery_due=(m_last_discovery_minute<0 || io_state.minute_id!=m_last_discovery_minute);
+      if(discovery_due)
+        {
+         RefreshDiscoveryOnly(io_state);
+         io_state.discovery_minute_id=io_state.minute_id;
+         m_last_discovery_minute=io_state.minute_id;
+        }
       BuildIdentityPhase(io_state);
       BuildRuntimePhase(io_state);
       BuildClassificationPhase(io_state);
@@ -2459,6 +2492,7 @@ public:
       io_state.dump_sequence_no=0;
       io_state.dump_minute_id=io_state.minute_id;
       io_state.discovery_minute_id=-1;
+      m_last_discovery_minute=-1;
       io_state.resumed_from_persistence=false;
       io_state.stage_publishability_state="not_ready";
 
@@ -2490,6 +2524,17 @@ public:
       const bool discovery_due=(io_state.sequence_no<=0 || io_state.discovery_minute_id!=current_minute);
       if(discovery_due)
         {
+         if(g_ea1_last_skip_log_minute!=current_minute)
+           {
+            g_ea1_last_discovery_skipped=true;
+            g_ea1_last_skip_log_minute=current_minute;
+           }
+        }
+      else
+        {
+         g_ea1_last_discovery_attempted=true;
+         int symbols_before=ArraySize(io_state.symbols);
+         ulong t0=GetTickCount();
          RefreshDiscoveryOnly(io_state);
          io_state.discovery_minute_id=current_minute;
         }
@@ -2617,6 +2662,15 @@ public:
 
 
 
+int ISSX_MarketEngine::m_last_discovery_minute=-1;
+int ISSX_MarketEngine::m_last_skip_log_minute=-1;
+bool ISSX_MarketEngine::m_last_discovery_attempted=false;
+bool ISSX_MarketEngine::m_last_discovery_skipped=false;
+bool ISSX_MarketEngine::m_last_discovery_no_change=false;
+int ISSX_MarketEngine::m_last_discovery_symbols=0;
+long ISSX_MarketEngine::m_last_discovery_elapsed_ms=0;
+string ISSX_MarketEngine::m_last_discovery_error="";
+
 string ISSX_MarketDiagTag()
   {
    return "market_diag_v172f";
@@ -2627,5 +2681,7 @@ string ISSX_MarketEngineDebugSignature()
   {
    return ISSX_MarketDiagTag();
   }
+
+int ISSX_MarketEngine::m_last_discovery_minute=-1;
 
 #endif // __ISSX_MARKET_ENGINE_MQH__

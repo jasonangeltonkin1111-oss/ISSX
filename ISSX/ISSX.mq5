@@ -646,6 +646,22 @@ bool ISSX_RunKernelCycle()
 
    g_debug.Write("INFO","ea1","stage_slice_ok","symbols="+IntegerToString(ArraySize(g_ea1.symbols)));
 
+   if(g_ea1.discovery_attempted)
+     {
+      g_debug.Write("INFO","ea1_market","discovery_attempt","minute_id="+IntegerToString(g_ea1.minute_id));
+      if(g_ea1.discovery_success)
+        {
+         string discovery_msg="symbols="+IntegerToString(ArraySize(g_ea1.symbols))+" elapsed_ms="+IntegerToString(g_ea1.discovery_elapsed_ms);
+         if(g_ea1.discovery_no_change)
+            discovery_msg+=" no_change=true";
+         g_debug.Write("INFO","ea1_market","discovery_success",discovery_msg);
+        }
+      else
+         g_debug.Write("WARN","ea1_market","discovery_failed","reason="+g_ea1.discovery_status_reason+" elapsed_ms="+IntegerToString(g_ea1.discovery_elapsed_ms));
+     }
+   else if(g_ea1.discovery_skipped && g_ea1.discovery_skip_streak<=3)
+      g_debug.Write("INFO","ea1_market","discovery_skipped","reason="+g_ea1.discovery_status_reason+" minute_id="+IntegerToString(g_ea1.minute_id));
+
    if(ArraySize(g_ea1.symbols)<=0)
      {
       g_debug.Write("WARN","ea1","zero_symbols","skipping downstream stages");
