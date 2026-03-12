@@ -5,7 +5,7 @@
 #include <ISSX/issx_registry.mqh>
 
 // ============================================================================
-// ISSX PERSISTENCE v1.712
+// ISSX PERSISTENCE v1.714
 // Blueprint-aligned persistence / handoff / fallback / warehouse / lock helpers.
 // Authoritative truth remains: accepted internal current + coherent manifest chain.
 // ============================================================================
@@ -1947,7 +1947,7 @@ public:
 
 string ISSX_PersistenceDiagTag()
   {
-   return "persistence_diag_v172f";
+   return "persistence_diag_v174f";
   }
 
 
