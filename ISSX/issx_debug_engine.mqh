@@ -79,7 +79,7 @@ public:
       m_terminal_data_path="";
       m_terminal_common_data_path="";
       m_write_count=0;
-      m_active_mode="";
+      m_active_mode="inactive";
       m_active_path="";
      }
 
@@ -98,8 +98,12 @@ public:
       EnsureFolderTree(ISSX_DEBUG_EXPORT_ROOT_REL,true);
       ResetLastError();
       m_file_handle=FileOpen(common_rel,FILE_WRITE|FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
-      m_active_mode="";
-      if(m_file_handle==INVALID_HANDLE)
+      if(m_file_handle!=INVALID_HANDLE)
+        {
+         m_active_mode="common";
+         m_active_path=common_rel;
+        }
+      else
         {
          const int common_err=GetLastError();
          PrintWithLevel("WARN","Common FileOpen failed err="+IntegerToString(common_err)+" rel="+common_rel);
@@ -120,13 +124,7 @@ public:
             PrintWithLevel("ERROR","Local fallback FileOpen failed err="+IntegerToString(local_err)+" rel="+local_rel+" mode="+m_active_mode);
             return false;
            }
-         m_active_mode="local";
         }
-      else
-         m_active_mode="common";
-
-      m_write_count=0;
-      m_active_path=common_rel;
 
       m_write_count=0;
       m_ready=true;
@@ -147,7 +145,7 @@ public:
          return;
 
       FileSeek(m_file_handle,0,SEEK_END);
-      const int chars_written=FileWriteString(m_file_handle,line+"\r\n");
+      const ulong chars_written=(ulong)FileWriteString(m_file_handle,line+"\r\n");
       if(chars_written>0)
         {
          m_write_count++;
