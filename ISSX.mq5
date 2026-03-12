@@ -1,5 +1,5 @@
 ﻿#property strict
-#property version   "1.713"
+#property version   "1.714"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
@@ -17,7 +17,7 @@
 
 input string InpFirmId                  = "default_firm";
 input bool   InpIncludeCustomSymbols    = false;
-input int    InpEA1MaxSymbols           = 300;
+input int    InpEA1MaxSymbols           = 0;
 input int    InpEA1HydrationBatchSize   = 25;
 input bool   InpEA2DeepProfileDefault   = true;
 input int    InpEA2MaxSymbolsPerSlice   = 128;
@@ -768,6 +768,29 @@ string ISSX_FormatHudTime(const datetime t)
    return TimeToString(t,TIME_DATE|TIME_SECONDS);
   }
 
+void ISSX_CleanupLegacyUiObjects()
+  {
+   const int total=ObjectsTotal(0,-1,-1);
+   int removed=0;
+   for(int i=total-1;i>=0;i--)
+     {
+      string name=ObjectName(0,i,-1,-1);
+      if(StringLen(name)<=0)
+         continue;
+
+      const bool is_hud=(StringFind(name,"ISSX_HUD")==0);
+      const bool is_menu=(StringFind(name,"ISSX_MENU_OPERATOR_")==0);
+      if(!is_hud && !is_menu)
+         continue;
+
+      if(ObjectDelete(0,name))
+         removed++;
+     }
+
+   g_debug.Write("INFO","ui","cleanup_legacy_objects",
+                 "removed="+IntegerToString(removed)+" scanned="+IntegerToString(total));
+  }
+
 void ISSX_UpdateHUD()
   {
    if(!ISSX_IsUiProjectionOn())
@@ -784,9 +807,9 @@ void ISSX_UpdateHUD()
    if(server_time<=0)
       server_time=TimeCurrent();
 
-   string hud="ISSX Market HUD | v1.713 | pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count)+"\n";
-   hud+="Broker="+g_operator_broker_name+" | Server="+g_operator_server_name+"\n";
-   hud+="Kernel="+g_last_kernel_result+" ("+g_last_kernel_reason+") ms="+IntegerToString((int)g_last_kernel_elapsed_ms)+"\n";
+   string hud="ISSX HUD v1.714 | pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count)+" | srv="+ISSX_FormatHudTime(server_time)+"\n";
+   hud+="Kernel="+g_last_kernel_result+"/"+g_last_kernel_reason+" ms="+IntegerToString((int)g_last_kernel_elapsed_ms)+
+        " sched="+ISSX_OnOff(gate_runtime_scheduler)+" tmr="+ISSX_OnOff(gate_timer_heavy)+" tick="+ISSX_OnOff(gate_tick_heavy)+"\n";
 
    string market_state="READY";
    if(g_ea1.runtime_state==EA1_STATE_DISCOVERY)
@@ -794,12 +817,24 @@ void ISSX_UpdateHUD()
    else if(g_ea1.runtime_state==EA1_STATE_HYDRATING)
       market_state="HYDRATING";
 
-   hud+="Market="+market_state+" reason="+g_last_ea1_stage_reason+" discovered="+IntegerToString(g_ea1.universe.broker_universe)+" publishable="+IntegerToString(g_ea1.universe.publishable_universe)+"\n";
-   hud+="symbols processed: "+IntegerToString(g_ea1.hydration_processed)+" / "+IntegerToString(g_ea1.hydration_total)+"\n";
-   hud+="Discovery="+g_ea1.discovery_status_reason+" publish="+g_last_ea1_publish_state+"/"+g_last_ea1_publish_reason+"\n";
-   hud+="Writes json="+g_last_ea1_root_status_state+" log="+g_last_ea1_root_debug_state+" internal="+g_last_ea1_stage_write_state+"\n";
-   hud+="Files: "+g_market_json_file_name+" | "+g_market_log_file_name+"\n";
-   hud+="History OFF | Selection OFF | Correlation OFF | Contracts OFF";
+   hud+="EA1="+market_state+" run="+g_last_ea1_stage_run+" reason="+g_last_ea1_stage_reason+
+        " disc="+g_ea1.discovery_status_reason+"("+IntegerToString(g_ea1.discovery_elapsed_ms)+"ms)\n";
+   hud+="Universe broker="+IntegerToString(g_ea1.universe.broker_universe)+
+        " elig="+IntegerToString(g_ea1.universe.eligible_universe)+
+        " rank="+IntegerToString(g_ea1.universe.rankable_universe)+
+        " pub="+IntegerToString(g_ea1.universe.publishable_universe)+"\n";
+   hud+="Hydration "+IntegerToString(g_ea1.hydration_processed)+"/"+IntegerToString(g_ea1.hydration_total)+
+        " batch="+IntegerToString(g_ea1.hydration_batch_size)+" publish="+g_last_ea1_publish_state+"/"+g_last_ea1_publish_reason+"\n";
+   hud+="Publish ckpt="+g_ea1.publish_last_checkpoint+" err="+g_ea1.publish_last_error+
+        " sym="+IntegerToString(g_ea1.publish_symbols_serialized)+" bytes s/u/d="+
+        IntegerToString(g_ea1.publish_stage_json_bytes)+"/"+
+        IntegerToString(g_ea1.publish_universe_json_bytes)+"/"+
+        IntegerToString(g_ea1.publish_debug_json_bytes)+"\n";
+   hud+="Writes internal="+g_last_ea1_stage_write_state+" universe="+g_last_ea1_universe_write_state+
+        " root_json="+g_last_ea1_root_status_state+" root_log="+g_last_ea1_root_debug_state+"\n";
+   hud+="EA2="+ISSX_OnOff(g_ea_enabled[1])+" EA3="+ISSX_OnOff(g_ea_enabled[2])+" EA4="+ISSX_OnOff(g_ea_enabled[3])+" EA5="+ISSX_OnOff(g_ea_enabled[4])+
+        " | menu="+ISSX_OnOff(gate_menu)+" ui="+ISSX_OnOff(gate_chart_ui)+" proj="+ISSX_OnOff(gate_ui_projection)+"\n";
+   hud+="Files: "+g_market_json_file_name+" | "+g_market_log_file_name;
 
    if(ObjectFind(0,ISSX_HUD_OBJECT_NAME)<0)
      {
@@ -809,9 +844,9 @@ void ISSX_UpdateHUD()
          return;
         }
       ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_CORNER,CORNER_LEFT_UPPER);
-      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_XDISTANCE,10);
-      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_YDISTANCE,10);
-      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_FONTSIZE,9);
+      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_XDISTANCE,6);
+      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_YDISTANCE,8);
+      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_FONTSIZE,8);
       ObjectSetString(0,ISSX_HUD_OBJECT_NAME,OBJPROP_FONT,"Consolas");
       ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_COLOR,clrLightGray);
       ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_SELECTABLE,false);
@@ -1029,20 +1064,28 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
      {
       g_debug.Write("INFO","ea1_publish","publish_enter","checkpoint=publish_enter");
       g_debug.Write("INFO","ea1_publish","publish_build_stage_json_start","checkpoint=publish_build_stage_json_start");
-      const bool stage_publish_ok=ISSX_MarketEngine::StagePublish(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,stage_json,debug_json);
+      const bool stage_publish_ok=ISSX_MarketEngine::StagePublish(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,stage_json,broker_dump_json,debug_json);
       g_debug.Write((stage_publish_ok?"INFO":"ERROR"),"ea1_publish",(stage_publish_ok?"publish_build_stage_json_ok":"publish_build_stage_json_fail"),
-                    "len="+IntegerToString(StringLen(stage_json))+" reason="+(stage_publish_ok?"ok":"stage_publish_returned_false"));
-      g_debug.Write("INFO","ea1_publish","publish_build_debug_json_start","checkpoint=publish_build_debug_json_start");
-      const bool debug_json_ok=(StringLen(debug_json)>2);
-      g_debug.Write((debug_json_ok?"INFO":"ERROR"),"ea1_publish",(debug_json_ok?"publish_build_debug_json_ok":"publish_build_debug_json_fail"),
-                    "len="+IntegerToString(StringLen(debug_json))+" reason="+(debug_json_ok?"ok":"debug_json_too_small"));
+                    "stage_len="+IntegerToString(g_ea1.publish_stage_json_bytes)+
+                    " universe_len="+IntegerToString(g_ea1.publish_universe_json_bytes)+
+                    " debug_len="+IntegerToString(g_ea1.publish_debug_json_bytes)+
+                    " symbols="+IntegerToString(g_ea1.publish_symbols_serialized)+
+                    " checkpoint="+g_ea1.publish_last_checkpoint+
+                    " elapsed_ms="+IntegerToString(g_ea1.publish_elapsed_ms)+
+                    " reason="+(stage_publish_ok?"ok":g_ea1.publish_last_error));
 
       string ea1_publish_reason="ok";
       bool publish_ok=false;
       if(stage_publish_ok)
-         publish_ok=ISSX_ProjectEA1(stage_json,"",debug_json,ea1_publish_reason);
+        {
+         g_debug.Write("INFO","ea1_publish","publish_file_projection_start",
+                       "checkpoint=publish_file_projection_start universe_json_len="+IntegerToString(StringLen(broker_dump_json))+
+                       " stage_json_len="+IntegerToString(StringLen(stage_json))+
+                       " debug_json_len="+IntegerToString(StringLen(debug_json)));
+         publish_ok=ISSX_ProjectEA1(stage_json,broker_dump_json,debug_json,ea1_publish_reason);
+        }
       else
-         ea1_publish_reason="stage_publish_build_failed";
+         ea1_publish_reason="stage_publish_build_failed_"+g_ea1.publish_last_error;
 
       if(!publish_ok)
      {
@@ -1267,6 +1310,8 @@ int OnInit()
    g_runtime_ready    = true;
    g_first_cycle_done = false;
    g_kernel_busy      = false;
+
+   ISSX_CleanupLegacyUiObjects();
 
    g_menu_prefix="ISSX_MENU_OPERATOR_"+ISSX_LongIdPart((long)ChartID())+"_"+ISSX_LongIdPart((long)TimeLocal());
    string menu_init_state="skipped | reason="+(InpMinimalDebugMode?"minimal_debug_mode":"gate_off");

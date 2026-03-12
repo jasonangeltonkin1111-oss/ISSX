@@ -4,7 +4,7 @@
 #include <ISSX/issx_core.mqh>
 
 // ============================================================================
-// ISSX REGISTRY v1.712
+// ISSX REGISTRY v1.714
 // Central ownership metadata for fields, enum surfaces, comparator contracts,
 // policy-sensitive fingerprints, owner-surface inventory, semantic warnings,
 // and EA5 legend support.
@@ -1858,7 +1858,7 @@ public:
 
 string ISSX_RegistryDiagTag()
   {
-   return "registry_diag_v172f";
+   return "registry_diag_v174f";
   }
 
 
