@@ -27,7 +27,7 @@
 // ============================================================================
 
 #ifndef ISSX_UI_MODULE_VERSION
-#define ISSX_UI_MODULE_VERSION                 "1.722"
+#define ISSX_UI_MODULE_VERSION                 "1.723"
 #endif
 #define ISSX_UI_TEST_MODULE_VERSION            ISSX_UI_MODULE_VERSION
 #define ISSX_TRACE_DEFAULT_COOLDOWN_MS         15000
@@ -166,6 +166,7 @@ struct ISSX_DebugAggregate
    double              clock_divergence_sec;
    bool                quote_clock_idle_flag;
    bool                clock_anomaly_flag;
+   datetime            server_time;
    long                kernel_minute_id;
    long                scheduler_cycle_no;
    long                queue_starvation_max_ms;
@@ -199,6 +200,7 @@ struct ISSX_DebugAggregate
       clock_divergence_sec=ISSX_DEBUG_UNKNOWN_DOUBLE;
       quote_clock_idle_flag=false;
       clock_anomaly_flag=false;
+      server_time=0;
       kernel_minute_id=0;
       scheduler_cycle_no=0;
       queue_starvation_max_ms=ISSX_DEBUG_UNKNOWN_LONG;
@@ -950,7 +952,9 @@ private:
    static string BuildHudRuntimeRow(const ISSX_DebugAggregate &agg)
      {
       string s="version="+agg.engine_version;
-      s+=" | server_time=na";
+      s+=" | server_time="+((agg.server_time>0)
+                            ? TimeToString(agg.server_time,TIME_DATE|TIME_SECONDS)
+                            : "na");
       s+=" | timer_pulse="+LongToString(agg.scheduler_cycle_no);
       s+=" | kernel_minute="+LongToString(agg.kernel_minute_id);
       s+=" | degraded="+ISSX_UI_Text::BoolToWord(agg.kernel_degraded_cycle_flag);
@@ -1040,6 +1044,7 @@ public:
       agg.clock_divergence_sec=ValueOrUnknownDouble(runtime_state.clock_stats.clock_divergence_sec);
       agg.quote_clock_idle_flag=runtime_state.clock_stats.quote_clock_idle_flag;
       agg.clock_anomaly_flag=runtime_state.clock_stats.clock_anomaly_flag;
+      agg.server_time=ISSX_Time::BestScheduleClock();
       agg.queue_starvation_max_ms=ValueOrUnknownLong(runtime_state.queue_starvation_max_ms);
       agg.queue_oldest_item_age_ms=ValueOrUnknownLong(runtime_state.queue_oldest_item_age_ms);
       agg.never_serviced_count=ValueOrUnknownCount(ea3.universe.never_serviced_count);
@@ -1075,6 +1080,7 @@ public:
       agg.clock_divergence_sec=ValueOrUnknownDouble(runtime_state.clock_stats.clock_divergence_sec);
       agg.quote_clock_idle_flag=runtime_state.clock_stats.quote_clock_idle_flag;
       agg.clock_anomaly_flag=runtime_state.clock_stats.clock_anomaly_flag;
+      agg.server_time=ISSX_Time::BestScheduleClock();
       agg.queue_starvation_max_ms=ValueOrUnknownLong(runtime_state.queue_starvation_max_ms);
       agg.queue_oldest_item_age_ms=ValueOrUnknownLong(runtime_state.queue_oldest_item_age_ms);
       agg.never_serviced_count=(long)ISSX_DEBUG_UNKNOWN_COUNT;
