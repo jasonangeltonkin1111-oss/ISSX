@@ -1,5 +1,5 @@
 ﻿#property strict
-#property version   "1.705"
+#property version   "1.704"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
@@ -86,6 +86,25 @@ string              g_last_feature_init_runtime_scheduler = "";
 string              g_last_feature_init_menu_engine       = "";
 string              g_last_feature_run_tick_heavy         = "";
 string              g_last_feature_run_chart_ui           = "";
+string              g_last_kernel_result             = "unknown";
+string              g_last_kernel_reason             = "none";
+long                g_last_kernel_elapsed_ms         = 0;
+string              g_last_ea1_stage_run             = "skipped";
+string              g_last_ea1_stage_reason          = "none";
+long                g_last_ea1_stage_elapsed_ms      = 0;
+string              g_last_ea1_publish_state         = "unknown";
+string              g_last_ea1_publish_reason        = "none";
+string              g_last_ea1_stage_json_state      = "unknown";
+string              g_last_ea1_debug_json_state      = "unknown";
+string              g_last_ea1_universe_build_state  = "unknown";
+string              g_last_ea1_stage_write_state     = "unknown";
+string              g_last_ea1_debug_write_state     = "unknown";
+string              g_last_ea1_universe_write_state  = "unknown";
+string              g_last_ea1_root_debug_state      = "unknown";
+string              g_last_ea1_root_status_state     = "unknown";
+string              g_last_ea1_root_universe_state   = "unknown";
+
+#define ISSX_HUD_OBJECT_NAME "ISSX_HUD"
 
 string ISSX_LongIdPart(const long value)
   {
@@ -335,6 +354,37 @@ int ISSX_CopyEA1Symbols(string &symbols[])
    return used;
   }
 
+string ISSX_BuildEA1StageStatusJson()
+  {
+   ISSX_JsonWriter j;
+   j.BeginObject();
+   j.NameString("stage_id","ea1_market");
+   j.NameString("stage_run",g_last_ea1_stage_run);
+   j.NameString("stage_reason",g_last_ea1_stage_reason);
+   j.NameInt("stage_elapsed_ms",(int)g_last_ea1_stage_elapsed_ms);
+   j.NameString("publish_state",g_last_ea1_publish_state);
+   j.NameString("publish_reason",g_last_ea1_publish_reason);
+   j.NameBool("requested",InpEnableEA1);
+   j.NameBool("effective",g_ea_enabled[0]);
+   j.EndObject();
+   return j.ToString();
+  }
+
+void ISSX_ResetEA1PublishStatus()
+  {
+   g_last_ea1_publish_state="unknown";
+   g_last_ea1_publish_reason="none";
+   g_last_ea1_stage_json_state="unknown";
+   g_last_ea1_debug_json_state="unknown";
+   g_last_ea1_universe_build_state="unknown";
+   g_last_ea1_stage_write_state="unknown";
+   g_last_ea1_debug_write_state="unknown";
+   g_last_ea1_universe_write_state="unknown";
+   g_last_ea1_root_debug_state="unknown";
+   g_last_ea1_root_status_state="unknown";
+   g_last_ea1_root_universe_state="unknown";
+  }
+
 void ISSX_ConvertEA4OptionalIntelligence(const ISSX_EA4_OptionalIntelligenceExport &src[],
                                          ISSX_EA5_OptionalIntelligence &dst[])
   {
@@ -372,10 +422,34 @@ void ISSX_ConvertEA4OptionalIntelligence(const ISSX_EA4_OptionalIntelligenceExpo
      }
   }
 
-void ISSX_ProjectEA1(const string stage_json,
+bool ISSX_ProjectEA1(const string stage_json,
                      const string broker_dump_json,
-                     const string debug_snapshot_json)
+                     const string debug_snapshot_json,
+                     string &out_reason)
   {
+   out_reason="ok";
+   ISSX_ResetEA1PublishStatus();
+
+   const bool stage_json_ok=(StringLen(stage_json)>2);
+   const bool debug_json_ok=(StringLen(debug_snapshot_json)>2);
+   const bool universe_json_ok=(StringLen(broker_dump_json)>2);
+
+   g_last_ea1_stage_json_state=(stage_json_ok?"success":"failed");
+   g_last_ea1_debug_json_state=(debug_json_ok?"success":"failed");
+   g_last_ea1_universe_build_state=(universe_json_ok?"success":"failed");
+
+   g_debug.Write((stage_json_ok?"INFO":"WARN"),"ea1_publish","stage_json_build_"+(stage_json_ok?"success":"failed"),"len="+IntegerToString(StringLen(stage_json)));
+   g_debug.Write((debug_json_ok?"INFO":"WARN"),"ea1_publish","debug_json_build_"+(debug_json_ok?"success":"failed"),"len="+IntegerToString(StringLen(debug_snapshot_json)));
+   g_debug.Write((universe_json_ok?"INFO":"WARN"),"ea1_publish","universe_dump_build_"+(universe_json_ok?"success":"failed"),"len="+IntegerToString(StringLen(broker_dump_json)));
+
+   if(!stage_json_ok || !debug_json_ok || !universe_json_ok)
+     {
+      out_reason="build_failed";
+      g_last_ea1_publish_state="failed";
+      g_last_ea1_publish_reason=out_reason;
+      return false;
+     }
+
    ISSX_StageHeader header;
    ISSX_Manifest manifest;
 
@@ -404,13 +478,42 @@ void ISSX_ProjectEA1(const string stage_json,
    manifest.taxonomy_hash=g_ea1.taxonomy_hash;
    manifest.comparator_registry_hash=g_ea1.comparator_registry_hash;
 
-   ISSX_PersistStageJson(issx_stage_ea1,header,manifest,stage_json);
-   ISSX_BrokerUniverseDump::RotateCurrentToPrevious(g_firm_id);
-   ISSX_BrokerUniverseDump::WriteCurrent(g_firm_id,broker_dump_json,manifest,true);
+   const bool stage_write_ok=ISSX_PersistStageJson(issx_stage_ea1,header,manifest,stage_json);
+   g_last_ea1_stage_write_state=(stage_write_ok?"success":"failed");
+   g_debug.Write((stage_write_ok?"INFO":"WARN"),"ea1_publish","stage_file_write_"+(stage_write_ok?"success":"fail"),"path=current_payload");
 
+   const bool universe_rotate_ok=ISSX_BrokerUniverseDump::RotateCurrentToPrevious(g_firm_id);
+   const bool universe_write_ok=ISSX_BrokerUniverseDump::WriteCurrent(g_firm_id,broker_dump_json,manifest,true);
+   g_last_ea1_universe_write_state=((universe_rotate_ok && universe_write_ok)?"success":"failed");
+   g_debug.Write(((universe_rotate_ok && universe_write_ok)?"INFO":"WARN"),"ea1_publish","universe_file_write_"+((universe_rotate_ok && universe_write_ok)?"success":"fail"),"rotate="+(universe_rotate_ok?"ok":"fail"));
+
+   bool debug_write_ok=true;
    if(InpProjectDebugSnapshots)
-      ISSX_UI_Test::ProjectStageSnapshot(g_firm_id,issx_stage_ea1,debug_snapshot_json);
+      debug_write_ok=ISSX_UI_Test::ProjectStageSnapshot(g_firm_id,issx_stage_ea1,debug_snapshot_json);
+   g_last_ea1_debug_write_state=(debug_write_ok?"success":"failed");
+   g_debug.Write((debug_write_ok?"INFO":"WARN"),"ea1_publish",("debug_file_write_"+(debug_write_ok?"success":"fail")),"requested="+(InpProjectDebugSnapshots?"on":"off"));
+
+   ISSX_ProjectionOutcome root_outcome;
+   root_outcome.Reset();
+   root_outcome.internal_commit_success=stage_write_ok;
+   const string stage_status_json=ISSX_BuildEA1StageStatusJson();
+   const bool root_ok=ISSX_RootProjection::ProjectFromAccepted(g_firm_id,stage_json,debug_snapshot_json,stage_status_json,broker_dump_json,root_outcome);
+   g_last_ea1_root_debug_state=(root_outcome.root_debug_projection_success?"success":"failed");
+   g_last_ea1_root_status_state=(root_outcome.root_status_projection_success?"success":"failed");
+   g_last_ea1_root_universe_state=(root_outcome.root_universe_snapshot_success?"success":"failed");
+
+   g_debug.Write((root_outcome.root_debug_projection_success?"INFO":"WARN"),"ea1_publish","root_debug_projection_"+(root_outcome.root_debug_projection_success?"success":"failed"),"reason="+root_outcome.last_projection_reason);
+   g_debug.Write((root_outcome.root_status_projection_success?"INFO":"WARN"),"ea1_publish","root_status_projection_"+(root_outcome.root_status_projection_success?"success":"failed"),"reason="+root_outcome.last_projection_reason);
+   g_debug.Write((root_outcome.root_universe_snapshot_success?"INFO":"WARN"),"ea1_publish","root_universe_projection_"+(root_outcome.root_universe_snapshot_success?"success":"failed"),"reason="+root_outcome.last_projection_reason);
+
+   const bool publish_ok=(stage_write_ok && debug_write_ok && universe_rotate_ok && universe_write_ok && root_ok && root_outcome.root_debug_projection_success && root_outcome.root_status_projection_success && root_outcome.root_universe_snapshot_success);
+   g_last_ea1_publish_state=(publish_ok?"success":"degraded");
+   g_last_ea1_publish_reason=(publish_ok?"ok":root_outcome.last_projection_reason);
+   out_reason=g_last_ea1_publish_reason;
+
+   return publish_ok;
   }
+
 
 void ISSX_ProjectEA2(const string stage_json,
                      const string debug_snapshot_json)
@@ -509,14 +612,28 @@ bool ISSX_IsGateOn(const bool gate_value,const bool minimal_default_on)
    return gate_value;
   }
 
+bool ISSX_IsTimerHeavyWorkOn()
+  {
+   if(InpGateTimerHeavyWork)
+      return true;
+   return ISSX_IsGateOn(InpGateTimerHeavyWork,false);
+  }
+
+bool ISSX_IsUiProjectionOn()
+  {
+   if(InpGateUiProjection)
+      return true;
+   return ISSX_IsGateOn(InpGateUiProjection,false);
+  }
+
 void ISSX_LogGateSnapshot()
   {
    const bool gate_runtime_scheduler=ISSX_IsGateOn(InpGateRuntimeScheduler,false);
-   const bool gate_timer_heavy=ISSX_IsGateOn(InpGateTimerHeavyWork,false);
+   const bool gate_timer_heavy=ISSX_IsTimerHeavyWorkOn();
    const bool gate_menu=ISSX_IsGateOn(InpGateMenuEngine,false);
    const bool gate_chart_ui=ISSX_IsGateOn(InpGateChartUiUpdates,false);
    const bool gate_tick_heavy=ISSX_IsGateOn(InpGateTickHeavyWork,false);
-   const bool gate_ui_projection=ISSX_IsGateOn(InpGateUiProjection,false);
+   const bool gate_ui_projection=ISSX_IsUiProjectionOn();
 
    g_debug.Write("INFO","gates","snapshot",
                  "minimal_debug="+(InpMinimalDebugMode?"on":"off")+
@@ -548,11 +665,88 @@ void ISSX_LogFeatureStatus(const string category,const string feature_name,const
       g_debug.Write("INFO",category,feature_name,status_detail);
   }
 
+string ISSX_FormatHudTime(const datetime t)
+  {
+   if(t<=0)
+      return "na";
+   return TimeToString(t,TIME_DATE|TIME_SECONDS);
+  }
+
+void ISSX_UpdateHUD()
+  {
+   if(!ISSX_IsUiProjectionOn())
+      return;
+
+   const bool gate_runtime_scheduler=ISSX_IsGateOn(InpGateRuntimeScheduler,false);
+   const bool gate_timer_heavy=ISSX_IsTimerHeavyWorkOn();
+   const bool gate_tick_heavy=ISSX_IsGateOn(InpGateTickHeavyWork,false);
+   const bool gate_menu=ISSX_IsGateOn(InpGateMenuEngine,false);
+   const bool gate_chart_ui=ISSX_IsGateOn(InpGateChartUiUpdates,false);
+   const bool gate_ui_projection=ISSX_IsUiProjectionOn();
+
+   datetime server_time=TimeTradeServer();
+   if(server_time<=0)
+      server_time=TimeCurrent();
+
+   string hud="ISSX SYSTEM HUD\n";
+   hud+="version=1.704 server_time="+ISSX_FormatHudTime(server_time)+" pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count)+"\n";
+   hud+="kernel_result="+g_last_kernel_result+" reason="+g_last_kernel_reason+" elapsed_ms="+IntegerToString((int)g_last_kernel_elapsed_ms)+"\n";
+
+   hud+="[systems]\n";
+   hud+="minimal_debug_mode req="+ISSX_OnOff(InpMinimalDebugMode)+" eff="+ISSX_OnOff(InpMinimalDebugMode)+"\n";
+   hud+="isolation_mode req="+ISSX_OnOff(InpIsolationMode)+" eff="+ISSX_OnOff(InpIsolationMode)+"\n";
+   hud+="runtime_scheduler req="+ISSX_OnOff(InpGateRuntimeScheduler)+" eff="+ISSX_OnOff(gate_runtime_scheduler)+"\n";
+   hud+="timer_heavy_work req="+ISSX_OnOff(InpGateTimerHeavyWork)+" eff="+ISSX_OnOff(gate_timer_heavy)+"\n";
+   hud+="tick_heavy_work req="+ISSX_OnOff(InpGateTickHeavyWork)+" eff="+ISSX_OnOff(gate_tick_heavy)+"\n";
+   hud+="menu_engine req="+ISSX_OnOff(InpGateMenuEngine)+" eff="+ISSX_OnOff(gate_menu)+"\n";
+   hud+="chart_ui_updates req="+ISSX_OnOff(InpGateChartUiUpdates)+" eff="+ISSX_OnOff(gate_chart_ui)+"\n";
+   hud+="ui_projection req="+ISSX_OnOff(InpGateUiProjection)+" eff="+ISSX_OnOff(gate_ui_projection)+"\n";
+
+   hud+="[stages]\n";
+   hud+="EA1 Market="+ISSX_OnOff(g_ea_enabled[0])+" run="+g_last_ea1_stage_run+" reason="+g_last_ea1_stage_reason+"\n";
+   hud+="EA2 History="+ISSX_OnOff(g_ea_enabled[1])+"\n";
+   hud+="EA3 Selection="+ISSX_OnOff(g_ea_enabled[2])+"\n";
+   hud+="EA4 Correlation="+ISSX_OnOff(g_ea_enabled[3])+"\n";
+   hud+="EA5 Contracts="+ISSX_OnOff(g_ea_enabled[4])+"\n";
+
+   hud+="[ea1_detail]\n";
+   string discovery_state="idle";
+   if(g_ea1.discovery_attempted)
+      discovery_state=(g_ea1.discovery_success?"success":"failed");
+   else if(g_ea1.discovery_skipped)
+      discovery_state="skipped";
+   hud+="discovery_state="+discovery_state+" symbols="+IntegerToString(ArraySize(g_ea1.symbols))+" elapsed_ms="+IntegerToString(g_ea1.discovery_elapsed_ms)+"\n";
+   hud+="discovery_reason="+g_ea1.discovery_status_reason+"\n";
+   hud+="publish="+g_last_ea1_publish_state+" reason="+g_last_ea1_publish_reason+"\n";
+   hud+="build stage="+g_last_ea1_stage_json_state+" debug="+g_last_ea1_debug_json_state+" universe="+g_last_ea1_universe_build_state+"\n";
+   hud+="write stage="+g_last_ea1_stage_write_state+" debug="+g_last_ea1_debug_write_state+" universe="+g_last_ea1_universe_write_state+"\n";
+   hud+="root debug="+g_last_ea1_root_debug_state+" status="+g_last_ea1_root_status_state+" universe="+g_last_ea1_root_universe_state;
+
+   if(ObjectFind(0,ISSX_HUD_OBJECT_NAME)<0)
+     {
+      if(!ObjectCreate(0,ISSX_HUD_OBJECT_NAME,OBJ_LABEL,0,0,0))
+        {
+         g_debug.Write("WARN","hud","create_failed","name="+ISSX_HUD_OBJECT_NAME);
+         return;
+        }
+      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_XDISTANCE,10);
+      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_YDISTANCE,15);
+      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_FONTSIZE,9);
+      ObjectSetString(0,ISSX_HUD_OBJECT_NAME,OBJPROP_FONT,"Consolas");
+      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_COLOR,clrLightGray);
+      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_SELECTABLE,false);
+      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_HIDDEN,true);
+     }
+
+   ObjectSetString(0,ISSX_HUD_OBJECT_NAME,OBJPROP_TEXT,hud);
+  }
+
 bool ISSX_RunUiProjectionSafe()
   {
    ISSX_SetCheckpoint("ui_projection_enter");
 
-   if(!ISSX_IsGateOn(InpGateUiProjection,false))
+   if(!ISSX_IsUiProjectionOn())
      {
       g_debug.Write("INFO","ui","projection_skipped","disabled_by_gate");
       return true;
@@ -588,13 +782,16 @@ bool ISSX_RunUiProjectionSafe()
       ISSX_UI_Test::ProjectStageSnapshot(g_firm_id,issx_stage_ea5,ISSX_UI_Test::BuildStageSnapshotEA5(g_ea5));
      }
 
-   Comment(ISSX_UI_Test::BuildHudText(agg));
+   // HUD rendering is handled by ISSX_UpdateHUD() as a read-only chart projection.
    ISSX_SetCheckpoint("ui_projection_ok");
    return true;
   }
 
-bool ISSX_RunKernelCycle()
+bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea1_stage_reason)
   {
+   ea1_stage_ran=false;
+   ea1_stage_result="skipped";
+   ea1_stage_reason="none";
    ISSX_SetCheckpoint("kernel_cycle_enter");
    g_debug.Write("INFO","kernel","cycle_enter","bootstrapped="+(g_bootstrapped?"true":"false"));
    if(ISSX_IsGateOn(InpGateRuntimeScheduler,false))
@@ -611,38 +808,38 @@ bool ISSX_RunKernelCycle()
       ISSX_SetCheckpoint("ea1_stage_boot");
       g_debug.Write("INFO","ea1","stage_boot","start");
       g_ea1.Reset();
-      ISSX_MarketEngine::StageBoot(g_ea1);
+      if(!ISSX_MarketEngine::StageBoot(g_ea1))
+        {
+         ea1_stage_reason="stage_boot_failed";
+         g_debug.Write("ERROR","stage_init","ea1_market","failed reason="+ea1_stage_reason);
+         return false;
+        }
+      g_debug.Write("INFO","stage_init","ea1_market","success");
      }
+   else
+      g_debug.Write("INFO","stage_init","ea1_market","skipped reason=already_bootstrapped");
 
    if(!g_ea_enabled[0])
      {
       g_debug.Write("WARN","ea1","disabled","EA1 disabled - no critical module active");
+      ea1_stage_reason="requested_off";
       return false;
      }
 
    ISSX_SetCheckpoint("ea1_stage_slice_enter");
    g_debug.Write("INFO","ea1","stage_slice","enter");
-   const int prior_discovery_minute=g_ea1.discovery_minute_id;
-   const int prior_symbol_count=ArraySize(g_ea1.symbols);
-   const ulong discovery_t0=GetTickCount();
+   ea1_stage_ran=true;
    if(!ISSX_MarketEngine::StageSlice(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,InpEA1MaxSymbols))
      {
       g_debug.Write("WARN","ea1_market","discovery_failed","reason=stage_slice_returned_false");
       g_debug.Write("ERROR","ea1","stage_slice_failed","returned false");
+      ea1_stage_result="failed";
+      ea1_stage_reason="stage_slice_returned_false";
+      g_debug.Write("ERROR","stage_run","ea1_market",ea1_stage_result);
+      g_debug.Write("ERROR","stage_reason","ea1_market",ea1_stage_reason);
       return false;
      }
 
-   if(g_ea1.discovery_minute_id!=prior_discovery_minute)
-     {
-      string discovery_msg="symbols="+IntegerToString(ArraySize(g_ea1.symbols))+
-                           " elapsed_ms="+IntegerToString((int)(GetTickCount()-discovery_t0));
-      if(ArraySize(g_ea1.symbols)==prior_symbol_count)
-         discovery_msg+=" no_change=true";
-      g_debug.Write("INFO","ea1_market","discovery_attempt","minute_id="+IntegerToString(g_ea1.minute_id));
-      g_debug.Write("INFO","ea1_market","discovery_success",discovery_msg);
-     }
-   else
-      g_debug.Write("INFO","ea1_market","discovery_skipped","reason=cadence_same_minute minute_id="+IntegerToString(g_ea1.minute_id));
 
    g_debug.Write("INFO","ea1","stage_slice_ok","symbols="+IntegerToString(ArraySize(g_ea1.symbols)));
 
@@ -651,16 +848,41 @@ bool ISSX_RunKernelCycle()
       g_debug.Write("INFO","ea1_market","discovery_attempt","minute_id="+IntegerToString(g_ea1.minute_id));
       if(g_ea1.discovery_success)
         {
-         string discovery_msg="symbols="+IntegerToString(ArraySize(g_ea1.symbols))+" elapsed_ms="+IntegerToString(g_ea1.discovery_elapsed_ms);
+         string discovery_msg="raw_symbols="+IntegerToString(g_ea1.universe.broker_universe)+
+                              " accepted="+IntegerToString(ArraySize(g_ea1.symbols))+
+                              " rejected="+IntegerToString(g_ea1.counters.rejected_count)+
+                              " degraded="+IntegerToString(g_ea1.counters.degraded_count)+
+                              " elapsed_ms="+IntegerToString(g_ea1.discovery_elapsed_ms)+
+                              " sort_applied="+(g_ea1.deterministic_sort_applied?"true":"false")+
+                              " sort_basis="+g_ea1.deterministic_sort_basis+
+                              " ordered_symbol_count="+IntegerToString(g_ea1.deterministic_sorted_count);
          if(g_ea1.discovery_no_change)
             discovery_msg+=" no_change=true";
          g_debug.Write("INFO","ea1_market","discovery_success",discovery_msg);
+         ea1_stage_result=(g_ea1.degraded_flag ? "degraded" : "success");
+         ea1_stage_reason=(g_ea1.degraded_flag ? "usable_degraded_universe" : "ready");
         }
       else
+        {
          g_debug.Write("WARN","ea1_market","discovery_failed","reason="+g_ea1.discovery_status_reason+" elapsed_ms="+IntegerToString(g_ea1.discovery_elapsed_ms));
+         ea1_stage_result="failed";
+         ea1_stage_reason=g_ea1.discovery_status_reason;
+        }
      }
-   else if(g_ea1.discovery_skipped && g_ea1.discovery_skip_streak<=3)
-      g_debug.Write("INFO","ea1_market","discovery_skipped","reason="+g_ea1.discovery_status_reason+" minute_id="+IntegerToString(g_ea1.minute_id));
+   else if(g_ea1.discovery_skipped)
+     {
+      if(g_ea1.discovery_skip_streak<=3 || (g_timer_pulse_count%30)==1)
+         g_debug.Write("INFO","ea1_market","discovery_skipped","reason="+g_ea1.discovery_status_reason+" minute_id="+IntegerToString(g_ea1.minute_id));
+      ea1_stage_result="skipped";
+      ea1_stage_reason=g_ea1.discovery_status_reason;
+     }
+
+   g_debug.Write((ea1_stage_result=="failed"?"ERROR":"INFO"),"stage_run","ea1_market",ea1_stage_result);
+   g_debug.Write((ea1_stage_result=="failed"?"ERROR":"INFO"),"stage_reason","ea1_market",ea1_stage_reason);
+   g_debug.Write("INFO","stage_elapsed_ms","ea1_market",IntegerToString(g_ea1.discovery_elapsed_ms));
+   g_last_ea1_stage_run=ea1_stage_result;
+   g_last_ea1_stage_reason=ea1_stage_reason;
+   g_last_ea1_stage_elapsed_ms=g_ea1.discovery_elapsed_ms;
 
    if(ArraySize(g_ea1.symbols)<=0)
      {
@@ -670,9 +892,27 @@ bool ISSX_RunKernelCycle()
      }
 
    g_debug.Write("INFO","ea1","stage_publish","start");
-   ISSX_MarketEngine::StagePublish(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,stage_json,debug_json);
-   ISSX_MarketEngine::BuildUniverseDump(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,broker_dump_json);
-   ISSX_ProjectEA1(stage_json,broker_dump_json,debug_json);
+   const bool stage_publish_ok=ISSX_MarketEngine::StagePublish(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,stage_json,debug_json);
+   const bool universe_build_ok=ISSX_MarketEngine::BuildUniverseDump(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,broker_dump_json);
+   string ea1_publish_reason="ok";
+   bool publish_ok=false;
+   if(stage_publish_ok && universe_build_ok)
+      publish_ok=ISSX_ProjectEA1(stage_json,broker_dump_json,debug_json,ea1_publish_reason);
+   else
+      ea1_publish_reason=(stage_publish_ok?"universe_dump_build_failed":"stage_publish_build_failed");
+
+   if(!publish_ok)
+     {
+      g_debug.Write("WARN","ea1_publish","degraded","reason="+ea1_publish_reason+" stage_json="+(stage_publish_ok?"ok":"fail")+" universe="+(universe_build_ok?"ok":"fail"));
+      if(ea1_stage_result=="success")
+         ea1_stage_result="degraded";
+      if(ea1_stage_reason=="ready")
+         ea1_stage_reason="publish_degraded_"+ea1_publish_reason;
+      g_last_ea1_stage_run=ea1_stage_result;
+      g_last_ea1_stage_reason=ea1_stage_reason;
+      g_debug.Write("INFO","stage_run","ea1_market",ea1_stage_result);
+      g_debug.Write("INFO","stage_reason","ea1_market",ea1_stage_reason);
+     }
 
    string ea1_symbols[];
    const int ea1_count=ISSX_CopyEA1Symbols(ea1_symbols);
@@ -823,11 +1063,11 @@ int OnInit()
    const bool req_ui_projection=InpGateUiProjection;
 
    const bool eff_runtime_scheduler=ISSX_IsGateOn(req_runtime_scheduler,false);
-   const bool eff_timer_heavy=ISSX_IsGateOn(req_timer_heavy,false);
+   const bool eff_timer_heavy=ISSX_IsTimerHeavyWorkOn();
    const bool eff_tick_heavy=ISSX_IsGateOn(req_tick_heavy,false);
    const bool eff_menu_engine=ISSX_IsGateOn(req_menu_engine,false);
    const bool eff_chart_ui=ISSX_IsGateOn(req_chart_ui,false);
-   const bool eff_ui_projection=ISSX_IsGateOn(req_ui_projection,false);
+   const bool eff_ui_projection=ISSX_IsUiProjectionOn();
 
    g_debug.Write("INFO","feature_state","session_snapshot",
                  "minimal_debug=requested="+ISSX_OnOff(InpMinimalDebugMode)+" effective="+ISSX_OnOff(InpMinimalDebugMode)+
@@ -915,6 +1155,7 @@ void OnDeinit(const int reason)
    g_kernel_busy=false;
    if(ISSX_IsGateOn(InpGateMenuEngine,false))
       g_menu.Destroy();
+   ObjectDelete(0,ISSX_HUD_OBJECT_NAME);
    g_debug.Write("INFO","lifecycle","ondeinit","reason="+IntegerToString(reason)+" last_checkpoint="+g_last_checkpoint);
    g_debug.Close(reason,"last_checkpoint="+g_last_checkpoint+" file_mode="+g_debug.ActiveMode()+" file_path="+g_debug.ActivePath());
    Comment("");
@@ -948,7 +1189,7 @@ void OnTimer()
    const ulong timer_start_us=(ulong)GetMicrosecondCount();
    const bool sampled=((g_timer_pulse_count%15)==1);
    const bool gate_runtime_scheduler=ISSX_IsGateOn(InpGateRuntimeScheduler,false);
-   const bool gate_timer_heavy=ISSX_IsGateOn(InpGateTimerHeavyWork,false);
+   const bool gate_timer_heavy=ISSX_IsTimerHeavyWorkOn();
 
    if(sampled || !g_first_cycle_done)
       g_debug.Write("INFO","timer","enter","pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count));
@@ -969,12 +1210,31 @@ void OnTimer()
       runtime_scheduler_status="skipped | gate=timer_heavy_off";
 
    string timer_heavy_status="skipped | gate=off";
+   string kernel_reason="none";
    if(gate_timer_heavy)
      {
       const ulong kernel_start_us=(ulong)GetMicrosecondCount();
-      timer_cycle_ok=ISSX_RunKernelCycle();
+      bool ea1_stage_ran=false;
+      string ea1_stage_result="skipped";
+      string ea1_stage_reason="none";
+      timer_cycle_ok=ISSX_RunKernelCycle(ea1_stage_ran,ea1_stage_result,ea1_stage_reason);
       timer_kernel_elapsed_ms=(long)(((ulong)GetMicrosecondCount()-kernel_start_us)/1000);
-      timer_heavy_status=(timer_cycle_ok ? "success" : "failed | reason=kernel_cycle_false");
+      if(!ea1_stage_ran)
+        {
+         timer_heavy_status="degraded | reason=no_enabled_stage_ran";
+         timer_cycle_ok=false;
+         kernel_reason="no_enabled_stage_ran";
+        }
+      else if(!timer_cycle_ok)
+        {
+         timer_heavy_status="failed | reason=kernel_cycle_false stage=ea1_market stage_reason="+ea1_stage_reason;
+         kernel_reason="kernel_cycle_false";
+        }
+      else
+        {
+         timer_heavy_status="success | stage=ea1_market stage_run="+ea1_stage_result+" stage_reason="+ea1_stage_reason;
+         kernel_reason="stage="+ea1_stage_result+" reason="+ea1_stage_reason;
+        }
      }
    else
      {
@@ -982,6 +1242,15 @@ void OnTimer()
         {
          g_debug.Write("INFO","timer","kernel_skip","disabled_by_gate");
          g_logged_timer_heavy_skip=true;
+        }
+      if(g_ea_enabled[0])
+        {
+         timer_cycle_ok=false;
+         timer_heavy_status="degraded | reason=gate_off_enabled_stage";
+         kernel_reason="timer_heavy_gate_off";
+         g_last_ea1_stage_run="skipped";
+         g_last_ea1_stage_reason="timer_heavy_gate_off";
+         g_last_ea1_stage_elapsed_ms=0;
         }
       if((g_timer_pulse_count%30)==1)
          g_debug.Write("INFO","timer","minimal_heartbeat","pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count));
@@ -992,12 +1261,20 @@ void OnTimer()
    ISSX_LogFeatureStatus("feature_run","runtime_scheduler",runtime_scheduler_status,g_last_feature_runtime_scheduler,sampled);
    ISSX_LogFeatureStatus("feature_run","timer_heavy_work",timer_heavy_status,g_last_feature_timer_heavy,sampled);
 
+   g_last_kernel_result=(timer_cycle_ok?"ok":"degraded");
+   g_last_kernel_elapsed_ms=timer_kernel_elapsed_ms;
+   if(kernel_reason=="none")
+      kernel_reason=(gate_timer_heavy?"active":"timer_heavy_off");
+   g_last_kernel_reason=kernel_reason;
+
    if(sampled || !timer_cycle_ok)
-      g_debug.Write("INFO","timer","kernel_result",(timer_cycle_ok?"ok":"degraded")+" elapsed_ms="+IntegerToString((int)timer_kernel_elapsed_ms));
+      g_debug.Write("INFO","timer","kernel_result",(timer_cycle_ok?"ok":"degraded")+" elapsed_ms="+IntegerToString((int)timer_kernel_elapsed_ms)+" timer_heavy="+(gate_timer_heavy?"on":"off")+" reason="+kernel_reason);
 
    const ulong elapsed_us=(ulong)GetMicrosecondCount()-timer_start_us;
    if(sampled || !timer_cycle_ok)
       g_debug.Write("INFO","timer","elapsed_us","value="+ISSX_Util::ULongToStringX(elapsed_us));
+
+   ISSX_UpdateHUD();
 
    g_first_cycle_done=true;
    g_kernel_busy=false;
