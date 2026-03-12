@@ -1,11 +1,11 @@
 ﻿#ifndef __ISSX_CORE_MQH__
 #define __ISSX_CORE_MQH__
 // ============================================================================
-// ISSX CORE v1.722
+// ISSX CORE v1.723
 // Shared foundation for the consolidated single-EA / five-stage ISSX kernel.
 //
 // HARDENING NOTES
-// - upgraded owner surface to blueprint v1.722 governance
+// - upgraded owner surface to blueprint v1.723 governance
 // - preserved shared semantic ownership in core only
 // - expanded field-key ownership for manifest / scheduler / debug / EA5 surfaces
 // - added compatibility-alias lifecycle and external-contract stability enums
@@ -21,7 +21,7 @@
 
 #define ISSX_ENGINE_NAME                              "ISSX"
 #define ISSX_ENGINE_FAMILY                            "ISSX_PIPELINE"
-#define ISSX_ENGINE_VERSION                           "1.722"
+#define ISSX_ENGINE_VERSION                           "1.723"
 #define ISSX_SCHEMA_VERSION                           "1.718"
 #define ISSX_SCHEMA_EPOCH                             10702
 #define ISSX_STORAGE_VERSION                          1721
