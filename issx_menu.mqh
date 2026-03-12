@@ -3,7 +3,7 @@
 
 #define ISSX_MENU_ROWS 5
 
-// ISSX MENU ENGINE v1.709
+// ISSX MENU ENGINE v1.710
 
 class ISSX_MenuEngine
   {
@@ -67,17 +67,18 @@ public:
          return false;
         }
 
-      CreateLabel(Obj("TITLE"),12,10,"ISSX 5-EA Control",clrAqua,10);
+      CreateLabel(Obj("TITLE"),12,10,"ISSX Stage Control",clrAqua,9);
+      string alias[ISSX_MENU_ROWS]={"Market","History","Selection","Correlation","Contracts"};
       for(int i=0;i<ISSX_MENU_ROWS;i++)
         {
-         const int y=34+(i*44);
+         const int y=30+(i*24);
          string row=IntegerToString(i+1);
-         string name="EA"+row;
          string state=(enabled[i] ? "ON" : "OFF");
-         color bg=(enabled[i] ? clrDarkGreen : clrMaroon);
+         color bg=(enabled[i] ? clrDarkGreen : clrDimGray);
+         string status_hint=(i==0 ? "foundation_locked" : "isolation_locked");
 
-         CreateButton(Obj("TOGGLE_"+row),12,y,90,18,name+" "+state,bg);
-         CreateLabel(Obj("SUB_"+row),110,y+2,"submenu: runtime status + diagnostics",clrSilver,8);
+         CreateButton(Obj("TOGGLE_"+row),12,y,120,18,alias[i]+" "+state,bg);
+         CreateLabel(Obj("SUB_"+row),138,y+2,status_hint,clrSilver,8);
         }
       return true;
      }
