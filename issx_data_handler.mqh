@@ -4,11 +4,11 @@
 #include <ISSX/issx_core.mqh>
 
 // ============================================================================
-// ISSX DATA HANDLER v1.731
+// ISSX DATA HANDLER v1.732
 // Shared JSON/payload/file-commit safety layer for ISSX stages.
 // ============================================================================
 
-#define ISSX_DATA_HANDLER_MODULE_VERSION "1.731"
+#define ISSX_DATA_HANDLER_MODULE_VERSION "1.732"
 #define ISSX_DATA_HANDLER_MAX_PAYLOAD_BYTES 7864320
 #define ISSX_DATA_HANDLER_WRITE_RETRY_MAX   3
 

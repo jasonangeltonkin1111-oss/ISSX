@@ -43,7 +43,7 @@
 // - same-tick handoff is never implied here; upstream accepted truth only
 // ============================================================================
 
-#define ISSX_CORRELATION_ENGINE_MODULE_VERSION "1.731"
+#define ISSX_CORRELATION_ENGINE_MODULE_VERSION "1.732"
 #define ISSX_CORRELATION_ENGINE_STAGE_API_VERSION "1.0"
 #define ISSX_EA4_PAIR_CACHE_MAX_AGE_MINUTES    30
 #define ISSX_EA4_FRONTIER_HARD_LIMIT           64

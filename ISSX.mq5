@@ -1,5 +1,5 @@
 #property strict
-#property version   "1.731"
+#property version   "1.732"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
@@ -30,6 +30,10 @@ input string InpFirmId                  = "default_firm";
 input bool   InpIncludeCustomSymbols    = false;
 input int    InpEA1MaxSymbols           = 2000;
 input int    InpEA1HydrationBatchSize   = 25;
+input int    InpEA1RollingBatchSize     = 50;
+input int    InpEA1RollingCadenceSec    = 3;
+input int    InpEA1RollingMaxSnapshots  = 100;
+input int    InpEA1PublishCadenceSec    = 5;
 input bool   InpEA2DeepProfileDefault   = true;
 input int    InpEA2MaxSymbolsPerSlice   = 128;
 input bool   InpProjectStageStatusRoot  = true;
@@ -149,6 +153,13 @@ string              g_market_log_file_name         = "";
 string              g_market_json_relative_path    = "";
 string              g_market_log_relative_path     = "";
 string              g_operator_root_relative       = "ISSX";
+string              g_market_rolling_json_relative_path = "";
+datetime            g_ea1_rolling_last_write_time = 0;
+long                g_ea1_rolling_last_minute_id  = -1;
+int                 g_ea1_rolling_cursor          = 0;
+string              g_ea1_recent_snapshots[];
+int                 g_ea1_recent_snapshots_count  = 0;
+datetime            g_ea1_last_publish_attempt_time = 0;
 string              g_startup_profile           = "unknown";
 
 string ISSX_LongIdPart(const long value)
@@ -489,6 +500,7 @@ void ISSX_ResolveOperatorContext()
    g_market_log_file_name=ISSX_OperatorSurface::OperatorFileName(issx_stage_ea1,g_operator_server_name,".log");
    g_market_json_relative_path=ISSX_Util::JoinPath(g_operator_root_relative,g_market_json_file_name);
    g_market_log_relative_path=ISSX_Util::JoinPath(g_operator_root_relative,g_market_log_file_name);
+   g_market_rolling_json_relative_path=ISSX_Util::JoinPath(g_operator_root_relative,"market_upcomers_server.json");
   }
 
 string ISSX_BuildEA1StageStatusJson()
@@ -558,6 +570,155 @@ void ISSX_ConvertEA4OptionalIntelligence(const ISSX_EA4_OptionalIntelligenceExpo
       dst[i].pair_cache_status=src[i].pair_cache_status;
       dst[i].pair_cache_reuse_block_reason=src[i].pair_cache_reuse_block_reason;
      }
+  }
+
+
+string ISSX_JsonQ(const string s)
+  {
+   return "\""+ISSX_Util::EscapeJson(s)+"\"";
+  }
+
+string ISSX_EA1RollingSymbolJson(const ISSX_EA1_SymbolState &sym)
+  {
+   string j="{";
+   j+="\"symbol\":"+ISSX_JsonQ(sym.normalized_identity.symbol_norm)+",";
+   j+="\"family\":"+ISSX_JsonQ(sym.normalized_identity.alias_family_id)+",";
+   j+="\"state\":"+ISSX_JsonQ(ISSX_MarketEngine::PracticalMarketStateText(sym.validated_runtime_truth.practical_market_state))+",";
+   j+="\"bid\":"+ISSX_Util::DoubleToStringX(sym.raw_broker_observation.quote_tick_snapshot.bid,6)+",";
+   j+="\"ask\":"+ISSX_Util::DoubleToStringX(sym.raw_broker_observation.quote_tick_snapshot.ask,6)+",";
+   j+="\"spread_points\":"+ISSX_Util::DoubleToStringX(sym.validated_runtime_truth.current_spread_points,2)+",";
+   j+="\"rankable\":"+(sym.rankability_gate.rankable_now?"true":"false");
+   j+="}";
+   return j;
+  }
+
+void ISSX_EA1RollingAppendSnapshot(const string snapshot_json)
+  {
+   int pruned=0;
+   int keep=MathMax(1,InpEA1RollingMaxSnapshots);
+   if(g_ea1_recent_snapshots_count<0)
+      g_ea1_recent_snapshots_count=0;
+
+   ArrayResize(g_ea1_recent_snapshots,g_ea1_recent_snapshots_count+1);
+   g_ea1_recent_snapshots[g_ea1_recent_snapshots_count]=snapshot_json;
+   g_ea1_recent_snapshots_count++;
+
+   if(g_ea1_recent_snapshots_count>keep)
+     {
+      pruned=g_ea1_recent_snapshots_count-keep;
+      for(int i=0;i<keep;i++)
+         g_ea1_recent_snapshots[i]=g_ea1_recent_snapshots[i+pruned];
+      g_ea1_recent_snapshots_count=keep;
+      ArrayResize(g_ea1_recent_snapshots,keep);
+     }
+
+   if(pruned>0)
+      g_debug.Write("INFO","ea1_publish","json_rotation_pruned","N="+IntegerToString(pruned));
+  }
+
+bool ISSX_MaybePersistEA1RollingJson()
+  {
+   if(!g_ea_enabled[0])
+      return false;
+
+   datetime now=TimeTradeServer();
+   if(now<=0)
+      now=TimeCurrent();
+   if(now<=0)
+      return false;
+
+   const int cadence=MathMax(1,InpEA1RollingCadenceSec);
+   if(g_ea1_rolling_last_write_time>0 && (int)(now-g_ea1_rolling_last_write_time)<cadence)
+      return false;
+
+   const int total=ArraySize(g_ea1.symbols);
+   if(total<=0)
+      return false;
+
+   const long minute_id=(long)(now/60);
+   if(g_ea1_rolling_last_minute_id!=minute_id)
+     {
+      g_ea1_rolling_last_minute_id=minute_id;
+      g_ea1_rolling_cursor=0;
+     }
+
+   const int batch_size=MathMax(1,InpEA1RollingBatchSize);
+   if(g_ea1_rolling_cursor>=total)
+      g_ea1_rolling_cursor=0;
+
+   const int batch_start=g_ea1_rolling_cursor;
+   const int batch_count=MathMin(batch_size,total-batch_start);
+   if(batch_count<=0)
+      return false;
+
+   string symbols_json="[";
+   for(int i=0;i<batch_count;i++)
+     {
+      if(i>0)
+         symbols_json+=",";
+      symbols_json+=ISSX_EA1RollingSymbolJson(g_ea1.symbols[batch_start+i]);
+     }
+   symbols_json+="]";
+
+   g_ea1_rolling_cursor=batch_start+batch_count;
+   if(g_ea1_rolling_cursor>=total)
+      g_ea1_rolling_cursor=0;
+
+   const double hydration_progress=((g_ea1.hydration_total>0)?((double)g_ea1.hydration_processed/(double)g_ea1.hydration_total):0.0);
+   const string server_time=TimeToString(now,TIME_DATE|TIME_SECONDS);
+
+   string snapshot="{";
+   snapshot+="\"server_time\":"+ISSX_JsonQ(server_time)+",";
+   snapshot+="\"minute_id\":"+ISSX_Util::LongToStringX(minute_id)+",";
+   snapshot+="\"batch_start\":"+IntegerToString(batch_start)+",";
+   snapshot+="\"batch_count\":"+IntegerToString(batch_count)+",";
+   snapshot+="\"total_symbols\":"+IntegerToString(total)+",";
+   snapshot+="\"cursor_next\":"+IntegerToString(g_ea1_rolling_cursor)+",";
+   snapshot+="\"ea1_state\":"+ISSX_JsonQ(ISSX_MarketEngine::RuntimeStateText(g_ea1.runtime_state))+",";
+   snapshot+="\"hydration_progress\":"+ISSX_Util::DoubleToStringX(hydration_progress,4);
+   snapshot+="}";
+   ISSX_EA1RollingAppendSnapshot(snapshot);
+
+   string recent_json="[";
+   for(int r=0;r<g_ea1_recent_snapshots_count;r++)
+     {
+      if(r>0)
+         recent_json+=",";
+      recent_json+=g_ea1_recent_snapshots[r];
+     }
+   recent_json+="]";
+
+   string payload="{";
+   payload+="\"server_time\":"+ISSX_JsonQ(server_time)+",";
+   payload+="\"ea1_state\":"+ISSX_JsonQ(ISSX_MarketEngine::RuntimeStateText(g_ea1.runtime_state))+",";
+   payload+="\"symbols\":"+symbols_json+",";
+   payload+="\"hydration_progress\":"+ISSX_Util::DoubleToStringX(hydration_progress,4)+",";
+   payload+="\"batch\":{\"start\":"+IntegerToString(batch_start)+",\"count\":"+IntegerToString(batch_count)+",\"total\":"+IntegerToString(total)+",\"cursor_next\":"+IntegerToString(g_ea1_rolling_cursor)+"},";
+   payload+="\"downstream\":{";
+   payload+="\"ea2\":{\"run\":"+ISSX_JsonQ(g_last_ea2_stage_run)+",\"reason\":"+ISSX_JsonQ(g_last_ea2_stage_reason)+"},";
+   payload+="\"ea3\":{\"run\":"+ISSX_JsonQ(g_last_ea3_stage_run)+",\"reason\":"+ISSX_JsonQ(g_last_ea3_stage_reason)+"},";
+   payload+="\"ea4\":{\"run\":"+ISSX_JsonQ(g_last_ea4_stage_run)+",\"reason\":"+ISSX_JsonQ(g_last_ea4_stage_reason)+"},";
+   payload+="\"ea5\":{\"run\":"+ISSX_JsonQ(g_last_ea5_stage_run)+",\"reason\":"+ISSX_JsonQ(g_last_ea5_stage_reason)+"}";
+   payload+="},";
+   payload+="\"recent_snapshots\":"+recent_json;
+   payload+="}";
+
+   g_debug.Write("INFO","ea1_publish","json_build_success",
+                 "path="+g_market_rolling_json_relative_path+
+                 " batch_start="+IntegerToString(batch_start)+
+                 " batch_count="+IntegerToString(batch_count)+
+                 " total="+IntegerToString(total)+
+                 " bytes="+IntegerToString(ISSX_DataHandler::EstimateUtf8Bytes(payload)));
+
+   const bool write_ok=ISSX_FileIO::WriteTextAtomic(g_market_rolling_json_relative_path,payload);
+   g_ea1_rolling_last_write_time=now;
+
+   g_debug.Write((write_ok?"INFO":"ERROR"),"ea1_publish",
+                 (write_ok?"json_write_success":"json_write_fail"),
+                 "path="+g_market_rolling_json_relative_path+
+                 " cursor_next="+IntegerToString(g_ea1_rolling_cursor)+
+                 " snapshots="+IntegerToString(g_ea1_recent_snapshots_count));
+   return write_ok;
   }
 
 bool ISSX_ProjectEA1(const string stage_json,
@@ -1182,10 +1343,27 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
      }
    else
      {
-      g_debug.Write("INFO","ea1_publish","publish_enter","checkpoint=publish_enter");
-      g_debug.Write("INFO","ea1_publish","publish_preconditions_check","checkpoint=publish_preconditions_check hydration_complete="+ISSX_OnOff(g_ea1.hydration_complete)+" runtime_state="+ISSX_EA1_RuntimeStateText(g_ea1.runtime_state));
-      g_debug.Write("INFO","ea1_publish","publish_build_stage_json_start","checkpoint=publish_build_stage_json_start");
-      const bool stage_publish_ok=ISSX_MarketEngine::StagePublish(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,stage_json,broker_dump_json,debug_json);
+      const int publish_cadence=MathMax(1,InpEA1PublishCadenceSec);
+      datetime publish_now=TimeTradeServer();
+      if(publish_now<=0)
+         publish_now=TimeCurrent();
+      const bool publish_due=(g_ea1_last_publish_attempt_time<=0 || (int)(publish_now-g_ea1_last_publish_attempt_time)>=publish_cadence);
+      if(!publish_due)
+        {
+         ISSX_ResetEA1PublishStatus();
+         g_last_ea1_publish_state="skipped";
+         g_last_ea1_publish_reason="cadence_guard";
+         g_ea1.publish_last_checkpoint="publish_skip_cadence";
+         g_ea1.publish_last_error="cadence_guard";
+         g_debug.Write("INFO","ea1_publish","publish_skip_cadence","cadence_sec="+IntegerToString(publish_cadence));
+        }
+      else
+        {
+         g_ea1_last_publish_attempt_time=publish_now;
+         g_debug.Write("INFO","ea1_publish","publish_enter","checkpoint=publish_enter");
+         g_debug.Write("INFO","ea1_publish","publish_preconditions_check","checkpoint=publish_preconditions_check hydration_complete="+ISSX_OnOff(g_ea1.hydration_complete)+" runtime_state="+ISSX_EA1_RuntimeStateText(g_ea1.runtime_state));
+         g_debug.Write("INFO","ea1_publish","publish_build_stage_json_start","checkpoint=publish_build_stage_json_start");
+         const bool stage_publish_ok=ISSX_MarketEngine::StagePublish(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,stage_json,broker_dump_json,debug_json);
       g_telemetry.Payload(issx_telemetry_stage_ea1_market,StringLen(stage_json));
       g_telemetry.RecordPayloadBytes("stage_json",StringLen(stage_json));
       g_telemetry.RecordPayloadBytes("debug_snapshot",StringLen(debug_json));
@@ -1220,20 +1398,20 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
             g_debug.Write("ERROR","ea1_publish","publish_build_stage_json_fail","reason="+g_ea1.publish_last_error);
          g_debug.Write("ERROR","ea1_publish","publish_failed","checkpoint="+g_ea1.publish_last_checkpoint+" reason="+g_ea1.publish_last_error);
         }
-      string ea1_publish_reason="ok";
-      bool publish_ok=false;
-      if(stage_publish_ok)
-        {
-         g_debug.Write("INFO","ea1_publish","publish_file_projection_start",
-                       "checkpoint=publish_file_projection_start universe_json_len="+IntegerToString(StringLen(broker_dump_json))+
-                       " stage_json_len="+IntegerToString(StringLen(stage_json))+
-                       " debug_json_len="+IntegerToString(StringLen(debug_json)));
-         publish_ok=ISSX_ProjectEA1(stage_json,broker_dump_json,debug_json,ea1_publish_reason);
-        }
-      else
-         ea1_publish_reason="stage_publish_build_failed_"+g_ea1.publish_last_error;
+         string ea1_publish_reason="ok";
+         bool publish_ok=false;
+         if(stage_publish_ok)
+           {
+            g_debug.Write("INFO","ea1_publish","publish_file_projection_start",
+                          "checkpoint=publish_file_projection_start universe_json_len="+IntegerToString(StringLen(broker_dump_json))+
+                          " stage_json_len="+IntegerToString(StringLen(stage_json))+
+                          " debug_json_len="+IntegerToString(StringLen(debug_json)));
+            publish_ok=ISSX_ProjectEA1(stage_json,broker_dump_json,debug_json,ea1_publish_reason);
+           }
+         else
+            ea1_publish_reason="stage_publish_build_failed_"+g_ea1.publish_last_error;
 
-      if(!publish_ok)
+         if(!publish_ok)
      {
       g_debug.Write("WARN","ea1_publish","publish_degraded","reason="+ea1_publish_reason+" stage_json="+(stage_publish_ok?"ok":"fail"));
       if(ea1_stage_result=="success")
@@ -1245,8 +1423,12 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       ISSX_SyncEA1StageRegistry(g_last_ea1_stage_run,g_last_ea1_stage_reason,g_last_ea1_stage_elapsed_ms,true);
       g_debug.Write("INFO","stage_run","ea1_market",ea1_stage_result);
       g_debug.Write("INFO","stage_reason","ea1_market",ea1_stage_reason);
-     }
+        }
+      }
    }
+
+   if(g_ea1.hydration_complete)
+      ISSX_MaybePersistEA1RollingJson();
 
    g_telemetry.EndStage("ea1_market",(ea1_stage_result=="success"?"READY":"DEGRADED"));
 

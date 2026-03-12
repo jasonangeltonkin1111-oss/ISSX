@@ -10,7 +10,7 @@
 #include <ISSX/issx_selection_engine.mqh>
 #include <ISSX/issx_correlation_engine.mqh>
 
-#define ISSX_CONTRACTS_MODULE_VERSION            "1.731"
+#define ISSX_CONTRACTS_MODULE_VERSION            "1.732"
 #define ISSX_CONTRACTS_STAGE_API_VERSION         "1.718"
 #define ISSX_CONTRACTS_SERIALIZER_VERSION        "1.718"
 #define ISSX_CONTRACTS_EXTERNAL_CONTRACT_VERSION "ea5_v1.723"
