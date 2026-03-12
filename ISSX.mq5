@@ -807,9 +807,9 @@ void ISSX_UpdateHUD()
    if(server_time<=0)
       server_time=TimeCurrent();
 
-   string hud="ISSX HUD v1.714 | pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count)+" | srv="+ISSX_FormatHudTime(server_time)+"\n";
-   hud+="Kernel="+g_last_kernel_result+"/"+g_last_kernel_reason+" ms="+IntegerToString((int)g_last_kernel_elapsed_ms)+
-        " sched="+ISSX_OnOff(gate_runtime_scheduler)+" tmr="+ISSX_OnOff(gate_timer_heavy)+" tick="+ISSX_OnOff(gate_tick_heavy)+"\n";
+   string hud="ISSX Market HUD | v1.714 | pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count)+"\n";
+   hud+="Broker="+g_operator_broker_name+" | Server="+g_operator_server_name+"\n";
+   hud+="Kernel="+g_last_kernel_result+" ("+g_last_kernel_reason+") ms="+IntegerToString((int)g_last_kernel_elapsed_ms)+"\n";
 
    string market_state="READY";
    if(g_ea1.runtime_state==EA1_STATE_DISCOVERY)
