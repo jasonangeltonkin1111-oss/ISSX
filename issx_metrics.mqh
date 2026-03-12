@@ -12,6 +12,9 @@ struct ISSX_MetricStage
    long hydration_bars;
    long export_size_bytes;
 
+   // Backward-compatible alias for legacy surfaces that still read the old name.
+   long hydration_rate_bps;
+
    void Reset()
      {
       stage_latency_ms=ISSX_NUMERIC_UNKNOWN_LONG;
@@ -46,7 +49,7 @@ public:
      {
       const int i=Idx(stage_id);
       if(i>=0)
-         m_rows[i].stage_latency_ms=ms;
+         m_rows[i].stage_latency_ms=NormalizeNonNegative(ms);
      }
 
    void RecordThroughput(const ISSX_StageId stage_id,const long items_per_slice)
@@ -67,7 +70,7 @@ public:
      {
       const int i=Idx(stage_id);
       if(i>=0)
-         m_rows[i].export_size_bytes=bytes;
+         m_rows[i].export_size_bytes=NormalizeNonNegative(bytes);
      }
 
    // Backward-compatible aliases.
