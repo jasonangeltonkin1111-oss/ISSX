@@ -20,7 +20,7 @@ This file is the condensed operating contract for Codex when working on ISSX.
 - `ISSX/issx_selection_engine.mqh` - EA3
 - `ISSX/issx_correlation_engine.mqh` - EA4
 - `ISSX/issx_contracts.mqh` - EA5
-- `ISSX/issx_ui_test.mqh` - aggregate UI / HUD projection
+- `ISSX/issx_ui.mqh` - aggregate UI / HUD projection
 - `ISSX/issx_debug_engine.mqh` - debug sink
 - `ISSX/issx_menu.mqh` - chart-button menu UI
 

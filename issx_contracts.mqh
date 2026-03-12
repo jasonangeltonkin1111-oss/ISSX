@@ -1,4 +1,4 @@
-﻿#ifndef __ISSX_CONTRACTS_MQH__
+#ifndef __ISSX_CONTRACTS_MQH__
 #define __ISSX_CONTRACTS_MQH__
 
 #include <ISSX/issx_core.mqh>
@@ -10,10 +10,10 @@
 #include <ISSX/issx_selection_engine.mqh>
 #include <ISSX/issx_correlation_engine.mqh>
 
-#define ISSX_CONTRACTS_MODULE_VERSION            "1.722"
+#define ISSX_CONTRACTS_MODULE_VERSION            "1.723"
 #define ISSX_CONTRACTS_STAGE_API_VERSION         "1.718"
 #define ISSX_CONTRACTS_SERIALIZER_VERSION        "1.718"
-#define ISSX_CONTRACTS_EXTERNAL_CONTRACT_VERSION "ea5_v1.722"
+#define ISSX_CONTRACTS_EXTERNAL_CONTRACT_VERSION "ea5_v1.723"
 #define ISSX_CONTRACTS_OWNER_MODULE_NAME         "issx_contracts.mqh"
 #define ISSX_CONTRACTS_FINGERPRINT_ALGO_VERSION  "utf8_canonical_v1"
 #define ISSX_CONTRACTS_SOURCE_SNAPSHOT_ACCEPTED  "accepted_snapshot"

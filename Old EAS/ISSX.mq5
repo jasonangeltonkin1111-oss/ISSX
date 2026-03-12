@@ -12,7 +12,7 @@
 #include "issx_selection_engine.mqh"
 #include "issx_correlation_engine.mqh"
 #include "issx_contracts.mqh"
-#include "issx_ui_test.mqh"
+#include "issx_ui.mqh"
 
 input string InpFirmId                  = "default_firm";
 input bool   InpIncludeCustomSymbols    = false;
