@@ -171,8 +171,8 @@ public:
       text+=" boot="+boot_id+" broker="+broker+" server="+server+"\n";
 
       text+="STAGE STATES\n";
-      text+=" EA1 Market="+ISSX_PublishabilityStateToString(ea1.stage_publishability_state)+" | run="+ea1_run+" | reason="+ea1_reason+"\n";
-      text+=" EA2 History="+ISSX_PublishabilityStateToString(ea2.stage_publishability_state)+" | run="+ea2_run+" | reason="+ea2_reason+"\n";
+      text+=" EA1 Market="+ea1.stage_publishability_state+" | run="+ea1_run+" | reason="+ea1_reason+"\n";
+      text+=" EA2 History="+ea2.stage_publishability_state+" | run="+ea2_run+" | reason="+ea2_reason+"\n";
       text+=" EA3 Selection="+ISSX_PublishabilityStateToString(ea3.stage_publishability_state)+" | run="+ea3_run+" | reason="+ea3_reason+"\n";
       text+=" EA4 Correlation="+ISSX_PublishabilityStateToString(ea4.stage_publishability_state)+" | run="+ea4_run+" | reason="+ea4_reason+"\n";
       text+=" EA5 Contracts="+ea5.debug_ready_state+" | run="+ea5_run+" | reason="+ea5_reason+"\n";
