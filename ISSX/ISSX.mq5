@@ -1,5 +1,5 @@
 #property strict
-#property version   "9.999"
+#property version   "1.7.2"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
@@ -80,8 +80,6 @@ string              g_last_status_comment       = "";
 bool                g_logged_timer_heavy_skip   = false;
 bool                g_logged_tick_heavy_skip    = false;
 bool                g_logged_chart_ui_skip      = false;
-string              g_last_feature_runtime_scheduler = "";
-string              g_last_feature_timer_heavy       = "";
 
 string ISSX_LongIdPart(const long value)
   {
@@ -524,15 +522,6 @@ void ISSX_LogGateSnapshot()
                  " ui_projection="+(gate_ui_projection?"on":"off"));
   }
 
-void ISSX_LogFeatureStatus(const string feature_name,const string status_detail,string &last_status,const bool sampled)
-  {
-   if(status_detail!=last_status || sampled)
-     {
-      g_debug.Write("INFO","feature",feature_name,status_detail);
-      last_status=status_detail;
-     }
-  }
-
 bool ISSX_RunUiProjectionSafe()
   {
    ISSX_SetCheckpoint("ui_projection_enter");
@@ -844,7 +833,7 @@ void OnTimer()
       g_first_timer_logged=true;
      }
    const ulong timer_start_us=(ulong)GetMicrosecondCount();
-   const bool sampled=((g_timer_pulse_count%15)==1);
+   const bool sampled=ISSX_ShouldSampleTimerDetail();
    const bool gate_runtime_scheduler=ISSX_IsGateOn(InpGateRuntimeScheduler,false);
    const bool gate_timer_heavy=ISSX_IsGateOn(InpGateTimerHeavyWork,false);
 
@@ -859,8 +848,8 @@ void OnTimer()
                     " runtime_scheduler="+(gate_runtime_scheduler?"on":"off")+
                     " heavy_timer_work="+(gate_timer_heavy?"on":"off"));
 
-   bool timer_cycle_ok=true;
-   long timer_kernel_elapsed_ms=0;
+   bool ok=true;
+   long kernel_elapsed_ms=0;
 
    string runtime_scheduler_status="skipped | gate=off";
    if(gate_runtime_scheduler && !gate_timer_heavy)
@@ -870,9 +859,9 @@ void OnTimer()
    if(gate_timer_heavy)
      {
       const ulong kernel_start_us=(ulong)GetMicrosecondCount();
-      timer_cycle_ok=ISSX_RunKernelCycle();
-      timer_kernel_elapsed_ms=(long)(((ulong)GetMicrosecondCount()-kernel_start_us)/1000);
-      timer_heavy_status=(timer_cycle_ok ? "success" : "failed | reason=kernel_cycle_false");
+      ok=ISSX_RunKernelCycle();
+      kernel_elapsed_ms=(long)(((ulong)GetMicrosecondCount()-kernel_start_us)/1000);
+      timer_heavy_status=(ok ? "success" : "failed | reason=kernel_cycle_false");
      }
    else
      {
@@ -885,22 +874,32 @@ void OnTimer()
          g_debug.Write("INFO","timer","minimal_heartbeat","pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count));
      }
 
-   if(gate_runtime_scheduler && gate_timer_heavy)
-      runtime_scheduler_status=(timer_cycle_ok ? "success" : "failed | reason=kernel_cycle_false");
-   ISSX_LogFeatureStatus("runtime_scheduler",runtime_scheduler_status,g_last_feature_runtime_scheduler,sampled);
-   ISSX_LogFeatureStatus("timer_heavy_work",timer_heavy_status,g_last_feature_timer_heavy,sampled);
+   bool ok=true;
+   long kernel_elapsed_ms=0;
+   if(ISSX_IsGateOn(InpGateTimerHeavyWork,false))
+     {
+      const long kernel_start_ms=(long)GetTickCount64();
+      ok=ISSX_RunKernelCycle();
+      kernel_elapsed_ms=(long)GetTickCount64()-kernel_start_ms;
+     }
+   else
+     {
+      if(!g_logged_timer_heavy_skip)
+        {
+         g_debug.Write("INFO","timer","kernel_skip","disabled_by_gate");
+         g_logged_timer_heavy_skip=true;
+        }
+      if((g_timer_pulse_count%30)==1)
+         g_debug.Write("INFO","timer","minimal_heartbeat","pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count));
+     }
 
-   if(sampled || !timer_cycle_ok)
-      g_debug.Write("INFO","timer","kernel_result",(timer_cycle_ok?"ok":"degraded")+" elapsed_ms="+IntegerToString((int)timer_kernel_elapsed_ms));
-
-   const ulong elapsed_us=(ulong)GetMicrosecondCount()-timer_start_us;
-   if(sampled || !timer_cycle_ok)
-      g_debug.Write("INFO","timer","elapsed_us","value="+ISSX_Util::ULongToStringX(elapsed_us));
+   if((g_timer_pulse_count%15)==1 || !ok)
+      g_debug.Write("INFO","timer","kernel_result",(ok?"ok":"degraded"));
 
    g_first_cycle_done=true;
    g_kernel_busy=false;
 
-   string status=(timer_cycle_ok ? "ISSX minimal-debug | firm="+g_firm_id : "ISSX degraded | firm="+g_firm_id);
+   string status=(ok ? "ISSX running | firm="+g_firm_id : "ISSX degraded | firm="+g_firm_id);
    if(status!=g_last_status_comment || (g_timer_pulse_count-g_last_comment_pulse)>=15)
      {
       Comment(status);
