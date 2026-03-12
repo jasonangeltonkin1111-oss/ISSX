@@ -1,9 +1,9 @@
-﻿#ifndef __ISSX_MENU_MQH__
+#ifndef __ISSX_MENU_MQH__
 #define __ISSX_MENU_MQH__
 
 #define ISSX_MENU_ROWS 5
 
-// ISSX MENU ENGINE v1.705
+// ISSX MENU ENGINE v1.706
 
 class ISSX_MenuEngine
   {

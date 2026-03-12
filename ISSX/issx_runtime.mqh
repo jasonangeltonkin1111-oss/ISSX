@@ -1,10 +1,10 @@
-﻿#ifndef __ISSX_RUNTIME_MQH__
+#ifndef __ISSX_RUNTIME_MQH__
 #define __ISSX_RUNTIME_MQH__
 
 #include <ISSX/issx_core.mqh>
 
 // ============================================================================
-// ISSX RUNTIME v1.705
+// ISSX RUNTIME v1.706
 // Canonical runtime owner for scheduler / timer-lossiness / budgets / fairness /
 // resumable phase state in the single-wrapper five-stage ISSX architecture.
 //

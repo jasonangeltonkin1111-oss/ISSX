@@ -1,10 +1,10 @@
-﻿#ifndef __ISSX_REGISTRY_MQH__
+#ifndef __ISSX_REGISTRY_MQH__
 #define __ISSX_REGISTRY_MQH__
 
 #include <ISSX/issx_core.mqh>
 
 // ============================================================================
-// ISSX REGISTRY v1.705
+// ISSX REGISTRY v1.706
 // Central ownership metadata for fields, enum surfaces, comparator contracts,
 // policy-sensitive fingerprints, owner-surface inventory, semantic warnings,
 // and EA5 legend support.
