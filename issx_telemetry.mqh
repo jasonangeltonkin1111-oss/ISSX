@@ -6,7 +6,7 @@
 // Infrastructure-only in-memory telemetry for structured diagnostics.
 // ============================================================================
 
-#define ISSX_TELEMETRY_VERSION         "1.725"
+#define ISSX_TELEMETRY_VERSION         "1.726"
 #define ISSX_TELEMETRY_MAX_EVENTS      256
 #define ISSX_TELEMETRY_STAGE_COUNT     9
 
@@ -93,6 +93,16 @@ private:
    long                        m_dropped_events;
    long                        m_cycle_count;
    string                      m_last_checkpoint;
+   string                      m_last_stage_reason[];
+   string                      m_last_stage_status[];
+   long                        m_last_batch_processed[];
+   long                        m_last_batch_total[];
+   long                        m_last_batch_cursor[];
+   long                        m_last_payload_bytes[];
+   long                        m_last_memory_bytes[];
+   int                         m_last_error_code[];
+   string                      m_last_error_message[];
+   long                        m_last_copyrates_reported_calls;
 
    string StageName(const ISSX_TelemetryStageId stage_id) const
      {
@@ -152,6 +162,18 @@ private:
       if(!m_initialized)
          return;
 
+      if(m_count>0)
+        {
+         const int last_idx=(m_start+m_count-1)%ISSX_TELEMETRY_MAX_EVENTS;
+         if(m_events[last_idx].stage==StageName(stage_id)
+            && m_events[last_idx].event_type==event_type
+            && m_events[last_idx].message==message
+            && m_events[last_idx].value==value
+            && m_events[last_idx].symbol==symbol
+            && m_events[last_idx].cursor==cursor)
+            return;
+        }
+
       int write_index=0;
       if(m_count<ISSX_TELEMETRY_MAX_EVENTS)
         {
@@ -163,18 +185,6 @@ private:
          write_index=m_start;
          m_start=(m_start+1)%ISSX_TELEMETRY_MAX_EVENTS;
          m_dropped_events++;
-
-         ISSX_TelemetryEvent drop_evt;
-         drop_evt.Reset();
-         drop_evt.timestamp=TimeCurrent();
-         drop_evt.stage="SYSTEM";
-         drop_evt.event_type="telemetry_event_drop";
-         drop_evt.message="telemetry_buffer_full";
-         drop_evt.value=(double)m_dropped_events;
-         drop_evt.cursor=-1;
-         m_events[write_index]=drop_evt;
-         m_total_events++;
-         return;
         }
 
       ISSX_TelemetryEvent evt;
@@ -210,6 +220,19 @@ private:
       return "error_general";
      }
 
+   string EventTypeFromStatus(const string status) const
+     {
+      if(status=="skipped" || status=="SKIPPED")
+         return "stage_skipped";
+      if(status=="degraded" || status=="DEGRADED" || status=="partial" || status=="PARTIAL")
+         return "stage_degraded";
+      if(status=="error" || status=="ERROR" || status=="failed" || status=="FAILED")
+         return "stage_error";
+      if(status=="blocked" || status=="BLOCKED")
+         return "stage_blocked";
+      return "stage_complete";
+     }
+
 public:
    void Init()
      {
@@ -227,6 +250,30 @@ public:
       m_dropped_events=0;
       m_cycle_count=0;
       m_last_checkpoint="";
+
+      ArrayResize(m_last_stage_reason,ISSX_TELEMETRY_STAGE_COUNT);
+      ArrayResize(m_last_stage_status,ISSX_TELEMETRY_STAGE_COUNT);
+      ArrayResize(m_last_batch_processed,ISSX_TELEMETRY_STAGE_COUNT);
+      ArrayResize(m_last_batch_total,ISSX_TELEMETRY_STAGE_COUNT);
+      ArrayResize(m_last_batch_cursor,ISSX_TELEMETRY_STAGE_COUNT);
+      ArrayResize(m_last_payload_bytes,ISSX_TELEMETRY_STAGE_COUNT);
+      ArrayResize(m_last_memory_bytes,ISSX_TELEMETRY_STAGE_COUNT);
+      ArrayResize(m_last_error_code,ISSX_TELEMETRY_STAGE_COUNT);
+      ArrayResize(m_last_error_message,ISSX_TELEMETRY_STAGE_COUNT);
+      for(int k=0;k<ISSX_TELEMETRY_STAGE_COUNT;k++)
+        {
+         m_last_stage_reason[k]="";
+         m_last_stage_status[k]="";
+         m_last_batch_processed[k]=-1;
+         m_last_batch_total[k]=-1;
+         m_last_batch_cursor[k]=-1;
+         m_last_payload_bytes[k]=-1;
+         m_last_memory_bytes[k]=-1;
+         m_last_error_code[k]=-2147483647;
+         m_last_error_message[k]="";
+        }
+      m_last_copyrates_reported_calls=0;
+
       m_initialized=true;
 
       Push(issx_telemetry_stage_system,"telemetry_init","telemetry_init",0.0,"",-1);
@@ -262,23 +309,16 @@ public:
       if(!m_initialized)
          return;
       const int idx=StageIndex(stage_id);
+      if(m_stage[idx].stage_begin_us==0
+         && m_last_stage_status[idx]==status
+         && m_stage[idx].last_stage_elapsed_ms==elapsed_ms)
+         return;
       m_stage[idx].last_stage_run=status;
+      m_last_stage_status[idx]=status;
       m_stage[idx].last_stage_elapsed_ms=elapsed_ms;
       m_stage[idx].stage_begin_us=0;
 
-      string event_type="stage_complete";
-      string lc=status;
-      StringToLower(lc);
-      if(lc=="skipped")
-         event_type="stage_skipped";
-      else if(lc=="degraded" || lc=="partial")
-         event_type="stage_degraded";
-      else if(lc=="error" || lc=="failed")
-         event_type="stage_error";
-      else if(lc=="blocked")
-         event_type="stage_blocked";
-
-      Push(stage_id,event_type,"telemetry_stage_transition",(double)elapsed_ms,"",-1);
+      Push(stage_id,EventTypeFromStatus(status),"telemetry_stage_transition",(double)elapsed_ms,"",-1);
      }
 
    void StageReason(const ISSX_TelemetryStageId stage_id,const string reason)
@@ -286,15 +326,23 @@ public:
       if(!m_initialized)
          return;
       const int idx=StageIndex(stage_id);
+      if(reason==m_last_stage_reason[idx])
+         return;
       m_stage[idx].last_stage_reason=reason;
+      m_last_stage_reason[idx]=reason;
       Push(stage_id,"error_context",reason,0.0,"",-1);
      }
 
    void Error(const ISSX_TelemetryStageId stage_id,const int code,const string message)
      {
       const int idx=StageIndex(stage_id);
+      if(m_last_error_code[idx]==code && m_last_error_message[idx]==message)
+         return;
+      m_last_error_code[idx]=code;
+      m_last_error_message[idx]=message;
       m_stage[idx].last_stage_run="ERROR";
       m_stage[idx].last_stage_reason=message;
+      m_last_stage_reason[idx]=message;
       Push(stage_id,ErrorTypeFromCode(code,message),message,(double)code,"",-1);
      }
 
@@ -315,6 +363,10 @@ public:
       m_stage[idx].symbols_total=total;
       m_stage[idx].symbols_cycle=(long)processed;
       m_stage[idx].batch_size=total;
+      if(m_last_batch_processed[idx]==processed && m_last_batch_total[idx]==total)
+         return;
+      m_last_batch_processed[idx]=processed;
+      m_last_batch_total[idx]=total;
       Push(stage_id,"batch_progress","batch_progress",(double)processed,"",(long)total);
      }
 
@@ -323,12 +375,19 @@ public:
       const int idx=StageIndex(stage_id);
       m_stage[idx].batch_cursor=cursor;
       m_stage[idx].batch_size=batch_size;
+      if(m_last_batch_cursor[idx]==cursor && m_last_batch_total[idx]==batch_size)
+         return;
+      m_last_batch_cursor[idx]=cursor;
+      m_last_batch_total[idx]=batch_size;
       Push(stage_id,"cursor_position","cursor_position",(double)cursor,"",(long)batch_size);
      }
 
    void Payload(const ISSX_TelemetryStageId stage_id,const int bytes)
      {
       const int idx=StageIndex(stage_id);
+      if(m_last_payload_bytes[idx]==bytes)
+         return;
+      m_last_payload_bytes[idx]=bytes;
       m_stage[idx].payload_bytes=bytes;
       Push(stage_id,"json_payload_bytes","json_payload_bytes",(double)bytes,"",-1);
      }
@@ -336,6 +395,9 @@ public:
    void MemoryEstimate(const ISSX_TelemetryStageId stage_id,const long bytes)
      {
       const int idx=StageIndex(stage_id);
+      if(m_last_memory_bytes[idx]==bytes)
+         return;
+      m_last_memory_bytes[idx]=bytes;
       m_stage[idx].estimated_memory=bytes;
       Push(stage_id,"memory_estimate","memory_estimate",(double)bytes,"",-1);
       if(bytes>(64L*1024L*1024L))
@@ -382,8 +444,11 @@ public:
       const int idx=StageIndex(issx_telemetry_stage_ea2_history);
       m_stage[idx].copyrates_calls++;
       m_stage[idx].copyrates_bars+=MathMax(0,bars);
-      if((m_stage[idx].copyrates_calls & 15)==1)
+      if((m_stage[idx].copyrates_calls-m_last_copyrates_reported_calls)>=32)
+        {
+         m_last_copyrates_reported_calls=m_stage[idx].copyrates_calls;
          Push(issx_telemetry_stage_ea2_history,"copyrates_pressure","copyrates_pressure",(double)m_stage[idx].copyrates_bars,"",-1);
+        }
      }
 
    void RecordPayloadBytes(const string type,const int bytes)
