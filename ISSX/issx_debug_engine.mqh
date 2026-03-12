@@ -1,8 +1,7 @@
 #ifndef __ISSX_DEBUG_ENGINE_MQH__
 #define __ISSX_DEBUG_ENGINE_MQH__
 
-#define ISSX_DEBUG_EXPORT_BASE "C:\\Users\\Jason\\AppData\\Roaming\\MetaQuotes\\Terminal\\43C1572456A3A33910D4FE26B1396DC3\\MQL5\\Include\\ISSX\\ISSX"
-#define ISSX_DEBUG_EXPORT_REPORTS ISSX_DEBUG_EXPORT_BASE "\\debug_reports"
+#define ISSX_DEBUG_EXPORT_ROOT_REL "ISSX\\debug_reports"
 
 class ISSX_DebugEngine
   {
@@ -11,6 +10,8 @@ private:
    int    m_file_handle;
    string m_session_id;
    string m_file_name;
+   string m_terminal_data_path;
+   string m_terminal_common_data_path;
 
    string BuildTimestamp() const
      {
@@ -25,21 +26,37 @@ private:
       Print("[ISSX][",level,"] ",text);
      }
 
-   bool EnsureFolder(const string full_path)
+   bool EnsureFolderTree(const string relative_path,const bool use_common)
      {
-      ResetLastError();
-      if(FolderCreate(full_path))
-         return true;
-      const int err=GetLastError();
-      if(err==0 || err==5019)
-         return true;
-      PrintWithLevel("WARN","FolderCreate failed path="+full_path+" err="+IntegerToString(err));
-      return false;
+      if(relative_path=="")
+         return false;
+
+      string normalized=relative_path;
+      StringReplace(normalized,"/","\\");
+
+      string parts[];
+      int n=StringSplit(normalized,'\\',parts);
+      if(n<=0)
+         return false;
+
+      string build="";
+      for(int i=0;i<n;i++)
+        {
+         if(parts[i]=="")
+            continue;
+
+         build=(build=="" ? parts[i] : build+"\\"+parts[i]);
+         if(use_common)
+            FolderCreate(build,FILE_COMMON);
+         else
+            FolderCreate(build);
+        }
+      return true;
      }
 
-   string FallbackRelativeName() const
+   string CommonRelativeName() const
      {
-      return "ISSX\\debug_reports\\"+m_file_name;
+      return ISSX_DEBUG_EXPORT_ROOT_REL+"\\"+m_file_name;
      }
 
 public:
@@ -49,47 +66,44 @@ public:
       m_file_handle=INVALID_HANDLE;
       m_session_id="";
       m_file_name="";
+      m_terminal_data_path="";
+      m_terminal_common_data_path="";
      }
 
    bool BeginSession(const string ea_name,const string symbol,const ENUM_TIMEFRAMES tf)
      {
       Reset();
+      m_terminal_data_path=TerminalInfoString(TERMINAL_DATA_PATH);
+      m_terminal_common_data_path=TerminalInfoString(TERMINAL_COMMONDATA_PATH);
+
       m_session_id=BuildTimestamp()+"_"+IntegerToString((int)ChartID())+"_"+IntegerToString((int)GetTickCount());
       m_file_name=ea_name+"_"+m_session_id+".log";
 
-      bool folder_ok=EnsureFolder(ISSX_DEBUG_EXPORT_BASE) && EnsureFolder(ISSX_DEBUG_EXPORT_REPORTS);
-      string full_path=ISSX_DEBUG_EXPORT_REPORTS+"\\"+m_file_name;
-      if(!folder_ok)
-         PrintWithLevel("WARN","Debug folder prepare not fully successful; attempting file open anyway");
+      const string common_rel=CommonRelativeName();
+      EnsureFolderTree(ISSX_DEBUG_EXPORT_ROOT_REL,true);
 
       ResetLastError();
-      m_file_handle=FileOpen(full_path,FILE_WRITE|FILE_READ|FILE_TXT|FILE_ANSI|FILE_SHARE_READ|FILE_SHARE_WRITE);
+      m_file_handle=FileOpen(common_rel,FILE_WRITE|FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
       if(m_file_handle==INVALID_HANDLE)
         {
-         const int abs_err=GetLastError();
-         PrintWithLevel("WARN","FileOpen absolute failed err="+IntegerToString(abs_err)+" path="+full_path);
+         const int common_err=GetLastError();
+         PrintWithLevel("WARN","Common FileOpen failed err="+IntegerToString(common_err)+" rel="+common_rel);
 
-         const string fallback_rel=FallbackRelativeName();
-         EnsureFolder("ISSX");
-         EnsureFolder("ISSX\\debug_reports");
+         // Local-terminal fallback stays relative to MQL5/Files for safety.
+         EnsureFolderTree(ISSX_DEBUG_EXPORT_ROOT_REL,false);
          ResetLastError();
-         m_file_handle=FileOpen(fallback_rel,FILE_WRITE|FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
+         m_file_handle=FileOpen(common_rel,FILE_WRITE|FILE_READ|FILE_TXT|FILE_ANSI|FILE_SHARE_READ|FILE_SHARE_WRITE);
          if(m_file_handle==INVALID_HANDLE)
            {
-            const int fb_err=GetLastError();
-            PrintWithLevel("ERROR","Fallback FileOpen failed err="+IntegerToString(fb_err)+" rel="+fallback_rel);
+            const int local_err=GetLastError();
+            PrintWithLevel("ERROR","Local fallback FileOpen failed err="+IntegerToString(local_err)+" rel="+common_rel);
             return false;
            }
-
-         m_ready=true;
-         PrintWithLevel("INFO","Debug session started with fallback file="+fallback_rel);
-         Write("INFO","session","begin","fallback_file="+fallback_rel+" symbol="+symbol+" tf="+EnumToString(tf));
-         return true;
         }
 
       m_ready=true;
-      PrintWithLevel("INFO","Debug session started file="+full_path);
-      Write("INFO","session","begin","file="+full_path+" symbol="+symbol+" tf="+EnumToString(tf));
+      PrintWithLevel("INFO","Debug session started rel="+common_rel+" terminal_data="+m_terminal_data_path+" terminal_common="+m_terminal_common_data_path);
+      Write("INFO","session","begin","file_rel="+common_rel+" symbol="+symbol+" tf="+EnumToString(tf));
       return true;
      }
 

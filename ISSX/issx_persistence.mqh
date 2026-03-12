@@ -1729,7 +1729,8 @@ public:
       if(lock_state.lock_heartbeat_time<=0)
          return true;
 
-      return ((int)(nowv-lock_state.lock_heartbeat_time)>lock_state.stale_after_sec);
+      const int ttl=MathMax(1,lock_state.stale_after_sec);
+      return ((int)(nowv-lock_state.lock_heartbeat_time)>ttl);
      }
 
    static bool Acquire(const string firm_id,
@@ -1746,8 +1747,8 @@ public:
       const bool has_existing=Read(firm_id,existing);
 
       if(has_existing && !IsStale(existing) &&
-         existing.lock_owner_boot_id!=boot_id &&
-         existing.lock_owner_instance_guid!=instance_guid)
+         (existing.lock_owner_boot_id!=boot_id ||
+          existing.lock_owner_instance_guid!=instance_guid))
          return false;
 
       out_lock.lock_owner_boot_id=boot_id;
@@ -1755,7 +1756,7 @@ public:
       out_lock.lock_owner_terminal_identity=terminal_identity;
       out_lock.lock_acquired_time=ISSX_Time::BestScheduleClock();
       out_lock.lock_heartbeat_time=out_lock.lock_acquired_time;
-      out_lock.stale_after_sec=stale_after_sec;
+      out_lock.stale_after_sec=MathMax(1,stale_after_sec);
 
       return ISSX_FileIO::WriteText(ISSX_PersistencePath::LockFile(firm_id),ISSX_PersistenceCodec::LockToJson(out_lock));
      }
