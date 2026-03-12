@@ -1,4 +1,4 @@
-#ifndef __ISSX_CORRELATION_ENGINE_MQH__
+﻿#ifndef __ISSX_CORRELATION_ENGINE_MQH__
 #define __ISSX_CORRELATION_ENGINE_MQH__
 
 #include <ISSX/issx_core.mqh>
@@ -9,7 +9,7 @@
 #include <ISSX/issx_selection_engine.mqh>
 
 // ============================================================================
-// ISSX CORRELATION ENGINE v1.7.2
+// ISSX CORRELATION ENGINE v1.7.3
 // EA4 shared engine for IntelligenceCore.
 //
 // OWNERSHIP IN THIS MODULE
@@ -39,11 +39,11 @@
 // - core-owned ISSX_JsonWriter only
 // - deterministic frontier / pair fingerprints
 // - explicit unknown / none defaults
-// - stage API normalized to blueprint v1.7.2
+// - stage API normalized to blueprint v1.7.3
 // - same-tick handoff is never implied here; upstream accepted truth only
 // ============================================================================
 
-#define ISSX_CORRELATION_ENGINE_MODULE_VERSION "1.7.2"
+#define ISSX_CORRELATION_ENGINE_MODULE_VERSION "1.7.3"
 #define ISSX_CORRELATION_ENGINE_STAGE_API_VERSION "1.0"
 #define ISSX_EA4_PAIR_CACHE_MAX_AGE_MINUTES    30
 #define ISSX_EA4_FRONTIER_HARD_LIMIT           64
