@@ -1,5 +1,5 @@
 ﻿#property strict
-#property version   "1.707"
+#property version   "1.704"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
@@ -92,6 +92,17 @@ long                g_last_kernel_elapsed_ms         = 0;
 string              g_last_ea1_stage_run             = "skipped";
 string              g_last_ea1_stage_reason          = "none";
 long                g_last_ea1_stage_elapsed_ms      = 0;
+string              g_last_ea1_publish_state         = "unknown";
+string              g_last_ea1_publish_reason        = "none";
+string              g_last_ea1_stage_json_state      = "unknown";
+string              g_last_ea1_debug_json_state      = "unknown";
+string              g_last_ea1_universe_build_state  = "unknown";
+string              g_last_ea1_stage_write_state     = "unknown";
+string              g_last_ea1_debug_write_state     = "unknown";
+string              g_last_ea1_universe_write_state  = "unknown";
+string              g_last_ea1_root_debug_state      = "unknown";
+string              g_last_ea1_root_status_state     = "unknown";
+string              g_last_ea1_root_universe_state   = "unknown";
 
 #define ISSX_HUD_OBJECT_NAME "ISSX_HUD"
 
@@ -343,6 +354,37 @@ int ISSX_CopyEA1Symbols(string &symbols[])
    return used;
   }
 
+string ISSX_BuildEA1StageStatusJson()
+  {
+   ISSX_JsonWriter j;
+   j.BeginObject();
+   j.NameString("stage_id","ea1_market");
+   j.NameString("stage_run",g_last_ea1_stage_run);
+   j.NameString("stage_reason",g_last_ea1_stage_reason);
+   j.NameInt("stage_elapsed_ms",(int)g_last_ea1_stage_elapsed_ms);
+   j.NameString("publish_state",g_last_ea1_publish_state);
+   j.NameString("publish_reason",g_last_ea1_publish_reason);
+   j.NameBool("requested",InpEnableEA1);
+   j.NameBool("effective",g_ea_enabled[0]);
+   j.EndObject();
+   return j.ToString();
+  }
+
+void ISSX_ResetEA1PublishStatus()
+  {
+   g_last_ea1_publish_state="unknown";
+   g_last_ea1_publish_reason="none";
+   g_last_ea1_stage_json_state="unknown";
+   g_last_ea1_debug_json_state="unknown";
+   g_last_ea1_universe_build_state="unknown";
+   g_last_ea1_stage_write_state="unknown";
+   g_last_ea1_debug_write_state="unknown";
+   g_last_ea1_universe_write_state="unknown";
+   g_last_ea1_root_debug_state="unknown";
+   g_last_ea1_root_status_state="unknown";
+   g_last_ea1_root_universe_state="unknown";
+  }
+
 void ISSX_ConvertEA4OptionalIntelligence(const ISSX_EA4_OptionalIntelligenceExport &src[],
                                          ISSX_EA5_OptionalIntelligence &dst[])
   {
@@ -380,10 +422,34 @@ void ISSX_ConvertEA4OptionalIntelligence(const ISSX_EA4_OptionalIntelligenceExpo
      }
   }
 
-void ISSX_ProjectEA1(const string stage_json,
+bool ISSX_ProjectEA1(const string stage_json,
                      const string broker_dump_json,
-                     const string debug_snapshot_json)
+                     const string debug_snapshot_json,
+                     string &out_reason)
   {
+   out_reason="ok";
+   ISSX_ResetEA1PublishStatus();
+
+   const bool stage_json_ok=(StringLen(stage_json)>2);
+   const bool debug_json_ok=(StringLen(debug_snapshot_json)>2);
+   const bool universe_json_ok=(StringLen(broker_dump_json)>2);
+
+   g_last_ea1_stage_json_state=(stage_json_ok?"success":"failed");
+   g_last_ea1_debug_json_state=(debug_json_ok?"success":"failed");
+   g_last_ea1_universe_build_state=(universe_json_ok?"success":"failed");
+
+   g_debug.Write((stage_json_ok?"INFO":"WARN"),"ea1_publish","stage_json_build_"+(stage_json_ok?"success":"failed"),"len="+IntegerToString(StringLen(stage_json)));
+   g_debug.Write((debug_json_ok?"INFO":"WARN"),"ea1_publish","debug_json_build_"+(debug_json_ok?"success":"failed"),"len="+IntegerToString(StringLen(debug_snapshot_json)));
+   g_debug.Write((universe_json_ok?"INFO":"WARN"),"ea1_publish","universe_dump_build_"+(universe_json_ok?"success":"failed"),"len="+IntegerToString(StringLen(broker_dump_json)));
+
+   if(!stage_json_ok || !debug_json_ok || !universe_json_ok)
+     {
+      out_reason="build_failed";
+      g_last_ea1_publish_state="failed";
+      g_last_ea1_publish_reason=out_reason;
+      return false;
+     }
+
    ISSX_StageHeader header;
    ISSX_Manifest manifest;
 
@@ -412,13 +478,42 @@ void ISSX_ProjectEA1(const string stage_json,
    manifest.taxonomy_hash=g_ea1.taxonomy_hash;
    manifest.comparator_registry_hash=g_ea1.comparator_registry_hash;
 
-   ISSX_PersistStageJson(issx_stage_ea1,header,manifest,stage_json);
-   ISSX_BrokerUniverseDump::RotateCurrentToPrevious(g_firm_id);
-   ISSX_BrokerUniverseDump::WriteCurrent(g_firm_id,broker_dump_json,manifest,true);
+   const bool stage_write_ok=ISSX_PersistStageJson(issx_stage_ea1,header,manifest,stage_json);
+   g_last_ea1_stage_write_state=(stage_write_ok?"success":"failed");
+   g_debug.Write((stage_write_ok?"INFO":"WARN"),"ea1_publish","stage_file_write_"+(stage_write_ok?"success":"fail"),"path=current_payload");
 
+   const bool universe_rotate_ok=ISSX_BrokerUniverseDump::RotateCurrentToPrevious(g_firm_id);
+   const bool universe_write_ok=ISSX_BrokerUniverseDump::WriteCurrent(g_firm_id,broker_dump_json,manifest,true);
+   g_last_ea1_universe_write_state=((universe_rotate_ok && universe_write_ok)?"success":"failed");
+   g_debug.Write(((universe_rotate_ok && universe_write_ok)?"INFO":"WARN"),"ea1_publish","universe_file_write_"+((universe_rotate_ok && universe_write_ok)?"success":"fail"),"rotate="+(universe_rotate_ok?"ok":"fail"));
+
+   bool debug_write_ok=true;
    if(InpProjectDebugSnapshots)
-      ISSX_UI_Test::ProjectStageSnapshot(g_firm_id,issx_stage_ea1,debug_snapshot_json);
+      debug_write_ok=ISSX_UI_Test::ProjectStageSnapshot(g_firm_id,issx_stage_ea1,debug_snapshot_json);
+   g_last_ea1_debug_write_state=(debug_write_ok?"success":"failed");
+   g_debug.Write((debug_write_ok?"INFO":"WARN"),"ea1_publish",("debug_file_write_"+(debug_write_ok?"success":"fail")),"requested="+(InpProjectDebugSnapshots?"on":"off"));
+
+   ISSX_ProjectionOutcome root_outcome;
+   root_outcome.Reset();
+   root_outcome.internal_commit_success=stage_write_ok;
+   const string stage_status_json=ISSX_BuildEA1StageStatusJson();
+   const bool root_ok=ISSX_RootProjection::ProjectFromAccepted(g_firm_id,stage_json,debug_snapshot_json,stage_status_json,broker_dump_json,root_outcome);
+   g_last_ea1_root_debug_state=(root_outcome.root_debug_projection_success?"success":"failed");
+   g_last_ea1_root_status_state=(root_outcome.root_status_projection_success?"success":"failed");
+   g_last_ea1_root_universe_state=(root_outcome.root_universe_snapshot_success?"success":"failed");
+
+   g_debug.Write((root_outcome.root_debug_projection_success?"INFO":"WARN"),"ea1_publish","root_debug_projection_"+(root_outcome.root_debug_projection_success?"success":"failed"),"reason="+root_outcome.last_projection_reason);
+   g_debug.Write((root_outcome.root_status_projection_success?"INFO":"WARN"),"ea1_publish","root_status_projection_"+(root_outcome.root_status_projection_success?"success":"failed"),"reason="+root_outcome.last_projection_reason);
+   g_debug.Write((root_outcome.root_universe_snapshot_success?"INFO":"WARN"),"ea1_publish","root_universe_projection_"+(root_outcome.root_universe_snapshot_success?"success":"failed"),"reason="+root_outcome.last_projection_reason);
+
+   const bool publish_ok=(stage_write_ok && debug_write_ok && universe_rotate_ok && universe_write_ok && root_ok && root_outcome.root_debug_projection_success && root_outcome.root_status_projection_success && root_outcome.root_universe_snapshot_success);
+   g_last_ea1_publish_state=(publish_ok?"success":"degraded");
+   g_last_ea1_publish_reason=(publish_ok?"ok":root_outcome.last_projection_reason);
+   out_reason=g_last_ea1_publish_reason;
+
+   return publish_ok;
   }
+
 
 void ISSX_ProjectEA2(const string stage_json,
                      const string debug_snapshot_json)
@@ -594,7 +689,7 @@ void ISSX_UpdateHUD()
       server_time=TimeCurrent();
 
    string hud="ISSX SYSTEM HUD\n";
-   hud+="version=1.707 server_time="+ISSX_FormatHudTime(server_time)+" pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count)+"\n";
+   hud+="version=1.704 server_time="+ISSX_FormatHudTime(server_time)+" pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count)+"\n";
    hud+="kernel_result="+g_last_kernel_result+" reason="+g_last_kernel_reason+" elapsed_ms="+IntegerToString((int)g_last_kernel_elapsed_ms)+"\n";
 
    hud+="[systems]\n";
@@ -621,7 +716,11 @@ void ISSX_UpdateHUD()
    else if(g_ea1.discovery_skipped)
       discovery_state="skipped";
    hud+="discovery_state="+discovery_state+" symbols="+IntegerToString(ArraySize(g_ea1.symbols))+" elapsed_ms="+IntegerToString(g_ea1.discovery_elapsed_ms)+"\n";
-   hud+="discovery_reason="+g_ea1.discovery_status_reason;
+   hud+="discovery_reason="+g_ea1.discovery_status_reason+"\n";
+   hud+="publish="+g_last_ea1_publish_state+" reason="+g_last_ea1_publish_reason+"\n";
+   hud+="build stage="+g_last_ea1_stage_json_state+" debug="+g_last_ea1_debug_json_state+" universe="+g_last_ea1_universe_build_state+"\n";
+   hud+="write stage="+g_last_ea1_stage_write_state+" debug="+g_last_ea1_debug_write_state+" universe="+g_last_ea1_universe_write_state+"\n";
+   hud+="root debug="+g_last_ea1_root_debug_state+" status="+g_last_ea1_root_status_state+" universe="+g_last_ea1_root_universe_state;
 
    if(ObjectFind(0,ISSX_HUD_OBJECT_NAME)<0)
      {
@@ -753,7 +852,10 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
                               " accepted="+IntegerToString(ArraySize(g_ea1.symbols))+
                               " rejected="+IntegerToString(g_ea1.counters.rejected_count)+
                               " degraded="+IntegerToString(g_ea1.counters.degraded_count)+
-                              " elapsed_ms="+IntegerToString(g_ea1.discovery_elapsed_ms);
+                              " elapsed_ms="+IntegerToString(g_ea1.discovery_elapsed_ms)+
+                              " sort_applied="+(g_ea1.deterministic_sort_applied?"true":"false")+
+                              " sort_basis="+g_ea1.deterministic_sort_basis+
+                              " ordered_symbol_count="+IntegerToString(g_ea1.deterministic_sorted_count);
          if(g_ea1.discovery_no_change)
             discovery_msg+=" no_change=true";
          g_debug.Write("INFO","ea1_market","discovery_success",discovery_msg);
@@ -790,9 +892,27 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
      }
 
    g_debug.Write("INFO","ea1","stage_publish","start");
-   ISSX_MarketEngine::StagePublish(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,stage_json,debug_json);
-   ISSX_MarketEngine::BuildUniverseDump(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,broker_dump_json);
-   ISSX_ProjectEA1(stage_json,broker_dump_json,debug_json);
+   const bool stage_publish_ok=ISSX_MarketEngine::StagePublish(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,stage_json,debug_json);
+   const bool universe_build_ok=ISSX_MarketEngine::BuildUniverseDump(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,broker_dump_json);
+   string ea1_publish_reason="ok";
+   bool publish_ok=false;
+   if(stage_publish_ok && universe_build_ok)
+      publish_ok=ISSX_ProjectEA1(stage_json,broker_dump_json,debug_json,ea1_publish_reason);
+   else
+      ea1_publish_reason=(stage_publish_ok?"universe_dump_build_failed":"stage_publish_build_failed");
+
+   if(!publish_ok)
+     {
+      g_debug.Write("WARN","ea1_publish","degraded","reason="+ea1_publish_reason+" stage_json="+(stage_publish_ok?"ok":"fail")+" universe="+(universe_build_ok?"ok":"fail"));
+      if(ea1_stage_result=="success")
+         ea1_stage_result="degraded";
+      if(ea1_stage_reason=="ready")
+         ea1_stage_reason="publish_degraded_"+ea1_publish_reason;
+      g_last_ea1_stage_run=ea1_stage_result;
+      g_last_ea1_stage_reason=ea1_stage_reason;
+      g_debug.Write("INFO","stage_run","ea1_market",ea1_stage_result);
+      g_debug.Write("INFO","stage_reason","ea1_market",ea1_stage_reason);
+     }
 
    string ea1_symbols[];
    const int ea1_count=ISSX_CopyEA1Symbols(ea1_symbols);

@@ -11,7 +11,7 @@
 #include <ISSX/issx_contracts.mqh>
 
 // ============================================================================
-// ISSX UI TEST v1.707
+// ISSX UI TEST v1.704
 // Kernel HUD / structured traces / weak-link reporting / event-driven debug
 // snapshots / aggregated debug summary / trace rate limiting.
 //
@@ -26,7 +26,7 @@
 //   masquerade as healthy, safe, or empty-good state
 // ============================================================================
 
-#define ISSX_UI_TEST_MODULE_VERSION            "1.707"
+#define ISSX_UI_TEST_MODULE_VERSION            "1.704"
 #define ISSX_TRACE_DEFAULT_COOLDOWN_MS         15000
 #define ISSX_TRACE_MAX_RECENT_KEYS             256
 #define ISSX_DEBUG_MAX_WARNINGS                32
