@@ -11,10 +11,10 @@
 #include <ISSX/issx_debug_engine.mqh>
 #include <ISSX/issx_persistence.mqh>
 
-#define ISSX_UI_MODULE_VERSION "1.725"
+#define ISSX_UI_MODULE_VERSION "1.726"
 #define ISSX_UI_DEBUG_MODULE_VERSION ISSX_UI_MODULE_VERSION
 #define ISSX_HUD_PREFIX "ISSX_HUD_"
-#define ISSX_HUD_MAIN_OBJECT "ISSX_HUD_MAIN"
+#define ISSX_HUD_MAIN_OBJECT "MAIN"
 
 struct ISSX_HudForensics
   {
@@ -80,13 +80,16 @@ private:
       m_fx.objects_created++;
       Log(dbg,"hud_object_create","name="+name);
       ObjectSetInteger(0,name,OBJPROP_CORNER,CORNER_LEFT_UPPER);
-      ObjectSetInteger(0,name,OBJPROP_XDISTANCE,6);
-      ObjectSetInteger(0,name,OBJPROP_YDISTANCE,8);
-      ObjectSetInteger(0,name,OBJPROP_FONTSIZE,8);
+      ObjectSetInteger(0,name,OBJPROP_XDISTANCE,12);
+      ObjectSetInteger(0,name,OBJPROP_YDISTANCE,18);
+      ObjectSetInteger(0,name,OBJPROP_FONTSIZE,10);
       ObjectSetString(0,name,OBJPROP_FONT,"Consolas");
-      ObjectSetInteger(0,name,OBJPROP_COLOR,clrLightGray);
+      ObjectSetInteger(0,name,OBJPROP_COLOR,clrWhite);
       ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
-      ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
+      ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
+      ObjectSetInteger(0,name,OBJPROP_BACK,false);
+      ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
+      ObjectSetInteger(0,name,OBJPROP_ZORDER,1000);
      }
 
 public:
@@ -99,7 +102,7 @@ public:
       const int removed=CleanupByPrefix(ISSX_HUD_PREFIX);
       Log(dbg,"hud_cleanup_complete","removed="+IntegerToString(removed));
       m_initialized=true;
-      Log(dbg,"hud_init_complete","version="+string(ISSX_UI_MODULE_VERSION));
+      Log(dbg,"hud_init_complete","version="+string(ISSX_UI_MODULE_VERSION)+" ownership=canonical_issx_ui");
      }
 
    void Shutdown(ISSX_DebugEngine &dbg)
@@ -243,7 +246,7 @@ public:
 // ============================================================================
 
 #ifndef ISSX_UI_MODULE_VERSION
-#define ISSX_UI_MODULE_VERSION                 "1.725"
+#define ISSX_UI_MODULE_VERSION                 "1.726"
 #endif
 #define ISSX_UI_TEST_MODULE_VERSION            ISSX_UI_MODULE_VERSION
 #define ISSX_TRACE_DEFAULT_COOLDOWN_MS         15000

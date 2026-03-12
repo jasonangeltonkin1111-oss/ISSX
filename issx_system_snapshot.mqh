@@ -4,7 +4,7 @@
 #include <ISSX/issx_core.mqh>
 #include <ISSX/issx_runtime.mqh>
 
-// ISSX SYSTEM SNAPSHOT v1.723
+// ISSX SYSTEM SNAPSHOT v1.726
 
 class ISSX_SystemSnapshot
   {
@@ -46,10 +46,6 @@ public:
       s+="\"ea3_frontier\":"+IntegerToString(ea3_frontier)+",";
       s+="\"ea4_pairs\":"+IntegerToString(ea4_pairs)+",";
       s+="\"ea5_exports\":"+IntegerToString(ea5_exports)+"},";
-      s+="\"ea2_hydrated\":"+IntegerToString(ea2_hydrated)+",";
-      s+="\"ea3_frontier\":"+IntegerToString(ea3_frontier)+",";
-      s+="\"ea4_pairs\":"+IntegerToString(ea4_pairs)+",";
-      s+="\"ea5_exports\":"+IntegerToString(ea5_exports)+",";
       s+="\"memory_bytes\":"+LongToString(estimated_memory_bytes)+",";
       s+="\"runtime_flags\":{";
       s+="\"forced_service_due\":"+(runtime_state.forced_service_due_flag ? "true" : "false")+",";

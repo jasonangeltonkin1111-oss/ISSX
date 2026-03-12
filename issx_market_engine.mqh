@@ -25,7 +25,11 @@
 //   owner runtime/persistence layer
 // ============================================================================
 
-#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.725"
+#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.726"
+#define ISSX_EA1_PUBLISH_STAGE_JSON_MAX_BYTES     262144
+#define ISSX_EA1_PUBLISH_DEBUG_JSON_MAX_BYTES     524288
+#define ISSX_EA1_PUBLISH_UNIVERSE_JSON_MAX_BYTES  6291456
+#define ISSX_EA1_PUBLISH_PAYLOAD_MAX_BYTES        7864320
 
 enum ISSX_EA1_RuntimeState
   {
@@ -3073,6 +3077,7 @@ public:
       const ulong t0=GetTickCount();
       io_state.scheduler.phase_id=ISSX_EA1_MapToRuntimePhase(issx_ea1_phase_publish);
       io_state.publish_last_checkpoint="publish_enter";
+      Print("ISSX: ea1_publish checkpoint=publish_enter");
       io_state.publish_last_error=ISSX_ErrorToString(ISSX_ERR_NONE);
       io_state.publish_symbols_serialized=0;
       io_state.publish_stage_json_bytes=0;
@@ -3087,11 +3092,13 @@ public:
       out_debug_snapshot_json="";
 
       io_state.publish_last_checkpoint="publish_preconditions_check";
+      Print("ISSX: ea1_publish checkpoint=publish_preconditions_check hydration_complete=",(io_state.hydration_complete?"on":"off")," runtime_state=",RuntimeStateText(io_state.runtime_state));
       if(!io_state.hydration_complete || io_state.runtime_state!=EA1_STATE_READY)
         {
          io_state.publish_last_checkpoint="publish_failed";
          io_state.publish_last_error=ISSX_ErrorToString(ISSX_ERR_RUNTIME_LIMIT);
          io_state.publish_elapsed_ms=(int)(GetTickCount()-t0);
+         Print("ISSX: ea1_publish checkpoint=publish_failed reason=runtime_limit");
          return false;
         }
 
@@ -3099,6 +3106,7 @@ public:
       forensic.Reset();
 
       io_state.publish_last_checkpoint="publish_build_stage_json_start";
+      Print("ISSX: ea1_publish checkpoint=publish_build_stage_json_start");
       ISSX_DataHandler::JsonBuildStart(forensic,"publish_build_stage_json_start");
       out_stage_json=BuildStageSummaryJson(io_state);
       io_state.publish_stage_json_bytes=StringLen(out_stage_json);
@@ -3107,11 +3115,22 @@ public:
          io_state.publish_last_checkpoint="publish_build_stage_json_fail";
          io_state.publish_last_error=ISSX_ErrorToString(ISSX_ERR_JSON_BUILD);
          io_state.publish_elapsed_ms=(int)(GetTickCount()-t0);
+         Print("ISSX: ea1_publish checkpoint=publish_build_stage_json_fail reason=json_build");
+         return false;
+        }
+      if(ISSX_DataHandler::EstimateUtf8Bytes(out_stage_json)>ISSX_EA1_PUBLISH_STAGE_JSON_MAX_BYTES)
+        {
+         io_state.publish_last_checkpoint="publish_build_stage_json_fail";
+         io_state.publish_last_error="json_too_large_stage";
+         io_state.publish_elapsed_ms=(int)(GetTickCount()-t0);
+         Print("ISSX: ea1_publish checkpoint=publish_build_stage_json_fail reason=json_too_large_stage bytes=",IntegerToString(io_state.publish_stage_json_bytes));
          return false;
         }
       io_state.publish_last_checkpoint="publish_build_stage_json_success";
+      Print("ISSX: ea1_publish checkpoint=publish_build_stage_json_success bytes=",IntegerToString(io_state.publish_stage_json_bytes));
 
       io_state.publish_last_checkpoint="publish_build_debug_json_start";
+      Print("ISSX: ea1_publish checkpoint=publish_build_debug_json_start");
       out_debug_snapshot_json=BuildDebugSnapshotJson(io_state,firm_id,writer_boot_id,writer_nonce);
       io_state.publish_debug_json_bytes=StringLen(out_debug_snapshot_json);
       if(out_debug_snapshot_json=="")
@@ -3119,11 +3138,22 @@ public:
          io_state.publish_last_checkpoint="publish_build_debug_json_fail";
          io_state.publish_last_error=ISSX_ErrorToString(ISSX_ERR_JSON_BUILD);
          io_state.publish_elapsed_ms=(int)(GetTickCount()-t0);
+         Print("ISSX: ea1_publish checkpoint=publish_build_debug_json_fail reason=json_build");
+         return false;
+        }
+      if(ISSX_DataHandler::EstimateUtf8Bytes(out_debug_snapshot_json)>ISSX_EA1_PUBLISH_DEBUG_JSON_MAX_BYTES)
+        {
+         io_state.publish_last_checkpoint="publish_build_debug_json_fail";
+         io_state.publish_last_error="json_too_large_debug";
+         io_state.publish_elapsed_ms=(int)(GetTickCount()-t0);
+         Print("ISSX: ea1_publish checkpoint=publish_build_debug_json_fail reason=json_too_large_debug bytes=",IntegerToString(io_state.publish_debug_json_bytes));
          return false;
         }
       io_state.publish_last_checkpoint="publish_build_debug_json_success";
+      Print("ISSX: ea1_publish checkpoint=publish_build_debug_json_success bytes=",IntegerToString(io_state.publish_debug_json_bytes));
 
       io_state.publish_last_checkpoint="publish_build_universe_dump_start";
+      Print("ISSX: ea1_publish checkpoint=publish_build_universe_dump_start symbols=",IntegerToString(ArraySize(io_state.symbols)));
       if(ArraySize(io_state.symbols)>0)
         {
          io_state.publish_last_serialized_symbol=io_state.symbols[ArraySize(io_state.symbols)-1].normalized_identity.symbol_norm;
@@ -3139,19 +3169,39 @@ public:
          io_state.publish_last_checkpoint="publish_build_universe_dump_fail";
          io_state.publish_last_error=ISSX_ErrorToString(ISSX_ERR_JSON_BUILD);
          io_state.publish_elapsed_ms=(int)(GetTickCount()-t0);
+         Print("ISSX: ea1_publish checkpoint=publish_build_universe_dump_fail reason=json_build");
+         return false;
+        }
+      if(ISSX_DataHandler::EstimateUtf8Bytes(out_broker_dump_json)>ISSX_EA1_PUBLISH_UNIVERSE_JSON_MAX_BYTES)
+        {
+         io_state.publish_last_checkpoint="publish_build_universe_dump_fail";
+         io_state.publish_last_error="json_too_large_universe";
+         io_state.publish_elapsed_ms=(int)(GetTickCount()-t0);
+         Print("ISSX: ea1_publish checkpoint=publish_build_universe_dump_fail reason=json_too_large_universe bytes=",IntegerToString(io_state.publish_universe_json_bytes));
          return false;
         }
       io_state.publish_last_checkpoint="publish_build_universe_dump_success";
+      Print("ISSX: ea1_publish checkpoint=publish_build_universe_dump_success bytes=",IntegerToString(io_state.publish_universe_json_bytes));
 
       io_state.publish_payload_bytes_attempted=ISSX_DataHandler::EstimateUtf8Bytes(out_stage_json)+
                                                ISSX_DataHandler::EstimateUtf8Bytes(out_debug_snapshot_json)+
                                                ISSX_DataHandler::EstimateUtf8Bytes(out_broker_dump_json);
       io_state.publish_payload_bytes_written=0;
+      if(io_state.publish_payload_bytes_attempted>ISSX_EA1_PUBLISH_PAYLOAD_MAX_BYTES)
+        {
+         io_state.publish_last_checkpoint="publish_payload_sizes_fail";
+         io_state.publish_last_error="json_too_large_payload_total";
+         io_state.publish_elapsed_ms=(int)(GetTickCount()-t0);
+         Print("ISSX: ea1_publish checkpoint=publish_payload_sizes_fail reason=json_too_large_payload_total attempted=",IntegerToString(io_state.publish_payload_bytes_attempted));
+         return false;
+        }
       io_state.publish_last_checkpoint="publish_payload_sizes";
+      Print("ISSX: ea1_publish checkpoint=publish_payload_sizes stage_bytes=",IntegerToString(io_state.publish_stage_json_bytes)," debug_bytes=",IntegerToString(io_state.publish_debug_json_bytes)," universe_bytes=",IntegerToString(io_state.publish_universe_json_bytes)," payload_attempted=",IntegerToString(io_state.publish_payload_bytes_attempted));
       ISSX_DataHandler::JsonBuildComplete(forensic,out_stage_json,"publish_payload_sizes");
 
       io_state.publish_last_checkpoint="publish_persistence_handoff_start";
       io_state.publish_elapsed_ms=(int)(GetTickCount()-t0);
+      Print("ISSX: ea1_publish checkpoint=publish_persistence_handoff_start elapsed_ms=",IntegerToString(io_state.publish_elapsed_ms));
       return true;
      }
 
