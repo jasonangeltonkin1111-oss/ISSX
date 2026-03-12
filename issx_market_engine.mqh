@@ -1,4 +1,4 @@
-﻿#ifndef __ISSX_MARKET_ENGINE_MQH__
+#ifndef __ISSX_MARKET_ENGINE_MQH__
 #define __ISSX_MARKET_ENGINE_MQH__
 
 #include <ISSX/issx_core.mqh>
@@ -25,7 +25,7 @@
 //   owner runtime/persistence layer
 // ============================================================================
 
-#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.730"
+#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.731"
 #define ISSX_EA1_PUBLISH_STAGE_JSON_MAX_BYTES     262144
 #define ISSX_EA1_PUBLISH_DEBUG_JSON_MAX_BYTES     524288
 #define ISSX_EA1_PUBLISH_UNIVERSE_JSON_MAX_BYTES  6291456
