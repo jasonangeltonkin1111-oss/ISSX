@@ -3,7 +3,7 @@
 
 #define ISSX_MENU_ROWS 5
 
-// ISSX MENU ENGINE v1.712
+// ISSX MENU ENGINE v1.714
 
 class ISSX_MenuEngine
   {
@@ -67,18 +67,18 @@ public:
          return false;
         }
 
-      CreateLabel(Obj("TITLE"),12,150,"ISSX Operator Stages",clrAqua,9);
+      CreateLabel(Obj("TITLE"),8,145,"ISSX Operator Stages",clrAqua,8);
       string alias[ISSX_MENU_ROWS]={"Market","History","Selection","Correlation","Contracts"};
       for(int i=0;i<ISSX_MENU_ROWS;i++)
         {
-         const int y=170+(i*24);
+         const int y=162+(i*18);
          string row=IntegerToString(i+1);
          string state=(enabled[i] ? "ON" : "OFF");
          color bg=(enabled[i] ? clrDarkGreen : clrDimGray);
          string status_hint=(i==0 ? "foundation_locked" : "isolation_locked");
 
-         CreateButton(Obj("TOGGLE_"+row),12,y,120,18,alias[i]+" "+state,bg);
-         CreateLabel(Obj("SUB_"+row),138,y+2,status_hint,clrSilver,8);
+         CreateButton(Obj("TOGGLE_"+row),8,y,96,14,alias[i]+" "+state,bg);
+         CreateLabel(Obj("SUB_"+row),110,y+1,status_hint+" | "+state,clrSilver,7);
         }
       return true;
      }

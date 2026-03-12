@@ -7,7 +7,7 @@
 #include <ISSX/issx_persistence.mqh>
 
 // ============================================================================
-// ISSX HISTORY ENGINE v1.712
+// ISSX HISTORY ENGINE v1.714
 // EA2 shared engine for HistoryStateCore.
 //
 // OWNERSHIP IN THIS MODULE
@@ -2599,7 +2599,7 @@ public:
 
 string ISSX_HistoryDiagTag()
   {
-   return "history_diag_v172f";
+   return "history_diag_v174f";
   }
 
 

@@ -7,7 +7,7 @@
 #include <ISSX/issx_persistence.mqh>
 
 // ============================================================================
-// ISSX MARKET ENGINE v1.713
+// ISSX MARKET ENGINE v1.714
 // EA1 shared engine for MarketStateCore.
 //
 // HARDENING NOTES
@@ -24,7 +24,7 @@
 //   owner runtime/persistence layer
 // ============================================================================
 
-#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.713"
+#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.714"
 
 enum ISSX_EA1_RuntimeState
   {
@@ -824,6 +824,13 @@ struct ISSX_EA1_State
    bool                     hydration_complete;
    string                   hydration_last_symbol_start;
    string                   hydration_last_symbol_done;
+   string                   publish_last_checkpoint;
+   string                   publish_last_error;
+   int                      publish_symbols_serialized;
+   int                      publish_stage_json_bytes;
+   int                      publish_debug_json_bytes;
+   int                      publish_universe_json_bytes;
+   int                      publish_elapsed_ms;
 
    void Reset()
      {
@@ -870,6 +877,13 @@ struct ISSX_EA1_State
       hydration_complete=false;
       hydration_last_symbol_start="";
       hydration_last_symbol_done="";
+      publish_last_checkpoint="idle";
+      publish_last_error="none";
+      publish_symbols_serialized=0;
+      publish_stage_json_bytes=0;
+      publish_debug_json_bytes=0;
+      publish_universe_json_bytes=0;
+      publish_elapsed_ms=0;
      }
   };
 
@@ -3019,21 +3033,65 @@ public:
                             const string writer_boot_id,
                             const string writer_nonce,
                             string &out_stage_json,
+                            string &out_broker_dump_json,
                             string &out_debug_snapshot_json)
      {
+      const ulong t0=GetTickCount();
       io_state.scheduler.phase_id=ISSX_EA1_MapToRuntimePhase(issx_ea1_phase_publish);
-      if(!io_state.hydration_complete || io_state.runtime_state!=EA1_STATE_READY)
-         return false;
+      io_state.publish_last_checkpoint="publish_enter";
+      io_state.publish_last_error="none";
+      io_state.publish_symbols_serialized=0;
+      io_state.publish_stage_json_bytes=0;
+      io_state.publish_debug_json_bytes=0;
+      io_state.publish_universe_json_bytes=0;
+      io_state.publish_elapsed_ms=0;
 
+      out_stage_json="";
+      out_broker_dump_json="";
+      out_debug_snapshot_json="";
+
+      if(!io_state.hydration_complete || io_state.runtime_state!=EA1_STATE_READY)
+        {
+         io_state.publish_last_checkpoint="publish_gate_blocked";
+         io_state.publish_last_error="hydration_or_runtime_not_ready";
+         return false;
+        }
+
+      io_state.publish_last_checkpoint="publish_build_stage_json";
       out_stage_json=BuildStageSummaryJson(io_state);
+      io_state.publish_stage_json_bytes=StringLen(out_stage_json);
+
+      io_state.publish_last_checkpoint="publish_build_universe_json";
+      out_broker_dump_json=BuildUniverseDumpJson(io_state,firm_id,writer_boot_id,writer_nonce);
+      io_state.publish_universe_json_bytes=StringLen(out_broker_dump_json);
+      io_state.publish_symbols_serialized=ArraySize(io_state.symbols);
+
+      io_state.publish_last_checkpoint="publish_build_debug_json";
       out_debug_snapshot_json=BuildDebugSnapshotJson(io_state,firm_id,writer_boot_id,writer_nonce);
+      io_state.publish_debug_json_bytes=StringLen(out_debug_snapshot_json);
 
       if(out_stage_json=="")
+        {
+         io_state.publish_last_checkpoint="publish_fail_stage_json_empty";
+         io_state.publish_last_error="stage_json_empty";
          return false;
+        }
+      if(out_broker_dump_json=="")
+        {
+         io_state.publish_last_checkpoint="publish_fail_universe_json_empty";
+         io_state.publish_last_error="universe_json_empty";
+         return false;
+        }
       if(out_debug_snapshot_json=="")
+        {
+         io_state.publish_last_checkpoint="publish_fail_debug_json_empty";
+         io_state.publish_last_error="debug_json_empty";
          return false;
+        }
 
-      return WriteInternalUniverseDump(io_state,firm_id,writer_boot_id,writer_nonce);
+      io_state.publish_last_checkpoint="publish_complete";
+      io_state.publish_elapsed_ms=(int)(GetTickCount()-t0);
+      return true;
      }
 
    static string BuildDebugSnapshotJson(const ISSX_EA1_State &state,
@@ -3148,7 +3206,7 @@ public:
 
 string ISSX_MarketDiagTag()
   {
-   return "market_diag_v172f";
+   return "market_diag_v174f";
   }
 
 
