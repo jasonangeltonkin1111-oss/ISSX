@@ -587,7 +587,7 @@ string ISSX_EA1RollingSymbolJson(const ISSX_EA1_SymbolState &sym)
    j+="\"bid\":"+ISSX_Util::DoubleToStringX(sym.raw_broker_observation.quote_tick_snapshot.bid,6)+",";
    j+="\"ask\":"+ISSX_Util::DoubleToStringX(sym.raw_broker_observation.quote_tick_snapshot.ask,6)+",";
    j+="\"spread_points\":"+ISSX_Util::DoubleToStringX(sym.validated_runtime_truth.current_spread_points,2)+",";
-   j+="\"rankable\":"+(sym.rankability_gate.rankable_now?"true":"false");
+   j+="\"rankable\":"+(sym.rankability_gate.rankable_flag?"true":"false");
    j+="}";
    return j;
   }

@@ -1893,6 +1893,7 @@ io_symbol.rankability_gate.contradiction_count=0;
         }
      }
 
+public:
    static string PracticalMarketStateText(const ISSX_PracticalMarketState v)
      {
       switch(v)
@@ -1905,6 +1906,8 @@ io_symbol.rankability_gate.contradiction_count=0;
          default:                        return "unknown";
         }
      }
+
+private:
 
    static string RepresentationStateText(const ISSX_RepresentationState v)
      {
