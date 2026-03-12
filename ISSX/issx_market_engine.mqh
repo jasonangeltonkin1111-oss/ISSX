@@ -2474,6 +2474,14 @@ public:
       return (out_json!="");
      }
 
+public:
+   static bool LastDiscoveryAttempted() { return m_last_discovery_attempted; }
+   static bool LastDiscoverySkippedCadence() { return m_last_discovery_skipped; }
+   static bool LastDiscoveryNoChange() { return m_last_discovery_no_change; }
+   static int  LastDiscoverySymbols() { return m_last_discovery_symbols; }
+   static long LastDiscoveryElapsedMs() { return m_last_discovery_elapsed_ms; }
+   static string LastDiscoveryError() { return m_last_discovery_error; }
+
    static bool StageBoot(ISSX_EA1_State &io_state)
      {
       InitState(io_state);
@@ -2485,6 +2493,15 @@ public:
       m_last_discovery_minute=-1;
       io_state.resumed_from_persistence=false;
       io_state.stage_publishability_state="not_ready";
+
+      m_last_discovery_minute=-1;
+      m_last_skip_log_minute=-1;
+      m_last_discovery_attempted=false;
+      m_last_discovery_skipped=false;
+      m_last_discovery_no_change=false;
+      m_last_discovery_symbols=ArraySize(io_state.symbols);
+      m_last_discovery_elapsed_ms=0;
+      m_last_discovery_error="";
       return true;
      }
 
@@ -2659,6 +2676,15 @@ public:
   };
 
 
+
+int ISSX_MarketEngine::m_last_discovery_minute=-1;
+int ISSX_MarketEngine::m_last_skip_log_minute=-1;
+bool ISSX_MarketEngine::m_last_discovery_attempted=false;
+bool ISSX_MarketEngine::m_last_discovery_skipped=false;
+bool ISSX_MarketEngine::m_last_discovery_no_change=false;
+int ISSX_MarketEngine::m_last_discovery_symbols=0;
+long ISSX_MarketEngine::m_last_discovery_elapsed_ms=0;
+string ISSX_MarketEngine::m_last_discovery_error="";
 
 string ISSX_MarketDiagTag()
   {
