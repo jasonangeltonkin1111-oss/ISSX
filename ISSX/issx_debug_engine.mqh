@@ -130,6 +130,16 @@ public:
       m_ready=false;
      }
 
+
+   void Close(const int deinit_reason,const string detail)
+     {
+      Write("INFO","session","end_detail",detail);
+      Close(deinit_reason);
+     }
+
+   string ActiveMode() const { return m_active_mode; }
+   string ActivePath() const { return m_active_path; }
+
    bool IsReady() const { return m_ready; }
    string SessionId() const { return m_session_id; }
   };
