@@ -1,9 +1,9 @@
-#ifndef __ISSX_CONFIG_MQH__
+﻿#ifndef __ISSX_CONFIG_MQH__
 #define __ISSX_CONFIG_MQH__
 
 #include <ISSX/issx_core.mqh>
 
-#define ISSX_CONFIG_MODULE_VERSION "1.715"
+#define ISSX_CONFIG_MODULE_VERSION "1.717"
 
 // Wrapper inputs (declared in ISSX.mq5)
 extern string InpFirmId;

@@ -1,4 +1,4 @@
-#ifndef __ISSX_UI_MQH__
+﻿#ifndef __ISSX_UI_MQH__
 #define __ISSX_UI_MQH__
 
 #include <ISSX/issx_core.mqh>
@@ -10,7 +10,7 @@
 #include <ISSX/issx_contracts.mqh>
 #include <ISSX/issx_debug_engine.mqh>
 
-#define ISSX_UI_MODULE_VERSION "1.715"
+#define ISSX_UI_MODULE_VERSION "1.717"
 #define ISSX_HUD_PREFIX "ISSX_HUD_"
 #define ISSX_HUD_MAIN_OBJECT "ISSX_HUD_MAIN"
 

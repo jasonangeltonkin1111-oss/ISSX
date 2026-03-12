@@ -1,8 +1,9 @@
 ﻿#property strict
-#property version   "1.716"
+#property version   "1.717"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
+#include <ISSX/issx_config.mqh>
 #include <ISSX/issx_registry.mqh>
 #include <ISSX/issx_runtime.mqh>
 #include <ISSX/issx_scheduler.mqh>
@@ -43,6 +44,8 @@ input bool   InpIsolationMode            = true;  // force EA1-only during foren
 input bool   InpMinimalDebugMode        = true;  // default: wrapper shell + heartbeat only
 input bool   InpGateRuntimeScheduler    = false; // enables runtime init + kernel pulse
 input bool   InpGateTimerHeavyWork      = true;  // foundation default: enables ISSX_RunKernelCycle from timer
+input bool   InpGateMenuEngine          = false;
+input bool   InpGateChartUiUpdates      = false;
 input bool   InpGateTickHeavyWork       = false; // enables any non-trivial tick path
 input bool   InpGateUiProjection        = true;  // foundation default: enable HUD projection
 input bool   InpEnableRuntimeSchedulerLayer = false;
@@ -72,6 +75,7 @@ long                g_sequence_seed             = 0;
 long                g_last_ea5_export_minute_id = 0;
 ISSX_DebugEngine    g_debug;
 ISSX_UI             g_ui;
+ISSX_Config         Config;
 bool                g_ea_enabled[5]={true,false,false,false,false};
 string              g_last_checkpoint           = "boot";
 bool                g_first_tick_logged         = false;
@@ -720,7 +724,7 @@ void ISSX_ProjectEA5(const string export_json,
    g_ea5.header.policy_fingerprint=g_registry.SchemaFingerprintHex();
 
    ISSX_PersistStageJson(issx_stage_ea5,g_ea5.header,g_ea5.manifest,export_json);
-   ISSX_FileIO::WriteText(ISSX_PersistencePath::RootExport(g_firm_id),export_json);
+   ISSX_Persistence::WriteTextAtomic(ISSX_PersistencePath::RootExport(g_firm_id),export_json);
 
    if(Config.GetBool("project_debug_snapshots"))
       ISSX_UI_Test::ProjectStageSnapshot(g_firm_id,issx_stage_ea5,debug_json);
@@ -790,7 +794,7 @@ void ISSX_LogGateSnapshot()
   {
    const bool gate_runtime_scheduler=Config.GetBool("runtime_scheduler_enabled");
    const bool gate_timer_heavy=ISSX_IsTimerHeavyWorkOn();
-   const bool gate_tick_heavy=ISSX_IsGateOn(InpGateTickHeavyWork,false);
+   const bool gate_tick_heavy=Config.GetBool("tick_heavy_work_enabled");
    const bool gate_ui_projection=ISSX_IsUiProjectionOn();
 
    g_debug.Write("INFO","gates","snapshot",
@@ -826,98 +830,6 @@ string ISSX_FormatHudTime(const datetime t)
    if(t<=0)
       return "na";
    return TimeToString(t,TIME_DATE|TIME_SECONDS);
-  }
-
-void ISSX_CleanupLegacyUiObjects()
-  {
-   const int total=ObjectsTotal(0,-1,-1);
-   int removed=0;
-   for(int i=total-1;i>=0;i--)
-     {
-      string name=ObjectName(0,i,-1,-1);
-      if(StringLen(name)<=0)
-         continue;
-
-      const bool is_hud=(StringFind(name,"ISSX_HUD")==0);
-      const bool is_menu=(StringFind(name,"ISSX_MENU_OPERATOR_")==0);
-      if(!is_hud && !is_menu)
-         continue;
-
-      if(ObjectDelete(0,name))
-         removed++;
-     }
-
-   g_debug.Write("INFO","ui","cleanup_legacy_objects",
-                 "removed="+IntegerToString(removed)+" scanned="+IntegerToString(total));
-  }
-
-void ISSX_UpdateHUD()
-  {
-   if(!ISSX_IsUiProjectionOn())
-      return;
-
-   const bool gate_runtime_scheduler=ISSX_IsGateOn(InpGateRuntimeScheduler,false);
-   const bool gate_timer_heavy=ISSX_IsTimerHeavyWorkOn();
-   const bool gate_tick_heavy=ISSX_IsGateOn(InpGateTickHeavyWork,false);
-   const bool gate_menu=ISSX_IsMenuEngineOn();
-   const bool gate_chart_ui=ISSX_IsChartUiUpdatesOn();
-   const bool gate_ui_projection=ISSX_IsUiProjectionOn();
-
-   datetime server_time=TimeTradeServer();
-   if(server_time<=0)
-      server_time=TimeCurrent();
-
-   string hud="ISSX Market HUD | v1.716 | pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count)+"\n";
-   hud+="Broker="+g_operator_broker_name+" | Server="+g_operator_server_name+"\n";
-   hud+="Kernel="+g_last_kernel_result+" ("+g_last_kernel_reason+") ms="+IntegerToString((int)g_last_kernel_elapsed_ms)+"\n";
-
-   string market_state="READY";
-   if(g_ea1.runtime_state==EA1_STATE_DISCOVERY)
-      market_state="DISCOVERY";
-   else if(g_ea1.runtime_state==EA1_STATE_HYDRATING)
-      market_state="HYDRATING";
-
-   const string ea1_registry_state=ISSX_StageStateRegistry::StateToString(StageRegistry.GetState("ea1_market"));
-   const string ea1_registry_reason=StageRegistry.GetReason("ea1_market");
-   const long ea1_registry_elapsed=StageRegistry.GetElapsed("ea1_market");
-
-   hud+="EA1="+market_state+" run="+ea1_registry_state+" reason="+ea1_registry_reason+
-        " disc="+g_ea1.discovery_status_reason+"("+IntegerToString((int)ea1_registry_elapsed)+"ms)\n";
-   hud+="Universe broker="+IntegerToString(g_ea1.universe.broker_universe)+
-        " elig="+IntegerToString(g_ea1.universe.eligible_universe)+
-        " rank="+IntegerToString(g_ea1.universe.rankable_universe)+
-        " pub="+IntegerToString(g_ea1.universe.publishable_universe)+"\n";
-   hud+="Hydration "+IntegerToString(g_ea1.hydration_processed)+"/"+IntegerToString(g_ea1.hydration_total)+
-        " batch="+IntegerToString(g_ea1.hydration_batch_size)+" publish="+g_last_ea1_publish_state+"/"+g_last_ea1_publish_reason+"\n";
-   hud+="Publish ckpt="+g_ea1.publish_last_checkpoint+" err="+g_ea1.publish_last_error+
-        " sym="+IntegerToString(g_ea1.publish_symbols_serialized)+" bytes s/u/d="+
-        IntegerToString(g_ea1.publish_stage_json_bytes)+"/"+
-        IntegerToString(g_ea1.publish_universe_json_bytes)+"/"+
-        IntegerToString(g_ea1.publish_debug_json_bytes)+"\n";
-   hud+="Writes internal="+g_last_ea1_stage_write_state+" universe="+g_last_ea1_universe_write_state+
-        " root_json="+g_last_ea1_root_status_state+" root_log="+g_last_ea1_root_debug_state+"\n";
-   hud+="EA2="+ISSX_OnOff(g_ea_enabled[1])+" EA3="+ISSX_OnOff(g_ea_enabled[2])+" EA4="+ISSX_OnOff(g_ea_enabled[3])+" EA5="+ISSX_OnOff(g_ea_enabled[4])+
-        " | menu="+ISSX_OnOff(gate_menu)+" ui="+ISSX_OnOff(gate_chart_ui)+" proj="+ISSX_OnOff(gate_ui_projection)+"\n";
-   hud+="Files: "+g_market_json_file_name+" | "+g_market_log_file_name;
-
-   if(ObjectFind(0,ISSX_HUD_OBJECT_NAME)<0)
-     {
-      if(!ObjectCreate(0,ISSX_HUD_OBJECT_NAME,OBJ_LABEL,0,0,0))
-        {
-         g_debug.Write("WARN","hud","create_failed","name="+ISSX_HUD_OBJECT_NAME);
-         return;
-        }
-      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_CORNER,CORNER_LEFT_UPPER);
-      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_XDISTANCE,6);
-      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_YDISTANCE,8);
-      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_FONTSIZE,8);
-      ObjectSetString(0,ISSX_HUD_OBJECT_NAME,OBJPROP_FONT,"Consolas");
-      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_COLOR,clrLightGray);
-      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_SELECTABLE,false);
-      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_HIDDEN,true);
-     }
-
-   ObjectSetString(0,ISSX_HUD_OBJECT_NAME,OBJPROP_TEXT,hud);
   }
 
 bool ISSX_RunUiProjectionSafe()
@@ -977,7 +889,6 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
    g_debug.Write("INFO","kernel","cycle_enter","bootstrapped="+(g_bootstrapped?"true":"false"));
    if(Config.GetBool("runtime_scheduler_enabled"))
       g_runtime.OnPulse();
-     }
    else
      {
       g_telemetry.Event("runtime_scheduler_state","skipped");
@@ -1031,7 +942,7 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
    g_debug.Write("INFO","stage_init","ea1_market","success");
    g_debug.Write("INFO","ea1","stage_slice","enter");
    ea1_stage_ran=true;
-   g_ea1.hydration_batch_size=MathMax(1,InpEA1HydrationBatchSize);
+   g_ea1.hydration_batch_size=MathMax(1,Config.GetInt("ea1_hydration_batch"));
    if(!g_scheduler.RunStage("ea1_market",10))
      {
       g_debug.Write("INFO","stage_run","ea1_market","skipped");
@@ -1043,7 +954,7 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       return true;
      }
    const ulong ea1_stage_start_us=(ulong)GetMicrosecondCount();
-   if(!ISSX_MarketEngine::StageSlice(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,InpEA1MaxSymbols))
+   if(!ISSX_MarketEngine::StageSlice(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,Config.GetInt("ea1_max_symbols")))
      {
       g_debug.Write("INFO","stage_run","ea1_market","failed");
       g_debug.Write("INFO","stage_reason","ea1_market","stage_slice_returned_false");
@@ -1241,11 +1152,11 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       g_telemetry.StageStart(issx_telemetry_stage_ea2_history);
       ISSX_SetCheckpoint("ea2_stage_slice_start");
       g_debug.Write("INFO","ea2","stage_slice","start");
-      const int ea2_batch_limit=g_scheduler.LastBatchLimit("ea2_history",InpEA2MaxSymbolsPerSlice);
+      const int ea2_batch_limit=g_scheduler.LastBatchLimit("ea2_history",Config.GetInt("ea2_max_symbols_per_slice"));
       if(g_scheduler.RunBatch("ea2_history",ea2_batch_limit) && g_scheduler.RunStage("ea2_history",12))
         {
          const ulong ea2_stage_start_us=(ulong)GetMicrosecondCount();
-         ISSX_HistoryEngine::StageSlice(g_ea2,ea1_symbols,InpEA2DeepProfileDefault,ea2_batch_limit);
+         ISSX_HistoryEngine::StageSlice(g_ea2,ea1_symbols,Config.GetBool("ea2_deep_profile_default"),ea2_batch_limit);
          g_scheduler.RecordStageTime("ea2_history",(long)((ulong)GetMicrosecondCount()-ea2_stage_start_us));
         }
       else
@@ -1385,6 +1296,8 @@ int OnInit()
    g_debug.Write("INFO","lifecycle","oninit_start","build="+IntegerToString((int)__MQLBUILD__));
    g_debug.Write("INFO","debug","sink","mode="+g_debug.ActiveMode()+" path="+g_debug.ActivePath());
 
+   Config.Init();
+
    MathSrand((uint)TimeLocal());
 
    g_scheduler.Reset();
@@ -1411,10 +1324,10 @@ int OnInit()
                  " ea4="+(g_ea_enabled[3]?"on":"off")+
                  " ea5="+(g_ea_enabled[4]?"on":"off")+" isolation="+(Config.GetBool("isolation_mode")?"true":"false"));
 
-   const bool req_runtime_scheduler=InpGateRuntimeScheduler;
-   const bool req_timer_heavy=InpGateTimerHeavyWork;
-   const bool req_tick_heavy=InpGateTickHeavyWork;
-   const bool req_ui_projection=InpGateUiProjection;
+   const bool req_runtime_scheduler=Config.GetBool("gate_runtime_scheduler_requested");
+   const bool req_timer_heavy=Config.GetBool("gate_timer_heavy_requested");
+   const bool req_tick_heavy=Config.GetBool("gate_tick_heavy_requested");
+   const bool req_ui_projection=Config.GetBool("gate_ui_projection_requested");
 
    const bool eff_runtime_scheduler=Config.GetBool("runtime_scheduler_enabled");
    const bool eff_timer_heavy=ISSX_IsTimerHeavyWorkOn();
@@ -1429,15 +1342,15 @@ int OnInit()
                  " tick_heavy_work=requested="+ISSX_OnOff(req_tick_heavy)+" effective="+ISSX_OnOff(eff_tick_heavy)+
                  " ui_projection=requested="+ISSX_OnOff(req_ui_projection)+" effective="+ISSX_OnOff(eff_ui_projection));
 
-   g_debug.Write("INFO","feature_state","minimal_debug_mode","requested="+ISSX_OnOff(InpMinimalDebugMode)+" effective="+ISSX_OnOff(InpMinimalDebugMode));
-   g_debug.Write("INFO","feature_state","isolation_mode","requested="+ISSX_OnOff(InpIsolationMode)+" effective="+ISSX_OnOff(InpIsolationMode));
-   g_debug.Write("INFO","feature_state","runtime_scheduler","requested="+ISSX_OnOff(req_runtime_scheduler)+" effective="+ISSX_OnOff(eff_runtime_scheduler)+" reason="+(eff_runtime_scheduler?"active":(InpMinimalDebugMode?"minimal_debug_mode":"gate_off")));
-   g_debug.Write("INFO","feature_state","timer_heavy_work","requested="+ISSX_OnOff(req_timer_heavy)+" effective="+ISSX_OnOff(eff_timer_heavy)+" reason="+(eff_timer_heavy?"active":(InpMinimalDebugMode?"minimal_debug_mode":"gate_off")));
-   g_debug.Write("INFO","feature_state","tick_heavy_work","requested="+ISSX_OnOff(req_tick_heavy)+" effective="+ISSX_OnOff(eff_tick_heavy)+" reason="+(eff_tick_heavy?"active":(InpMinimalDebugMode?"minimal_debug_mode":"gate_off")));
-   g_debug.Write("INFO","feature_state","ui_projection","requested="+ISSX_OnOff(req_ui_projection)+" effective="+ISSX_OnOff(eff_ui_projection)+" reason="+(eff_ui_projection?"active":(InpMinimalDebugMode?"minimal_debug_mode":"gate_off")));
+   g_debug.Write("INFO","feature_state","minimal_debug_mode","requested="+ISSX_OnOff(Config.GetBool("minimal_debug_mode"))+" effective="+ISSX_OnOff(Config.GetBool("minimal_debug_mode")));
+   g_debug.Write("INFO","feature_state","isolation_mode","requested="+ISSX_OnOff(Config.GetBool("isolation_mode"))+" effective="+ISSX_OnOff(Config.GetBool("isolation_mode")));
+   g_debug.Write("INFO","feature_state","runtime_scheduler","requested="+ISSX_OnOff(req_runtime_scheduler)+" effective="+ISSX_OnOff(eff_runtime_scheduler)+" reason="+(eff_runtime_scheduler?"active":(Config.GetBool("minimal_debug_mode")?"minimal_debug_mode":"gate_off")));
+   g_debug.Write("INFO","feature_state","timer_heavy_work","requested="+ISSX_OnOff(req_timer_heavy)+" effective="+ISSX_OnOff(eff_timer_heavy)+" reason="+(eff_timer_heavy?"active":(Config.GetBool("minimal_debug_mode")?"minimal_debug_mode":"gate_off")));
+   g_debug.Write("INFO","feature_state","tick_heavy_work","requested="+ISSX_OnOff(req_tick_heavy)+" effective="+ISSX_OnOff(eff_tick_heavy)+" reason="+(eff_tick_heavy?"active":(Config.GetBool("minimal_debug_mode")?"minimal_debug_mode":"gate_off")));
+   g_debug.Write("INFO","feature_state","ui_projection","requested="+ISSX_OnOff(req_ui_projection)+" effective="+ISSX_OnOff(eff_ui_projection)+" reason="+(eff_ui_projection?"active":(Config.GetBool("minimal_debug_mode")?"minimal_debug_mode":"gate_off")));
 
-   g_debug.Write("INFO","feature_state","ea1_market","requested="+ISSX_OnOff(InpEnableEA1)+" effective="+ISSX_OnOff(g_ea_enabled[0])+" reason="+((InpIsolationMode && !InpEnableEA1)?"isolation_forced_on":(g_ea_enabled[0]?"active":"requested_off")));
-   g_debug.Write("INFO","stage_state","ea1_market","requested="+ISSX_OnOff(InpEnableEA1));
+   g_debug.Write("INFO","feature_state","ea1_market","requested="+ISSX_OnOff(Config.GetBool("ea1_enabled"))+" effective="+ISSX_OnOff(g_ea_enabled[0])+" reason="+((Config.GetBool("isolation_mode") && !Config.GetBool("ea1_enabled"))?"isolation_forced_on":(g_ea_enabled[0]?"active":"requested_off")));
+   g_debug.Write("INFO","stage_state","ea1_market","requested="+ISSX_OnOff(Config.GetBool("ea1_enabled")));
    g_debug.Write("INFO","stage_state","ea1_market","effective="+ISSX_OnOff(g_ea_enabled[0]));
    g_debug.Write("INFO","feature_state","ea2_history","requested="+ISSX_OnOff(Config.GetBool("ea2_enabled"))+" effective="+ISSX_OnOff(g_ea_enabled[1])+" reason="+(g_ea_enabled[1]?"active":(Config.GetBool("isolation_mode")?"isolation_forced_off":"requested_off")));
    g_debug.Write("INFO","feature_state","ea3_selection","requested="+ISSX_OnOff(Config.GetBool("ea3_enabled"))+" effective="+ISSX_OnOff(g_ea_enabled[2])+" reason="+(g_ea_enabled[2]?"active":(Config.GetBool("isolation_mode")?"isolation_forced_off":"requested_off")));
@@ -1458,8 +1371,8 @@ int OnInit()
    g_registry.SeedBlueprintV170();
    StageRegistry.Reset();
    ISSX_SyncEA1StageRegistry("init","oninit",0,false);
-   string runtime_init_state="skipped | reason="+(InpMinimalDebugMode?"minimal_debug_mode":"gate_off");
-   if(ISSX_IsGateOn(InpGateRuntimeScheduler,false))
+   string runtime_init_state="skipped | reason="+(Config.GetBool("minimal_debug_mode")?"minimal_debug_mode":"gate_off");
+   if(Config.GetBool("runtime_scheduler_enabled"))
      {
       g_runtime.Init();
       runtime_init_state="success";
@@ -1616,8 +1529,10 @@ void OnTimer()
       g_debug.Write("INFO","timer","elapsed_us","value="+ISSX_Util::ULongToStringX(elapsed_us));
 
 
-   g_ui.Render(g_debug,"1.715",g_boot_id,g_timer_pulse_count,InpMinimalDebugMode,InpIsolationMode,
-               (ISSX_IsGateOn(InpGateRuntimeScheduler,false)?"on":"off"),
+   g_ui.Render(g_debug,"1.717",g_boot_id,g_timer_pulse_count,
+               Config.GetBool("minimal_debug_mode"),
+               Config.GetBool("isolation_mode"),
+               (Config.GetBool("runtime_scheduler_enabled")?"on":"off"),
                g_last_kernel_result,g_last_kernel_reason,g_last_kernel_elapsed_ms,
                g_operator_broker_name,g_operator_server_name,g_ea_enabled,
                g_ea1,g_ea2,g_ea3,g_ea4,g_ea5,
@@ -1660,4 +1575,3 @@ void OnTick()
    if((tick_count%50)==0)
       g_debug.Write("INFO","tick","heartbeat","count="+IntegerToString((int)tick_count)+" mode=heavy_enabled");
   }
-
