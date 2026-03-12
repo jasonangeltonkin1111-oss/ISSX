@@ -1,4 +1,4 @@
-#ifndef __ISSX_MENU_MQH__
+﻿#ifndef __ISSX_MENU_MQH__
 #define __ISSX_MENU_MQH__
 
 #define ISSX_MENU_ROWS 5

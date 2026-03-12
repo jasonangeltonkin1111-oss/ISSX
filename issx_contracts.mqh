@@ -1,4 +1,4 @@
-#ifndef __ISSX_CONTRACTS_MQH__
+﻿#ifndef __ISSX_CONTRACTS_MQH__
 #define __ISSX_CONTRACTS_MQH__
 
 #include <ISSX/issx_core.mqh>

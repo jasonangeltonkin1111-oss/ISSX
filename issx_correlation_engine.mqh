@@ -1,4 +1,4 @@
-#ifndef __ISSX_CORRELATION_ENGINE_MQH__
+﻿#ifndef __ISSX_CORRELATION_ENGINE_MQH__
 #define __ISSX_CORRELATION_ENGINE_MQH__
 
 #include <ISSX/issx_core.mqh>
@@ -39,7 +39,7 @@
 // - core-owned ISSX_JsonWriter only
 // - deterministic frontier / pair fingerprints
 // - explicit unknown / none defaults
-// - stage API normalized to blueprint v1.714
+// - stage API normalized to blueprint v1.718
 // - same-tick handoff is never implied here; upstream accepted truth only
 // ============================================================================
 
