@@ -7,7 +7,7 @@
 #include <ISSX/issx_persistence.mqh>
 
 // ============================================================================
-// ISSX MARKET ENGINE v1.706
+// ISSX MARKET ENGINE v1.707
 // EA1 shared engine for MarketStateCore.
 //
 // HARDENING NOTES
@@ -24,7 +24,7 @@
 //   owner runtime/persistence layer
 // ============================================================================
 
-#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.706"
+#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.707"
 
 // ============================================================================
 // SECTION 01: EA1 PHASE IDS
@@ -75,7 +75,7 @@ enum ISSX_EA1_SessionPhase
    issx_ea1_session_rollover
   };
 
-// Legacy owner-side bridge for pre-v1.706 EA1 session labels.
+// Legacy owner-side bridge for pre-v1.707 EA1 session labels.
 #define issx_ea1_session_preopen    issx_ea1_session_pre_open
 #define issx_ea1_session_transition issx_ea1_session_rollover
 
@@ -985,14 +985,14 @@ public:
 // SECTION 05: MARKET ENGINE
 // ============================================================================
 
-int g_ea1_last_discovery_minute;
-int g_ea1_last_skip_log_minute;
-bool g_ea1_last_discovery_attempted;
-bool g_ea1_last_discovery_skipped;
-bool g_ea1_last_discovery_no_change;
-int g_ea1_last_discovery_symbols;
-long g_ea1_last_discovery_elapsed_ms;
-string g_ea1_last_discovery_error;
+int g_ea1_last_discovery_minute=-1;
+int g_ea1_last_skip_log_minute=-1;
+bool g_ea1_last_discovery_attempted=false;
+bool g_ea1_last_discovery_skipped=false;
+bool g_ea1_last_discovery_no_change=false;
+int g_ea1_last_discovery_symbols=0;
+long g_ea1_last_discovery_elapsed_ms=0;
+string g_ea1_last_discovery_error="";
 
 class ISSX_MarketEngine
   {
@@ -2694,16 +2694,17 @@ public:
 
 
 
-int ISSX_MarketEngine::m_last_discovery_minute=-1;
-
 string ISSX_MarketDiagTag()
   {
    return "market_diag_v172f";
   }
 
+
 string ISSX_MarketEngineDebugSignature()
   {
    return ISSX_MarketDiagTag();
   }
+
+int ISSX_MarketEngine::m_last_discovery_minute=-1;
 
 #endif // __ISSX_MARKET_ENGINE_MQH__
