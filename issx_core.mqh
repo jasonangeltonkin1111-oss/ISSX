@@ -1,4 +1,4 @@
-﻿#ifndef __ISSX_CORE_MQH__
+#ifndef __ISSX_CORE_MQH__
 #define __ISSX_CORE_MQH__
 // ============================================================================
 // ISSX CORE v1.718
@@ -177,6 +177,56 @@
 #define ISSX_ACCEPTANCE_ERR_THRESHOLD                 1025
 #define ISSX_ACCEPTANCE_ERR_INCLUDE_DRIFT             1026
 #define ISSX_ACCEPTANCE_ERR_ALIAS_DRIFT               1027
+
+// Canonical runtime/pipeline error classification for deterministic diagnostics.
+enum ISSX_ErrorCode
+  {
+   ISSX_ERR_NONE = 0,
+
+   // DISCOVERY
+   ISSX_ERR_SYMBOL_DISCOVERY,
+   ISSX_ERR_INVALID_SYMBOL,
+
+   // HISTORY
+   ISSX_ERR_COPYRATES,
+   ISSX_ERR_HISTORY_NOT_READY,
+
+   // MEMORY
+   ISSX_ERR_MEMORY_ALLOC,
+
+   // PERSISTENCE
+   ISSX_ERR_JSON_BUILD,
+   ISSX_ERR_FILE_WRITE,
+
+   // RUNTIME
+   ISSX_ERR_STAGE_DISABLED,
+   ISSX_ERR_STAGE_SKIPPED,
+   ISSX_ERR_RUNTIME_LIMIT,
+   ISSX_ERR_TIMEOUT,
+
+   ISSX_ERR_UNKNOWN
+  };
+
+string ISSX_ErrorToString(const ISSX_ErrorCode code)
+  {
+   switch(code)
+     {
+      case ISSX_ERR_NONE:              return "none";
+      case ISSX_ERR_SYMBOL_DISCOVERY:  return "symbol_discovery";
+      case ISSX_ERR_INVALID_SYMBOL:    return "invalid_symbol";
+      case ISSX_ERR_COPYRATES:         return "copyrates";
+      case ISSX_ERR_HISTORY_NOT_READY: return "history_not_ready";
+      case ISSX_ERR_MEMORY_ALLOC:      return "memory_alloc";
+      case ISSX_ERR_JSON_BUILD:        return "json_build";
+      case ISSX_ERR_FILE_WRITE:        return "file_write";
+      case ISSX_ERR_STAGE_DISABLED:    return "stage_disabled";
+      case ISSX_ERR_STAGE_SKIPPED:     return "stage_skipped";
+      case ISSX_ERR_RUNTIME_LIMIT:     return "runtime_limit";
+      case ISSX_ERR_TIMEOUT:           return "timeout";
+      case ISSX_ERR_UNKNOWN:           return "unknown";
+     }
+   return "unknown";
+  }
 
 #define ISSX_THRESHOLD_MIN_FRESHNESS                  "minimum_freshness"
 #define ISSX_THRESHOLD_CONTRADICTION_LIMIT            "contradiction_threshold"

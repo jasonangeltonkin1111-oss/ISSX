@@ -1,4 +1,4 @@
-﻿#property strict
+#property strict
 #property version   "1.718"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
