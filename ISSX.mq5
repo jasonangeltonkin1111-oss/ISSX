@@ -1,5 +1,5 @@
 ﻿#property strict
-#property version   "1.722"
+#property version   "1.723"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
@@ -1597,8 +1597,8 @@ void OnTimer()
    g_stage_registry_infra.SetElapsed(issx_stage_ea1,g_last_ea1_stage_elapsed_ms);
    g_metrics.RecordLatency(issx_stage_ea1,g_last_ea1_stage_elapsed_ms);
    g_metrics.RecordThroughput(issx_stage_ea1,g_ea1.universe.active_universe);
-   g_metrics.RecordCopyRates(issx_stage_ea2,g_ea2.forensic.max_rates_returned);
-   g_metrics.RecordPayloadSize(issx_stage_ea1,g_ea1.publish_stage_json_bytes);
+   g_metrics.RecordHydrationRateBps(issx_stage_ea2,g_ea2.forensic.max_rates_returned);
+   g_metrics.RecordExportSize(issx_stage_ea1,g_ea1.publish_stage_json_bytes);
    g_last_system_snapshot=ISSX_SystemSnapshot::DumpSystemState(g_runtime.State(),
                                                                g_ea1.universe.broker_universe,
                                                                g_ea2.counters.symbols_total,
