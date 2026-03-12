@@ -1,10 +1,11 @@
 ﻿#property strict
-#property version   "1.715"
+#property version   "1.716"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
 #include <ISSX/issx_registry.mqh>
 #include <ISSX/issx_runtime.mqh>
+#include <ISSX/issx_scheduler.mqh>
 #include <ISSX/issx_persistence.mqh>
 #include <ISSX/issx_data_handler.mqh>
 #include <ISSX/issx_market_engine.mqh>
@@ -44,9 +45,12 @@ input bool   InpGateRuntimeScheduler    = false; // enables runtime init + kerne
 input bool   InpGateTimerHeavyWork      = true;  // foundation default: enables ISSX_RunKernelCycle from timer
 input bool   InpGateTickHeavyWork       = false; // enables any non-trivial tick path
 input bool   InpGateUiProjection        = true;  // foundation default: enable HUD projection
+input bool   InpEnableRuntimeSchedulerLayer = false;
+input int    InpSchedulerCycleBudgetMs  = 25;
 
 ISSX_RegistryBundle g_registry;
 ISSX_StageRuntime   g_runtime;
+ISSX_Scheduler      g_scheduler;
 
 ISSX_EA1_State      g_ea1;
 ISSX_EA2_State      g_ea2;
@@ -814,6 +818,8 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       g_debug.Write("INFO","kernel","runtime_scheduler_skipped","disabled_by_gate");
      }
 
+   g_scheduler.BeginCycle();
+
    string stage_json="";
    string broker_dump_json="";
    string debug_json="";
@@ -827,8 +833,7 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
         {
          ea1_stage_reason="stage_boot_failed";
          g_debug.Write("ERROR","stage_init","ea1_market","failed reason="+ea1_stage_reason);
-         g_telemetry.Error(issx_telemetry_stage_ea1_market,2,ea1_stage_reason);
-         g_telemetry.StageEnd(issx_telemetry_stage_kernel,"ERROR",0);
+         g_scheduler.EndCycle();
          return false;
         }
       g_debug.Write("INFO","stage_init","ea1_market","success");
@@ -843,9 +848,7 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       g_last_kernel_reason="no_enabled_stage";
       g_debug.Write("WARN","ea1","disabled","EA1 disabled - no critical module active");
       ea1_stage_reason="requested_off";
-      g_telemetry.StageEnd(issx_telemetry_stage_ea1_market,"SKIPPED",0);
-      g_telemetry.StageReason(issx_telemetry_stage_ea1_market,ea1_stage_reason);
-      g_telemetry.StageEnd(issx_telemetry_stage_kernel,"DEGRADED",0);
+      g_scheduler.EndCycle();
       return false;
      }
 
@@ -854,8 +857,19 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
    g_debug.Write("INFO","stage_init","ea1_market","success");
    g_debug.Write("INFO","ea1","stage_slice","enter");
    ea1_stage_ran=true;
-   g_ea1.hydration_batch_size=MathMax(1,Config.GetInt("ea1_hydration_batch"));
-   if(!ISSX_MarketEngine::StageSlice(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,Config.GetInt("ea1_max_symbols")))
+   g_ea1.hydration_batch_size=MathMax(1,InpEA1HydrationBatchSize);
+   if(!g_scheduler.RunStage("ea1_market",10))
+     {
+      g_debug.Write("INFO","stage_run","ea1_market","skipped");
+      g_debug.Write("INFO","stage_reason","ea1_market","scheduler_budget_or_quota");
+      g_last_kernel_reason="scheduler_deferred_ea1";
+      ea1_stage_result="skipped";
+      ea1_stage_reason="scheduler_budget_or_quota";
+      g_scheduler.EndCycle();
+      return true;
+     }
+   const ulong ea1_stage_start_us=(ulong)GetMicrosecondCount();
+   if(!ISSX_MarketEngine::StageSlice(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,InpEA1MaxSymbols))
      {
       g_debug.Write("INFO","stage_run","ea1_market","failed");
       g_debug.Write("INFO","stage_reason","ea1_market","stage_slice_returned_false");
@@ -867,9 +881,12 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       ea1_stage_reason="stage_slice_returned_false";
       g_debug.Write("ERROR","stage_run","ea1_market",ea1_stage_result);
       g_debug.Write("ERROR","stage_reason","ea1_market",ea1_stage_reason);
+      g_scheduler.RecordStageTime("ea1_market",(long)((ulong)GetMicrosecondCount()-ea1_stage_start_us));
+      g_scheduler.EndCycle();
       return false;
      }
 
+   g_scheduler.RecordStageTime("ea1_market",(long)((ulong)GetMicrosecondCount()-ea1_stage_start_us));
 
    g_debug.Write("INFO","ea1","stage_slice_ok","symbols="+IntegerToString(ArraySize(g_ea1.symbols)));
 
@@ -958,6 +975,7 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       g_last_kernel_reason="ea1_zero_symbols";
       g_debug.Write("WARN","ea1","zero_symbols","skipping downstream stages");
       g_bootstrapped=true;
+      g_scheduler.EndCycle();
       return true;
      }
 
@@ -1028,6 +1046,7 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
      {
       g_debug.Write("WARN","ea1","symbol_copy_empty","ending cycle safely");
       g_bootstrapped=true;
+      g_scheduler.EndCycle();
       return true;
      }
 
@@ -1042,7 +1061,15 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       g_telemetry.StageStart(issx_telemetry_stage_ea2_history);
       ISSX_SetCheckpoint("ea2_stage_slice_start");
       g_debug.Write("INFO","ea2","stage_slice","start");
-      ISSX_HistoryEngine::StageSlice(g_ea2,ea1_symbols,Config.GetBool("ea2_deep_profile_default"),Config.GetInt("ea2_max_symbols_per_slice"));
+      const int ea2_batch_limit=g_scheduler.LastBatchLimit("ea2_history",InpEA2MaxSymbolsPerSlice);
+      if(g_scheduler.RunBatch("ea2_history",ea2_batch_limit) && g_scheduler.RunStage("ea2_history",12))
+        {
+         const ulong ea2_stage_start_us=(ulong)GetMicrosecondCount();
+         ISSX_HistoryEngine::StageSlice(g_ea2,ea1_symbols,InpEA2DeepProfileDefault,ea2_batch_limit);
+         g_scheduler.RecordStageTime("ea2_history",(long)((ulong)GetMicrosecondCount()-ea2_stage_start_us));
+        }
+      else
+         g_debug.Write("INFO","stage_run","ea2_history","skipped reason=scheduler_budget_or_quota");
       stage_json=ISSX_HistoryEngine::StagePublish(g_ea2);
       debug_json=ISSX_HistoryEngine::BuildDebugSnapshot(g_ea2);
       ISSX_ProjectEA2(stage_json,debug_json);
@@ -1162,10 +1189,7 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
    else
       g_telemetry.StageEnd(issx_telemetry_stage_ui,"READY",0);
    g_bootstrapped=true;
-   g_telemetry.StageEnd(issx_telemetry_stage_ea1_market,(ea1_stage_result=="success"?"READY":ea1_stage_result),g_last_ea1_stage_elapsed_ms);
-   g_telemetry.StageReason(issx_telemetry_stage_ea1_market,ea1_stage_reason);
-   g_telemetry.StageEnd(issx_telemetry_stage_kernel,"READY",g_last_kernel_elapsed_ms);
-   g_telemetry.Event("kernel_cycle_exit","kernel_cycle_exit");
+   g_scheduler.EndCycle();
    g_debug.Write("INFO","kernel","cycle_exit","ok=true");
    return true;
   }
@@ -1183,8 +1207,8 @@ int OnInit()
 
    MathSrand((uint)TimeLocal());
 
-   Config.Init();
-   g_config_snapshot=Config.GetSnapshot();
+   g_scheduler.Reset();
+   g_scheduler.Configure(InpEnableRuntimeSchedulerLayer,InpSchedulerCycleBudgetMs,15);
 
    g_boot_id        = ISSX_WrapperBootId();
    g_instance_guid  = ISSX_WrapperInstanceGuid();
