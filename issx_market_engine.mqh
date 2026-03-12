@@ -5,9 +5,10 @@
 #include <ISSX/issx_registry.mqh>
 #include <ISSX/issx_runtime.mqh>
 #include <ISSX/issx_persistence.mqh>
+#include <ISSX/issx_data_handler.mqh>
 
 // ============================================================================
-// ISSX MARKET ENGINE v1.714
+// ISSX MARKET ENGINE v1.715
 // EA1 shared engine for MarketStateCore.
 //
 // HARDENING NOTES
@@ -24,7 +25,7 @@
 //   owner runtime/persistence layer
 // ============================================================================
 
-#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.714"
+#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.715"
 
 enum ISSX_EA1_RuntimeState
   {
@@ -831,6 +832,10 @@ struct ISSX_EA1_State
    int                      publish_debug_json_bytes;
    int                      publish_universe_json_bytes;
    int                      publish_elapsed_ms;
+   string                   publish_last_serialized_symbol;
+   string                   publish_last_successful_symbol;
+   int                      publish_payload_bytes_attempted;
+   int                      publish_payload_bytes_written;
 
    void Reset()
      {
@@ -884,6 +889,10 @@ struct ISSX_EA1_State
       publish_debug_json_bytes=0;
       publish_universe_json_bytes=0;
       publish_elapsed_ms=0;
+      publish_last_serialized_symbol="";
+      publish_last_successful_symbol="";
+      publish_payload_bytes_attempted=0;
+      publish_payload_bytes_written=0;
      }
   };
 
@@ -2460,57 +2469,6 @@ io_symbol.rankability_gate.contradiction_count=0;
                                      "ea1_rankable_thin");
      }
 
-   static bool WriteInternalUniverseDump(const ISSX_EA1_State &state,
-                                         const string firm_id,
-                                         const string writer_boot_id,
-                                         const string writer_nonce)
-     {
-      if(!ISSX_FileIO::EnsureFolder(ISSX_PersistencePath::UniverseDir(firm_id)))
-         return false;
-
-      const string relative_path=ISSX_Util::JoinPath(ISSX_PersistencePath::UniverseDir(firm_id),ISSX_BIN_BROKER_UNIVERSE_CURRENT);
-      ResetLastError();
-      const int h=FileOpen(relative_path,FILE_WRITE|FILE_TXT|FILE_COMMON|FILE_ANSI,(short)0,(uint)65001);
-      if(h==INVALID_HANDLE)
-         return false;
-
-      bool ok=true;
-      ok=ok && ((int)FileWriteString(h,"{")>=1);
-      ok=ok && ((int)FileWriteString(h,"\"stage_alias\":\""+ISSX_JsonWriter::Escape(ISSX_OperatorSurface::StageAlias(issx_stage_ea1))+"\",")>=1);
-      ok=ok && ((int)FileWriteString(h,"\"internal_stage_id\":\"ea1\",")>=1);
-      ok=ok && ((int)FileWriteString(h,"\"version\":\""+ISSX_JsonWriter::Escape(ISSX_ENGINE_VERSION)+"\",")>=1);
-      ok=ok && ((int)FileWriteString(h,"\"firm_id\":\""+ISSX_JsonWriter::Escape(firm_id)+"\",")>=1);
-      ok=ok && ((int)FileWriteString(h,"\"writer_boot_id\":\""+ISSX_JsonWriter::Escape(writer_boot_id)+"\",")>=1);
-      ok=ok && ((int)FileWriteString(h,"\"writer_nonce\":\""+ISSX_JsonWriter::Escape(writer_nonce)+"\",")>=1);
-      ok=ok && ((int)FileWriteString(h,"\"minute_id\":"+IntegerToString(state.minute_id)+",")>=1);
-      ok=ok && ((int)FileWriteString(h,"\"sequence_no\":"+IntegerToString(state.sequence_no)+",")>=1);
-      ok=ok && ((int)FileWriteString(h,"\"hydration\":{\"processed\":"+IntegerToString(state.hydration_processed)+",\"total\":"+IntegerToString(state.hydration_total)+",\"complete\":"+(state.hydration_complete?"true":"false")+"},")>=1);
-      ok=ok && ((int)FileWriteString(h,"\"symbols\":[")>=1);
-
-      const int n=ArraySize(state.symbols);
-      for(int i=0;i<n;i++)
-        {
-         if(i>0)
-            ok=ok && ((int)FileWriteString(h,",")>=1);
-
-         string entry="{";
-         entry+="\"symbol\":\""+ISSX_JsonWriter::Escape(state.symbols[i].raw_broker_observation.symbol_raw)+"\",";
-         entry+="\"symbol_norm\":\""+ISSX_JsonWriter::Escape(state.symbols[i].normalized_identity.symbol_norm)+"\",";
-         entry+="\"sector\":\""+ISSX_JsonWriter::Escape(state.symbols[i].classification_truth.final_sector)+"\",";
-         entry+="\"industry\":\""+ISSX_JsonWriter::Escape(state.symbols[i].classification_truth.final_industry)+"\",";
-         entry+="\"publishable\":"+(state.symbols[i].rankability_gate.publishable_flag?"true":"false");
-         entry+="}";
-         ok=ok && ((int)FileWriteString(h,entry)>0);
-        }
-
-      ok=ok && ((int)FileWriteString(h,"]}")>=1);
-      ResetLastError();
-      FileFlush(h);
-      const int flush_error=GetLastError();
-      FileClose(h);
-      return (ok && flush_error==0);
-     }
-
 public:
    static void InitState(ISSX_EA1_State &io_state)
      {
@@ -3057,34 +3015,51 @@ public:
          return false;
         }
 
-      io_state.publish_last_checkpoint="publish_build_stage_json";
+      ISSX_DataHandler::ForensicState forensic;
+      forensic.Reset();
+
+      io_state.publish_last_checkpoint="json_build_start";
+      ISSX_DataHandler::JsonBuildStart(forensic,"json_build_start");
       out_stage_json=BuildStageSummaryJson(io_state);
       io_state.publish_stage_json_bytes=StringLen(out_stage_json);
+      io_state.publish_payload_bytes_attempted=ISSX_DataHandler::EstimateUtf8Bytes(out_stage_json);
+      io_state.publish_payload_bytes_written=io_state.publish_payload_bytes_attempted;
+      io_state.publish_last_checkpoint="json_stage_payload_ready";
 
-      io_state.publish_last_checkpoint="publish_build_universe_json";
+      io_state.publish_last_checkpoint="json_symbol_serialize_start";
+      if(ArraySize(io_state.symbols)>0)
+        {
+         io_state.publish_last_serialized_symbol=io_state.symbols[ArraySize(io_state.symbols)-1].symbol_norm;
+         ISSX_DataHandler::JsonSymbolSerializeStart(forensic,io_state.publish_last_serialized_symbol);
+         ISSX_DataHandler::JsonSymbolSerializeComplete(forensic,io_state.publish_last_serialized_symbol);
+         io_state.publish_last_successful_symbol=forensic.last_successful_symbol;
+        }
+
       out_broker_dump_json=BuildUniverseDumpJson(io_state,firm_id,writer_boot_id,writer_nonce);
       io_state.publish_universe_json_bytes=StringLen(out_broker_dump_json);
       io_state.publish_symbols_serialized=ArraySize(io_state.symbols);
+      io_state.publish_last_checkpoint="json_universe_payload_ready";
 
-      io_state.publish_last_checkpoint="publish_build_debug_json";
       out_debug_snapshot_json=BuildDebugSnapshotJson(io_state,firm_id,writer_boot_id,writer_nonce);
       io_state.publish_debug_json_bytes=StringLen(out_debug_snapshot_json);
+      io_state.publish_last_checkpoint="json_debug_payload_ready";
+      ISSX_DataHandler::JsonBuildComplete(forensic,out_stage_json,"json_build_complete");
 
       if(out_stage_json=="")
         {
-         io_state.publish_last_checkpoint="publish_fail_stage_json_empty";
+         io_state.publish_last_checkpoint="json_fail";
          io_state.publish_last_error="stage_json_empty";
          return false;
         }
       if(out_broker_dump_json=="")
         {
-         io_state.publish_last_checkpoint="publish_fail_universe_json_empty";
+         io_state.publish_last_checkpoint="json_fail";
          io_state.publish_last_error="universe_json_empty";
          return false;
         }
       if(out_debug_snapshot_json=="")
         {
-         io_state.publish_last_checkpoint="publish_fail_debug_json_empty";
+         io_state.publish_last_checkpoint="json_fail";
          io_state.publish_last_error="debug_json_empty";
          return false;
         }
@@ -3177,6 +3152,12 @@ public:
       j.NameInt("phase_id",(int)state.scheduler.phase_id);
       j.NameInt("sequence_no",state.sequence_no);
       j.NameInt("minute_id",state.minute_id);
+      j.NameString("publish_last_checkpoint",state.publish_last_checkpoint);
+      j.NameString("publish_last_error",state.publish_last_error);
+      j.NameString("last_serialized_symbol",state.publish_last_serialized_symbol);
+      j.NameString("last_successful_symbol",state.publish_last_successful_symbol);
+      j.NameInt("payload_bytes_attempted",state.publish_payload_bytes_attempted);
+      j.NameInt("payload_bytes_written",state.publish_payload_bytes_written);
       j.EndObject();
       return j.ToString();
      }
@@ -3206,7 +3187,7 @@ public:
 
 string ISSX_MarketDiagTag()
   {
-   return "market_diag_v174f";
+   return "market_diag_v175a";
   }
 
 
