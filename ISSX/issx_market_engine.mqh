@@ -7,7 +7,7 @@
 #include <ISSX/issx_persistence.mqh>
 
 // ============================================================================
-// ISSX MARKET ENGINE v1.7.3
+// ISSX MARKET ENGINE v1.705
 // EA1 shared engine for MarketStateCore.
 //
 // HARDENING NOTES
@@ -24,7 +24,7 @@
 //   owner runtime/persistence layer
 // ============================================================================
 
-#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.7.3"
+#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.705"
 
 // ============================================================================
 // SECTION 01: EA1 PHASE IDS
@@ -75,7 +75,7 @@ enum ISSX_EA1_SessionPhase
    issx_ea1_session_rollover
   };
 
-// Legacy owner-side bridge for pre-v1.7.3 EA1 session labels.
+// Legacy owner-side bridge for pre-v1.705 EA1 session labels.
 #define issx_ea1_session_preopen    issx_ea1_session_pre_open
 #define issx_ea1_session_transition issx_ea1_session_rollover
 
@@ -970,6 +970,15 @@ public:
 // ============================================================================
 // SECTION 05: MARKET ENGINE
 // ============================================================================
+
+int g_ea1_last_discovery_minute;
+int g_ea1_last_skip_log_minute;
+bool g_ea1_last_discovery_attempted;
+bool g_ea1_last_discovery_skipped;
+bool g_ea1_last_discovery_no_change;
+int g_ea1_last_discovery_symbols;
+long g_ea1_last_discovery_elapsed_ms;
+string g_ea1_last_discovery_error;
 
 class ISSX_MarketEngine
   {
@@ -2450,6 +2459,14 @@ public:
       return (out_json!="");
      }
 
+public:
+   static bool LastDiscoveryAttempted() { return g_ea1_last_discovery_attempted; }
+   static bool LastDiscoverySkippedCadence() { return g_ea1_last_discovery_skipped; }
+   static bool LastDiscoveryNoChange() { return g_ea1_last_discovery_no_change; }
+   static int  LastDiscoverySymbols() { return g_ea1_last_discovery_symbols; }
+   static long LastDiscoveryElapsedMs() { return g_ea1_last_discovery_elapsed_ms; }
+   static string LastDiscoveryError() { return g_ea1_last_discovery_error; }
+
    static bool StageBoot(ISSX_EA1_State &io_state)
      {
       InitState(io_state);
@@ -2460,6 +2477,15 @@ public:
       io_state.discovery_minute_id=-1;
       io_state.resumed_from_persistence=false;
       io_state.stage_publishability_state="not_ready";
+
+      g_ea1_last_discovery_minute=-1;
+      g_ea1_last_skip_log_minute=-1;
+      g_ea1_last_discovery_attempted=false;
+      g_ea1_last_discovery_skipped=false;
+      g_ea1_last_discovery_no_change=false;
+      g_ea1_last_discovery_symbols=ArraySize(io_state.symbols);
+      g_ea1_last_discovery_elapsed_ms=0;
+      g_ea1_last_discovery_error="";
       return true;
      }
 
@@ -2482,13 +2508,38 @@ public:
                           const string writer_nonce,
                           const int max_symbols=0)
      {
-      io_state.minute_id=(int)(TimeCurrent()/60);
+      int current_minute=(int)(TimeCurrent()/60);
+      io_state.minute_id=current_minute;
 
-      const bool discovery_due=(io_state.sequence_no<=0 || io_state.discovery_minute_id!=io_state.minute_id);
-      if(discovery_due)
+      g_ea1_last_discovery_attempted=false;
+      g_ea1_last_discovery_skipped=false;
+      g_ea1_last_discovery_no_change=false;
+      g_ea1_last_discovery_elapsed_ms=0;
+      g_ea1_last_discovery_error="";
+
+      if(g_ea1_last_discovery_minute==current_minute)
         {
+         if(g_ea1_last_skip_log_minute!=current_minute)
+           {
+            g_ea1_last_discovery_skipped=true;
+            g_ea1_last_skip_log_minute=current_minute;
+           }
+        }
+      else
+        {
+         g_ea1_last_discovery_attempted=true;
+         int symbols_before=ArraySize(io_state.symbols);
+         ulong t0=GetTickCount();
          RefreshDiscoveryOnly(io_state);
-         io_state.discovery_minute_id=io_state.minute_id;
+         ulong elapsed_tick=(GetTickCount()-t0);
+         g_ea1_last_discovery_elapsed_ms=(long)elapsed_tick;
+         g_ea1_last_discovery_symbols=ArraySize(io_state.symbols);
+         g_ea1_last_discovery_no_change=(symbols_before==g_ea1_last_discovery_symbols);
+         g_ea1_last_discovery_minute=current_minute;
+         io_state.discovery_minute_id=current_minute;
+         g_ea1_last_skip_log_minute=-1;
+         if(g_ea1_last_discovery_symbols<=0)
+            g_ea1_last_discovery_error="no_symbols_discovered";
         }
 
       if(max_symbols>0 && ArraySize(io_state.symbols)>max_symbols)

@@ -1,5 +1,5 @@
 ﻿#property strict
-#property version   "1.703"
+#property version   "1.705"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
@@ -622,11 +622,27 @@ bool ISSX_RunKernelCycle()
 
    ISSX_SetCheckpoint("ea1_stage_slice_enter");
    g_debug.Write("INFO","ea1","stage_slice","enter");
+   const int prior_discovery_minute=g_ea1.discovery_minute_id;
+   const int prior_symbol_count=ArraySize(g_ea1.symbols);
+   const ulong discovery_t0=GetTickCount();
    if(!ISSX_MarketEngine::StageSlice(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,InpEA1MaxSymbols))
      {
+      g_debug.Write("WARN","ea1_market","discovery_failed","reason=stage_slice_returned_false");
       g_debug.Write("ERROR","ea1","stage_slice_failed","returned false");
       return false;
      }
+
+   if(g_ea1.discovery_minute_id!=prior_discovery_minute)
+     {
+      string discovery_msg="symbols="+IntegerToString(ArraySize(g_ea1.symbols))+
+                           " elapsed_ms="+IntegerToString((int)(GetTickCount()-discovery_t0));
+      if(ArraySize(g_ea1.symbols)==prior_symbol_count)
+         discovery_msg+=" no_change=true";
+      g_debug.Write("INFO","ea1_market","discovery_attempt","minute_id="+IntegerToString(g_ea1.minute_id));
+      g_debug.Write("INFO","ea1_market","discovery_success",discovery_msg);
+     }
+   else
+      g_debug.Write("INFO","ea1_market","discovery_skipped","reason=cadence_same_minute minute_id="+IntegerToString(g_ea1.minute_id));
 
    g_debug.Write("INFO","ea1","stage_slice_ok","symbols="+IntegerToString(ArraySize(g_ea1.symbols)));
 
@@ -817,6 +833,8 @@ int OnInit()
    g_debug.Write("INFO","feature_state","ui_projection","requested="+ISSX_OnOff(req_ui_projection)+" effective="+ISSX_OnOff(eff_ui_projection)+" reason="+(eff_ui_projection?"active":(InpMinimalDebugMode?"minimal_debug_mode":"gate_off")));
 
    g_debug.Write("INFO","feature_state","ea1_market","requested="+ISSX_OnOff(InpEnableEA1)+" effective="+ISSX_OnOff(g_ea_enabled[0])+" reason="+((InpIsolationMode && !InpEnableEA1)?"isolation_forced_on":(g_ea_enabled[0]?"active":"requested_off")));
+   g_debug.Write("INFO","stage_state","ea1_market","requested="+ISSX_OnOff(InpEnableEA1));
+   g_debug.Write("INFO","stage_state","ea1_market","effective="+ISSX_OnOff(g_ea_enabled[0]));
    g_debug.Write("INFO","feature_state","ea2_history","requested="+ISSX_OnOff(InpEnableEA2)+" effective="+ISSX_OnOff(g_ea_enabled[1])+" reason="+(g_ea_enabled[1]?"active":(InpIsolationMode?"isolation_forced_off":"requested_off")));
    g_debug.Write("INFO","feature_state","ea3_selection","requested="+ISSX_OnOff(InpEnableEA3)+" effective="+ISSX_OnOff(g_ea_enabled[2])+" reason="+(g_ea_enabled[2]?"active":(InpIsolationMode?"isolation_forced_off":"requested_off")));
    g_debug.Write("INFO","feature_state","ea4_correlation","requested="+ISSX_OnOff(InpEnableEA4)+" effective="+ISSX_OnOff(g_ea_enabled[3])+" reason="+(g_ea_enabled[3]?"active":(InpIsolationMode?"isolation_forced_off":"requested_off")));
