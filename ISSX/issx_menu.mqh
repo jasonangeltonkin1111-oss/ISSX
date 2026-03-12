@@ -3,7 +3,7 @@
 
 #define ISSX_MENU_ROWS 5
 
-// ISSX MENU ENGINE v1.7.3
+// ISSX MENU ENGINE v1.705
 
 class ISSX_MenuEngine
   {
@@ -85,22 +85,44 @@ public:
    bool HandleClick(const string object_name,bool &enabled[],const bool allow_toggle=true)
      {
       m_last_error="";
-      for(int i=0;i<ISSX_MENU_ROWS;i++)
+      if(StringLen(m_prefix)==0)
         {
-         string row=IntegerToString(i+1);
-         if(object_name==Obj("TOGGLE_"+row))
-           {
-            if(!allow_toggle)
-              {
-               m_last_error="isolation_mode_locked";
-               return false;
-              }
-            enabled[i]=!enabled[i];
-            return true;
-           }
+         m_last_error="prefix_missing";
+         return false;
         }
-      m_last_error="object_not_owned";
-      return false;
+
+      string owned_prefix=m_prefix+"_";
+      int owned_prefix_len=StringLen(owned_prefix);
+      if(StringLen(object_name)<=owned_prefix_len || StringSubstr(object_name,0,owned_prefix_len)!=owned_prefix)
+        {
+         m_last_error="object_not_owned";
+         return false;
+        }
+
+      string owned_key=StringSubstr(object_name,owned_prefix_len);
+      if(StringFind(owned_key,"TOGGLE_")!=0)
+        {
+         m_last_error="object_not_owned";
+         return false;
+        }
+
+      string row_token=StringSubstr(owned_key,7);
+      int row=(int)StringToInteger(row_token);
+      if(StringLen(row_token)==0 || IntegerToString(row)!=row_token || row<1 || row>ISSX_MENU_ROWS)
+        {
+         m_last_error="invalid_toggle_state";
+         return false;
+        }
+
+      if(!allow_toggle)
+        {
+         m_last_error="isolation_locked";
+         return false;
+        }
+
+      int idx=row-1;
+      enabled[idx]=!enabled[idx];
+      return true;
      }
 
    string LastError() const { return m_last_error; }

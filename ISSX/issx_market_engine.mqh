@@ -7,7 +7,7 @@
 #include <ISSX/issx_persistence.mqh>
 
 // ============================================================================
-// ISSX MARKET ENGINE v1.7.3
+// ISSX MARKET ENGINE v1.705
 // EA1 shared engine for MarketStateCore.
 //
 // HARDENING NOTES
@@ -24,7 +24,7 @@
 //   owner runtime/persistence layer
 // ============================================================================
 
-#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.7.3"
+#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.705"
 
 // ============================================================================
 // SECTION 01: EA1 PHASE IDS
@@ -75,7 +75,7 @@ enum ISSX_EA1_SessionPhase
    issx_ea1_session_rollover
   };
 
-// Legacy owner-side bridge for pre-v1.7.3 EA1 session labels.
+// Legacy owner-side bridge for pre-v1.705 EA1 session labels.
 #define issx_ea1_session_preopen    issx_ea1_session_pre_open
 #define issx_ea1_session_transition issx_ea1_session_rollover
 
@@ -752,6 +752,13 @@ struct ISSX_EA1_State
    int                      dump_sequence_no;
    int                      dump_minute_id;
    int                      discovery_minute_id;
+   bool                     discovery_attempted;
+   bool                     discovery_skipped;
+   bool                     discovery_success;
+   bool                     discovery_no_change;
+   int                      discovery_elapsed_ms;
+   int                      discovery_skip_streak;
+   string                   discovery_status_reason;
    bool                     stage_minimum_ready_flag;
    string                   stage_publishability_state;
    string                   dependency_block_reason;
@@ -779,6 +786,13 @@ struct ISSX_EA1_State
       dump_sequence_no=0;
       dump_minute_id=0;
       discovery_minute_id=-1;
+      discovery_attempted=false;
+      discovery_skipped=false;
+      discovery_success=false;
+      discovery_no_change=false;
+      discovery_elapsed_ms=0;
+      discovery_skip_streak=0;
+      discovery_status_reason="none";
       stage_minimum_ready_flag=false;
       stage_publishability_state="not_ready";
       dependency_block_reason="none";
@@ -974,6 +988,8 @@ public:
 class ISSX_MarketEngine
   {
 private:
+   static int m_last_discovery_minute;
+
    static string SafeUpper(const string s)
      {
       string r=s;
@@ -2227,6 +2243,7 @@ public:
       io_state.comparator_registry_hash=ISSX_Hash::HashStringHex("ea1_registry_"+ISSX_MARKET_ENGINE_MODULE_VERSION);
       io_state.policy_fingerprint=ISSX_Hash::HashStringHex("ea1_policy_"+ISSX_MARKET_ENGINE_MODULE_VERSION);
       io_state.fingerprint_algorithm_version="sha256_hex_v1";
+      m_last_discovery_minute=-1;
      }
 
    static bool DiscoverUniverse(ISSX_EA1_State &io_state,
@@ -2428,7 +2445,14 @@ public:
 
    static void AdvanceOneCycle(ISSX_EA1_State &io_state)
      {
-      RefreshDiscoveryOnly(io_state);
+      io_state.minute_id=(int)(TimeCurrent()/60);
+      const bool discovery_due=(m_last_discovery_minute<0 || io_state.minute_id!=m_last_discovery_minute);
+      if(discovery_due)
+        {
+         RefreshDiscoveryOnly(io_state);
+         io_state.discovery_minute_id=io_state.minute_id;
+         m_last_discovery_minute=io_state.minute_id;
+        }
       BuildIdentityPhase(io_state);
       BuildRuntimePhase(io_state);
       BuildClassificationPhase(io_state);
@@ -2458,6 +2482,7 @@ public:
       io_state.dump_sequence_no=0;
       io_state.dump_minute_id=io_state.minute_id;
       io_state.discovery_minute_id=-1;
+      m_last_discovery_minute=-1;
       io_state.resumed_from_persistence=false;
       io_state.stage_publishability_state="not_ready";
       return true;
@@ -2483,12 +2508,33 @@ public:
                           const int max_symbols=0)
      {
       io_state.minute_id=(int)(TimeCurrent()/60);
+      io_state.discovery_attempted=false;
+      io_state.discovery_skipped=false;
+      io_state.discovery_success=false;
+      io_state.discovery_no_change=false;
+      io_state.discovery_elapsed_ms=0;
+      io_state.discovery_status_reason="none";
 
-      const bool discovery_due=(io_state.sequence_no<=0 || io_state.discovery_minute_id!=io_state.minute_id);
+      const bool discovery_due=(m_last_discovery_minute<0 || io_state.minute_id!=m_last_discovery_minute);
       if(discovery_due)
         {
-         RefreshDiscoveryOnly(io_state);
+         io_state.discovery_attempted=true;
+         const string prior_fingerprint=io_state.universe.broker_universe_fingerprint;
+         const uint discovery_start_ms=GetTickCount();
+         const bool discovered=DiscoverUniverse(io_state,false,0);
+         io_state.discovery_elapsed_ms=(int)(GetTickCount()-discovery_start_ms);
+         io_state.discovery_success=discovered;
+         io_state.discovery_no_change=(discovered && prior_fingerprint!="" && prior_fingerprint==io_state.universe.broker_universe_fingerprint);
+         io_state.discovery_status_reason=(discovered ? (io_state.discovery_no_change ? "no_change" : "ok") : "discover_universe_empty");
+         io_state.discovery_skip_streak=0;
          io_state.discovery_minute_id=io_state.minute_id;
+         m_last_discovery_minute=io_state.minute_id;
+        }
+      else
+        {
+         io_state.discovery_skipped=true;
+         io_state.discovery_status_reason="cadence_same_minute";
+         io_state.discovery_skip_streak++;
         }
 
       if(max_symbols>0 && ArraySize(io_state.symbols)>max_symbols)
@@ -2624,5 +2670,7 @@ string ISSX_MarketEngineDebugSignature()
   {
    return ISSX_MarketDiagTag();
   }
+
+int ISSX_MarketEngine::m_last_discovery_minute=-1;
 
 #endif // __ISSX_MARKET_ENGINE_MQH__
