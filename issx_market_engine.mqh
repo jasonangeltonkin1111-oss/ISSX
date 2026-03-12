@@ -1,4 +1,4 @@
-#ifndef __ISSX_MARKET_ENGINE_MQH__
+﻿#ifndef __ISSX_MARKET_ENGINE_MQH__
 #define __ISSX_MARKET_ENGINE_MQH__
 
 #include <ISSX/issx_core.mqh>
@@ -8,7 +8,7 @@
 #include <ISSX/issx_data_handler.mqh>
 
 // ============================================================================
-// ISSX MARKET ENGINE v1.715
+// ISSX MARKET ENGINE v1.718
 // EA1 shared engine for MarketStateCore.
 //
 // HARDENING NOTES
@@ -25,7 +25,7 @@
 //   owner runtime/persistence layer
 // ============================================================================
 
-#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.715"
+#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.718"
 
 enum ISSX_EA1_RuntimeState
   {

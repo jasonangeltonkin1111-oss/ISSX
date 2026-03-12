@@ -1,5 +1,5 @@
 ﻿#property strict
-#property version   "1.717"
+#property version   "1.718"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
@@ -17,6 +17,7 @@
 #include <ISSX/issx_ui.mqh>
 #include <ISSX/issx_ui_test.mqh>
 #include <ISSX/issx_debug_engine.mqh>
+#include <ISSX/issx_universe_manager.mqh>
 
 input string InpFirmId                  = "default_firm";
 input bool   InpIncludeCustomSymbols    = false;
@@ -60,6 +61,7 @@ ISSX_EA2_State      g_ea2;
 ISSX_EA3_State      g_ea3;
 ISSX_EA4_State      g_ea4;
 ISSX_EA5_State      g_ea5;
+ISSX_UniverseManager g_universe;
 
 ISSX_LockLease      g_lock;
 string              g_boot_id                   = "";
@@ -358,14 +360,14 @@ bool ISSX_PersistStageJson(const ISSX_StageId stage_id,
 
 int ISSX_CopyEA1Symbols(string &symbols[])
   {
-   ArrayResize(symbols,0);
+   return g_universe.GetAllSymbols(symbols);
+  }
+
+int ISSX_SyncUniverseFromEA1()
+  {
    const int n=ArraySize(g_ea1.symbols);
-   if(n<=0)
-      return 0;
-
-   if(ArrayResize(symbols,n)!=n)
-      return 0;
-
+   string symbols[];
+   ArrayResize(symbols,n);
    int used=0;
    for(int i=0;i<n;i++)
      {
@@ -376,9 +378,49 @@ int ISSX_CopyEA1Symbols(string &symbols[])
          continue;
       symbols[used++]=s;
      }
-
    ArrayResize(symbols,used);
-   return used;
+   g_universe.SetUniverse(symbols);
+   return g_universe.SortUniverse();
+  }
+
+int ISSX_SyncFrontierFromEA3()
+  {
+   const int n=ArraySize(g_ea3.frontier);
+   string frontier[];
+   ArrayResize(frontier,n);
+   int used=0;
+   for(int i=0;i<n;i++)
+     {
+      string s=g_ea3.frontier[i].symbol_norm;
+      if(StringLen(s)==0)
+         s=g_ea3.frontier[i].symbol_raw;
+      if(StringLen(s)==0)
+         continue;
+      frontier[used++]=s;
+     }
+   ArrayResize(frontier,used);
+   return g_universe.SetFrontier(frontier);
+  }
+
+int ISSX_SyncSelectedFromEA5()
+  {
+   const int n=ArraySize(g_ea5.symbols);
+   string selected[];
+   ArrayResize(selected,n);
+   int used=0;
+   for(int i=0;i<n;i++)
+     {
+      if(!g_ea5.symbols[i].quality_state.selected_final)
+         continue;
+      string s=g_ea5.symbols[i].symbol_norm;
+      if(StringLen(s)==0)
+         s=g_ea5.symbols[i].symbol_raw;
+      if(StringLen(s)==0)
+         continue;
+      selected[used++]=s;
+     }
+   ArrayResize(selected,used);
+   return g_universe.SetSelected(selected);
   }
 
 string ISSX_StageAlias(const ISSX_StageId stage_id)
@@ -1130,8 +1172,9 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
    }
 
    string ea1_symbols[];
+   const int canonical_universe_count=ISSX_SyncUniverseFromEA1();
    const int ea1_count=ISSX_CopyEA1Symbols(ea1_symbols);
-   g_debug.Write("INFO","ea1","symbol_copy","count="+IntegerToString(ea1_count));
+   g_debug.Write("INFO","ea1","symbol_copy","count="+IntegerToString(ea1_count)+" canonical="+IntegerToString(canonical_universe_count));
 
    if(ea1_count<=0)
      {
@@ -1188,6 +1231,7 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       ISSX_SetCheckpoint("ea3_stage_slice_start");
       g_debug.Write("INFO","ea3","stage_slice","start");
       ISSX_SelectionEngine::StageSlice(g_firm_id,g_ea1,g_ea2,g_ea3);
+      ISSX_SyncFrontierFromEA3();
       string ea3_debug="";
       ISSX_SelectionEngine::StagePublish(g_ea3,stage_json,ea3_debug);
       ISSX_ProjectEA3(stage_json,ea3_debug);
@@ -1244,6 +1288,8 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       ISSX_SetCheckpoint("ea5_build_from_inputs");
       g_debug.Write("INFO","ea5","build_from_inputs","start");
       ISSX_Contracts::BuildFromInputs(g_ea5,g_ea1,g_ea2,g_ea3,optional_intel);
+      const int selected_count=ISSX_SyncSelectedFromEA5();
+      g_debug.Write("INFO","ea5","selected_sync","count="+IntegerToString(selected_count));
 
       const long current_minute_id=ISSX_CurrentKernelMinuteId();
       const bool ea5_export_due=(!g_bootstrapped || ISSX_IsEA5ExportDue(current_minute_id));
@@ -1529,7 +1575,7 @@ void OnTimer()
       g_debug.Write("INFO","timer","elapsed_us","value="+ISSX_Util::ULongToStringX(elapsed_us));
 
 
-   g_ui.Render(g_debug,"1.717",g_boot_id,g_timer_pulse_count,
+   g_ui.Render(g_debug,"1.718",g_boot_id,g_timer_pulse_count,
                Config.GetBool("minimal_debug_mode"),
                Config.GetBool("isolation_mode"),
                (Config.GetBool("runtime_scheduler_enabled")?"on":"off"),
