@@ -7,7 +7,7 @@
 #include <ISSX/issx_persistence.mqh>
 
 // ============================================================================
-// ISSX MARKET ENGINE v1.7.3
+// ISSX MARKET ENGINE v1.705
 // EA1 shared engine for MarketStateCore.
 //
 // HARDENING NOTES
@@ -24,7 +24,7 @@
 //   owner runtime/persistence layer
 // ============================================================================
 
-#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.7.3"
+#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.705"
 
 // ============================================================================
 // SECTION 01: EA1 PHASE IDS
@@ -75,7 +75,7 @@ enum ISSX_EA1_SessionPhase
    issx_ea1_session_rollover
   };
 
-// Legacy owner-side bridge for pre-v1.7.3 EA1 session labels.
+// Legacy owner-side bridge for pre-v1.705 EA1 session labels.
 #define issx_ea1_session_preopen    issx_ea1_session_pre_open
 #define issx_ea1_session_transition issx_ea1_session_rollover
 
@@ -2450,6 +2450,7 @@ public:
       return (out_json!="");
      }
 
+public:
    static bool StageBoot(ISSX_EA1_State &io_state)
      {
       InitState(io_state);
@@ -2460,6 +2461,7 @@ public:
       io_state.discovery_minute_id=-1;
       io_state.resumed_from_persistence=false;
       io_state.stage_publishability_state="not_ready";
+
       return true;
      }
 
@@ -2482,13 +2484,14 @@ public:
                           const string writer_nonce,
                           const int max_symbols=0)
      {
-      io_state.minute_id=(int)(TimeCurrent()/60);
+      int current_minute=(int)(TimeCurrent()/60);
+      io_state.minute_id=current_minute;
 
-      const bool discovery_due=(io_state.sequence_no<=0 || io_state.discovery_minute_id!=io_state.minute_id);
+      const bool discovery_due=(io_state.sequence_no<=0 || io_state.discovery_minute_id!=current_minute);
       if(discovery_due)
         {
          RefreshDiscoveryOnly(io_state);
-         io_state.discovery_minute_id=io_state.minute_id;
+         io_state.discovery_minute_id=current_minute;
         }
 
       if(max_symbols>0 && ArraySize(io_state.symbols)>max_symbols)
