@@ -21,7 +21,7 @@
 
 #define ISSX_ENGINE_NAME                              "ISSX"
 #define ISSX_ENGINE_FAMILY                            "ISSX_PIPELINE"
-#define ISSX_ENGINE_VERSION                           "1.732"
+#define ISSX_ENGINE_VERSION                           "1.733"
 #define ISSX_SCHEMA_VERSION                           "1.718"
 #define ISSX_SCHEMA_EPOCH                             10702
 #define ISSX_STORAGE_VERSION                          1721
@@ -2445,6 +2445,11 @@ private:
    int    m_depth;
 
 public:
+   ISSX_JsonWriter()
+     {
+      Reset();
+     }
+
    static string Escape(const string s)
      {
       return ISSX_Util::EscapeJson(s);

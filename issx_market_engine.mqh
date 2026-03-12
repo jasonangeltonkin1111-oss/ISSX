@@ -2285,6 +2285,7 @@ private:
                                        const string writer_nonce)
      {
       ISSX_JsonWriter j;
+      j.Reset();
       j.BeginObject();
       j.NameString("stage_alias",ISSX_OperatorSurface::StageAlias(issx_stage_ea1));
       j.NameString("internal_stage_id","ea1");
@@ -2472,45 +2473,28 @@ private:
    static string BuildStageSummaryJson(const ISSX_EA1_State &state)
      {
       ISSX_JsonWriter j;
+      j.Reset();
+      datetime ts=TimeTradeServer();
+      if(ts<=0)
+         ts=TimeCurrent();
+      const string hydration_state=(state.hydration_complete ? "complete" :
+                                    ((state.hydration_processed>0 || state.hydration_total>0) ? "in_progress" : "not_started"));
       j.BeginObject();
+      j.NameString("schema_version",ISSX_SCHEMA_VERSION);
+      j.NameString("version",ISSX_ENGINE_VERSION);
+      j.NameString("server_time",TimeToString(ts,TIME_DATE|TIME_SECONDS));
       j.NameString("stage_alias",ISSX_OperatorSurface::StageAlias(issx_stage_ea1));
       j.NameString("internal_stage_id","ea1");
-      j.NameInt("minute_id",state.minute_id);
-      j.NameInt("sequence_no",state.sequence_no);
-      j.NameBool("stage_minimum_ready_flag",state.stage_minimum_ready_flag);
-      j.NameString("stage_publishability_state",StagePublishabilityText(state.stage_publishability_state));
-      j.NameBool("degraded_flag",state.degraded_flag);
-      j.NameBool("publishable",state.publishable);
-      j.NameString("dependency_block_reason",state.dependency_block_reason);
-      j.NameString("debug_weak_link_code",state.debug_weak_link_code);
-      j.NameInt("discovery_minute_id",state.discovery_minute_id);
-      j.NameBool("discovery_attempted",state.discovery_attempted);
-      j.NameBool("discovery_skipped",state.discovery_skipped);
-      j.NameBool("discovery_success",state.discovery_success);
-      j.NameBool("discovery_no_change",state.discovery_no_change);
-      j.NameInt("discovery_elapsed_ms",state.discovery_elapsed_ms);
-      j.NameInt("discovery_skip_streak",state.discovery_skip_streak);
-      j.NameString("discovery_status_reason",state.discovery_status_reason);
       j.NameString("ea1_runtime_state",ISSX_EA1_RuntimeStateText(state.runtime_state));
+      j.NameString("stage_publishability_state",StagePublishabilityText(state.stage_publishability_state));
+      j.NameString("stage_reason",state.dependency_block_reason);
+      j.NameInt("symbol_count",ArraySize(state.symbols));
       j.NameInt("hydration_processed",state.hydration_processed);
       j.NameInt("hydration_total",state.hydration_total);
       j.NameInt("hydration_remaining",state.hydration_remaining);
-      j.NameInt("hydration_window_size",state.hydration_window_size);
-      j.NameInt("hydration_window_start",state.hydration_window_start);
-      j.NameInt("hydration_window_end",state.hydration_window_end);
-      j.NameInt("hydration_windows_completed",state.hydration_windows_completed);
-      j.NameInt("hydration_full_passes",state.hydration_full_passes);
-      j.NameBool("hydration_complete",state.hydration_complete);
-      j.NameBool("deterministic_sort_applied",state.deterministic_sort_applied);
-      j.NameInt("deterministic_sorted_count",state.deterministic_sorted_count);
-      j.NameString("deterministic_sort_basis",state.deterministic_sort_basis);
-      j.NameInt("broker_universe",state.universe.broker_universe);
-      j.NameInt("eligible_universe",state.universe.eligible_universe);
-      j.NameInt("active_universe",state.universe.active_universe);
-      j.NameInt("rankable_universe",state.universe.rankable_universe);
-      j.NameInt("publishable_universe",state.universe.publishable_universe);
-      j.NameInt("changed_symbol_count",state.deltas.changed_symbol_count);
-      j.NameString("changed_symbol_ids_compact",state.deltas.changed_symbol_ids_compact);
+      j.NameString("hydration_state",hydration_state);
+      j.NameString("discovery_status",state.discovery_status_reason);
+      j.NameString("publish_status",state.publish_last_checkpoint);
       j.EndObject();
       return j.ToString();
      }
@@ -3207,8 +3191,8 @@ public:
       io_state.publish_last_checkpoint="publish_build_debug_json_success";
       Print("ISSX: ea1_publish checkpoint=publish_build_debug_json_success bytes=",IntegerToString(io_state.publish_debug_json_bytes));
 
-      io_state.publish_last_checkpoint="publish_build_universe_dump_start";
-      Print("ISSX: ea1_publish checkpoint=publish_build_universe_dump_start symbols=",IntegerToString(ArraySize(io_state.symbols)));
+      io_state.publish_last_checkpoint="publish_build_universe_json_start";
+      Print("ISSX: ea1_publish checkpoint=publish_build_universe_json_start symbols=",IntegerToString(ArraySize(io_state.symbols)));
       if(ArraySize(io_state.symbols)>0)
         {
          io_state.publish_last_serialized_symbol=io_state.symbols[ArraySize(io_state.symbols)-1].normalized_identity.symbol_norm;
@@ -3221,22 +3205,27 @@ public:
       io_state.publish_universe_json_bytes=StringLen(out_broker_dump_json);
       if(out_broker_dump_json=="")
         {
-         io_state.publish_last_checkpoint="publish_build_universe_dump_fail";
+         io_state.publish_last_checkpoint="publish_build_universe_json_fail";
          io_state.publish_last_error=ISSX_ErrorToString(ISSX_ERR_JSON_BUILD);
          io_state.publish_elapsed_ms=(int)(GetTickCount()-t0);
-         Print("ISSX: ea1_publish checkpoint=publish_build_universe_dump_fail reason=json_build");
-         return false;
+         Print("ISSX: ea1_publish checkpoint=publish_build_universe_json_fail reason=json_build optional=1");
+         out_broker_dump_json="";
         }
-      if(ISSX_DataHandler::EstimateUtf8Bytes(out_broker_dump_json)>ISSX_EA1_PUBLISH_UNIVERSE_JSON_MAX_BYTES)
+      else if(ISSX_DataHandler::EstimateUtf8Bytes(out_broker_dump_json)>ISSX_EA1_PUBLISH_UNIVERSE_JSON_MAX_BYTES)
         {
-         io_state.publish_last_checkpoint="publish_build_universe_dump_fail";
+         io_state.publish_last_checkpoint="publish_build_universe_json_fail";
          io_state.publish_last_error="json_too_large_universe";
          io_state.publish_elapsed_ms=(int)(GetTickCount()-t0);
-         Print("ISSX: ea1_publish checkpoint=publish_build_universe_dump_fail reason=json_too_large_universe bytes=",IntegerToString(io_state.publish_universe_json_bytes));
-         return false;
+         Print("ISSX: ea1_publish checkpoint=publish_build_universe_json_fail reason=json_too_large_universe bytes=",IntegerToString(io_state.publish_universe_json_bytes)," optional=1");
+         out_broker_dump_json="";
+         io_state.publish_universe_json_bytes=0;
         }
-      io_state.publish_last_checkpoint="publish_build_universe_dump_success";
-      Print("ISSX: ea1_publish checkpoint=publish_build_universe_dump_success bytes=",IntegerToString(io_state.publish_universe_json_bytes));
+      else
+        {
+         io_state.publish_last_checkpoint="publish_build_universe_json_success";
+         io_state.publish_last_error=ISSX_ErrorToString(ISSX_ERR_NONE);
+         Print("ISSX: ea1_publish checkpoint=publish_build_universe_json_success bytes=",IntegerToString(io_state.publish_universe_json_bytes));
+        }
 
       io_state.publish_payload_bytes_attempted=ISSX_DataHandler::EstimateUtf8Bytes(out_stage_json)+
                                                ISSX_DataHandler::EstimateUtf8Bytes(out_debug_snapshot_json)+
@@ -3267,6 +3256,7 @@ public:
                                         const string writer_nonce)
      {
       ISSX_JsonWriter j;
+      j.Reset();
       j.BeginObject();
       j.NameString("stage_alias",ISSX_OperatorSurface::StageAlias(issx_stage_ea1));
       j.NameString("internal_stage_id","ea1");
