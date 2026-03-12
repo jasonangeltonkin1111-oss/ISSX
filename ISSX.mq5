@@ -1,5 +1,5 @@
 ﻿#property strict
-#property version   "1.711"
+#property version   "1.712"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
@@ -463,6 +463,12 @@ bool ISSX_ProjectEA1(const string stage_json,
    out_reason="ok";
    ISSX_ResetEA1PublishStatus();
 
+   g_debug.Write("INFO","ea1_publish","publish_prepare_operator_paths_start",
+                 "checkpoint=publish_prepare_operator_paths_start root="+g_operator_root_relative+" json="+g_market_json_relative_path+" log="+g_market_log_relative_path);
+   const bool operator_paths_ok=(StringLen(g_market_json_relative_path)>0 && StringLen(g_market_log_relative_path)>0);
+   g_debug.Write((operator_paths_ok?"INFO":"ERROR"),"ea1_publish",(operator_paths_ok?"publish_prepare_operator_paths_ok":"publish_prepare_operator_paths_fail"),
+                 "json_path="+g_market_json_relative_path+" log_path="+g_market_log_relative_path+" reason="+(operator_paths_ok?"ok":"empty_operator_path"));
+
    const bool stage_json_ok=(StringLen(stage_json)>2);
    const bool debug_json_ok=(StringLen(debug_snapshot_json)>2);
    const bool universe_json_ok=(StringLen(broker_dump_json)>2);
@@ -471,79 +477,71 @@ bool ISSX_ProjectEA1(const string stage_json,
    g_last_ea1_debug_json_state=(debug_json_ok?"success":"failed");
    g_last_ea1_universe_build_state=(universe_json_ok?"success":"failed");
 
-   g_debug.Write((stage_json_ok?"INFO":"WARN"),"ea1_publish","market_json_build_"+(stage_json_ok?"success":"failed"),"len="+IntegerToString(StringLen(stage_json)));
-   g_debug.Write((debug_json_ok?"INFO":"WARN"),"ea1_publish","market_debug_snapshot_build_"+(debug_json_ok?"success":"failed"),"len="+IntegerToString(StringLen(debug_snapshot_json)));
-   g_debug.Write((universe_json_ok?"INFO":"WARN"),"ea1_publish","market_universe_dump_build_"+(universe_json_ok?"success":"failed"),"len="+IntegerToString(StringLen(broker_dump_json)));
-
-   if(!stage_json_ok || !debug_json_ok || !universe_json_ok)
+   if(!stage_json_ok || !debug_json_ok || !universe_json_ok || !operator_paths_ok)
      {
-      out_reason="build_failed";
+      out_reason="build_or_paths_failed";
       g_last_ea1_publish_state="failed";
       g_last_ea1_publish_reason=out_reason;
+      g_debug.Write("ERROR","ea1_publish","publish_complete_fail",
+                    "reason="+out_reason+" stage_json_len="+IntegerToString(StringLen(stage_json))+" debug_json_len="+IntegerToString(StringLen(debug_snapshot_json))+" market_json_len="+IntegerToString(StringLen(broker_dump_json)));
       return false;
      }
 
    ISSX_StageHeader header;
    ISSX_Manifest manifest;
 
-   ISSX_SeedHeader(header,
-                   issx_stage_ea1,
-                   (long)g_ea1.minute_id,
-                   ArraySize(g_ea1.symbols),
-                   g_ea1.deltas.changed_symbol_count,
-                   g_ea1.degraded_flag,
-                   0,
-                   g_ea1.cohort_fingerprint,
-                   g_ea1.universe.broker_universe_fingerprint,
-                   g_registry.SchemaFingerprintHex());
+   ISSX_SeedHeader(header,issx_stage_ea1,(long)g_ea1.minute_id,ArraySize(g_ea1.symbols),g_ea1.deltas.changed_symbol_count,g_ea1.degraded_flag,0,
+                   g_ea1.cohort_fingerprint,g_ea1.universe.broker_universe_fingerprint,g_registry.SchemaFingerprintHex());
 
    const ISSX_PublishabilityState pub=ISSX_EA1PublishabilityToEnum(g_ea1.stage_publishability_state);
-
-   ISSX_SeedManifest(manifest,
-                     header,
-                     issx_content_partial,
-                     issx_publish_scheduled,
-                     pub,
-                     g_ea1.stage_minimum_ready_flag,
-                     (g_ea1.publishable ? 1 : 0),
-                     (g_ea1.degraded_flag ? 1 : 0));
-
+   ISSX_SeedManifest(manifest,header,issx_content_partial,issx_publish_scheduled,pub,g_ea1.stage_minimum_ready_flag,(g_ea1.publishable ? 1 : 0),(g_ea1.degraded_flag ? 1 : 0));
    manifest.taxonomy_hash=g_ea1.taxonomy_hash;
    manifest.comparator_registry_hash=g_ea1.comparator_registry_hash;
 
+   g_debug.Write("INFO","ea1_publish","publish_internal_write_start","path="+ISSX_PersistencePath::PayloadCurrent(g_firm_id,issx_stage_ea1)+" bytes="+IntegerToString(StringLen(stage_json)));
    const bool stage_write_ok=ISSX_PersistStageJson(issx_stage_ea1,header,manifest,stage_json);
    g_last_ea1_stage_write_state=(stage_write_ok?"success":"failed");
-   g_debug.Write((stage_write_ok?"INFO":"WARN"),"ea1_publish","internal_persistence_write_"+(stage_write_ok?"success":"fail"),"path="+ISSX_PersistencePath::PayloadCurrent(g_firm_id,issx_stage_ea1)+" reason="+(stage_write_ok?"ok":"persist_stage_json_failed"));
+   g_debug.Write((stage_write_ok?"INFO":"ERROR"),"ea1_publish",(stage_write_ok?"publish_internal_write_ok":"publish_internal_write_fail"),
+                 "path="+ISSX_PersistencePath::PayloadCurrent(g_firm_id,issx_stage_ea1)+" reason="+(stage_write_ok?"ok":"persist_stage_json_failed"));
 
    const bool universe_rotate_ok=ISSX_BrokerUniverseDump::RotateCurrentToPrevious(g_firm_id);
    const bool universe_write_ok=ISSX_BrokerUniverseDump::WriteCurrent(g_firm_id,broker_dump_json,manifest,true);
    g_last_ea1_universe_write_state=((universe_rotate_ok && universe_write_ok)?"success":"failed");
-   g_debug.Write(((universe_rotate_ok && universe_write_ok)?"INFO":"WARN"),"ea1_publish","internal_universe_write_"+((universe_rotate_ok && universe_write_ok)?"success":"fail"),"path="+ISSX_BrokerUniverseDump::CurrentPath(g_firm_id));
 
    bool debug_write_ok=true;
    if(InpProjectDebugSnapshots)
       debug_write_ok=ISSX_UI_Test::ProjectStageSnapshot(g_firm_id,issx_stage_ea1,debug_snapshot_json);
    g_last_ea1_debug_write_state=(debug_write_ok?"success":"failed");
-   g_debug.Write((debug_write_ok?"INFO":"WARN"),"ea1_publish",("market_debug_snapshot_write_"+(debug_write_ok?"success":"fail")),"path="+ISSX_PersistencePath::DebugSnapshot(g_firm_id,issx_stage_ea1));
 
+   g_debug.Write("INFO","ea1_publish","publish_operator_market_write_start","path="+g_market_json_relative_path+" bytes="+IntegerToString(StringLen(broker_dump_json)));
+   ResetLastError();
    const bool operator_json_ok=ISSX_FileIO::WriteText(g_market_json_relative_path,broker_dump_json);
+   const int operator_json_err=GetLastError();
    g_last_ea1_root_status_state=(operator_json_ok?"success":"failed");
-   g_debug.Write((operator_json_ok?"INFO":"WARN"),"ea1_publish","market_json_write_"+(operator_json_ok?"success":"fail"),"path="+g_market_json_relative_path);
-   g_debug.Write((operator_json_ok?"INFO":"WARN"),"ea1_publish","market_root_projection_"+(operator_json_ok?"success":"fail"),"path="+g_market_json_relative_path+" reason="+(operator_json_ok?"ok":"operator_write_failed"));
+   g_debug.Write((operator_json_ok?"INFO":"ERROR"),"ea1_publish",(operator_json_ok?"publish_operator_market_write_ok":"publish_operator_market_write_fail"),
+                 "path="+g_market_json_relative_path+" bytes="+IntegerToString(StringLen(broker_dump_json))+" last_error="+IntegerToString(operator_json_err));
 
+   g_debug.Write("INFO","ea1_publish","publish_operator_debug_write_start","src="+g_debug.ActivePath()+" dst="+g_market_log_relative_path);
+   ResetLastError();
    const bool operator_log_projection_ok=ISSX_FileIO::CopyText(g_debug.ActivePath(),g_market_log_relative_path);
+   const int operator_log_err=GetLastError();
    g_last_ea1_root_debug_state=(operator_log_projection_ok?"success":"failed");
-   g_debug.Write((operator_log_projection_ok?"INFO":"WARN"),"ea1_publish","market_log_write_"+(operator_log_projection_ok?"success":"fail"),"path="+g_market_log_relative_path);
-   g_debug.Write((operator_log_projection_ok?"INFO":"WARN"),"ea1_publish","market_debug_projection_"+(operator_log_projection_ok?"success":"fail"),"path="+g_market_log_relative_path+" reason="+(operator_log_projection_ok?"ok":"debug_copy_failed"));
+   g_debug.Write((operator_log_projection_ok?"INFO":"ERROR"),"ea1_publish",(operator_log_projection_ok?"publish_operator_debug_write_ok":"publish_operator_debug_write_fail"),
+                 "path="+g_market_log_relative_path+" last_error="+IntegerToString(operator_log_err));
 
+   g_debug.Write("INFO","ea1_publish","publish_root_projection_start","json="+g_market_json_relative_path+" log="+g_market_log_relative_path);
+   const bool root_projection_ok=(operator_json_ok && operator_log_projection_ok);
    g_last_ea1_root_universe_state="skipped";
-   g_debug.Write("INFO","ea1_publish","market_universe_projection_skipped","reason=operator_root_market_json_primary path="+g_market_json_relative_path);
+   g_debug.Write((root_projection_ok?"INFO":"ERROR"),"ea1_publish",(root_projection_ok?"publish_root_projection_ok":"publish_root_projection_fail"),
+                 "json="+g_last_ea1_root_status_state+" log="+g_last_ea1_root_debug_state);
 
-   const bool publish_ok=(stage_write_ok && debug_write_ok && universe_rotate_ok && universe_write_ok && operator_json_ok && operator_log_projection_ok);
+   const bool publish_ok=(stage_write_ok && debug_write_ok && universe_rotate_ok && universe_write_ok && root_projection_ok);
    g_last_ea1_publish_state=(publish_ok?"success":"degraded");
    g_last_ea1_publish_reason=(publish_ok?"ok":"operator_or_internal_write_failed");
    out_reason=g_last_ea1_publish_reason;
 
+   g_debug.Write((publish_ok?"INFO":"ERROR"),"ea1_publish",(publish_ok?"publish_complete_ok":"publish_complete_fail"),
+                 "reason="+out_reason+" internal="+g_last_ea1_stage_write_state+" universe="+g_last_ea1_universe_write_state+" debug="+g_last_ea1_debug_write_state+" root_json="+g_last_ea1_root_status_state+" root_log="+g_last_ea1_root_debug_state);
    return publish_ok;
   }
 
@@ -770,7 +768,7 @@ void ISSX_UpdateHUD()
    if(server_time<=0)
       server_time=TimeCurrent();
 
-   string hud="ISSX Market HUD | v1.711 | pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count)+"\n";
+   string hud="ISSX Market HUD | v1.712 | pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count)+"\n";
    hud+="Broker="+g_operator_broker_name+" | Server="+g_operator_server_name+"\n";
    hud+="Kernel="+g_last_kernel_result+" ("+g_last_kernel_reason+") ms="+IntegerToString((int)g_last_kernel_elapsed_ms)+"\n";
    hud+="Market="+g_last_ea1_stage_run+" reason="+g_last_ea1_stage_reason+" discovered="+IntegerToString(g_ea1.universe.broker_universe)+" publishable="+IntegerToString(g_ea1.universe.publishable_universe)+"\n";
@@ -788,7 +786,7 @@ void ISSX_UpdateHUD()
         }
       ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_CORNER,CORNER_LEFT_UPPER);
       ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_XDISTANCE,10);
-      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_YDISTANCE,15);
+      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_YDISTANCE,10);
       ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_FONTSIZE,9);
       ObjectSetString(0,ISSX_HUD_OBJECT_NAME,OBJPROP_FONT,"Consolas");
       ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_COLOR,clrLightGray);
@@ -981,8 +979,19 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
    g_last_kernel_reason="ea1_ran";
 
    g_debug.Write("INFO","ea1","stage_publish","start");
+   g_debug.Write("INFO","ea1_publish","publish_enter","checkpoint=publish_enter");
+   g_debug.Write("INFO","ea1_publish","publish_build_stage_json_start","checkpoint=publish_build_stage_json_start");
    const bool stage_publish_ok=ISSX_MarketEngine::StagePublish(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,stage_json,debug_json);
+   g_debug.Write((stage_publish_ok?"INFO":"ERROR"),"ea1_publish",(stage_publish_ok?"publish_build_stage_json_ok":"publish_build_stage_json_fail"),
+                 "len="+IntegerToString(StringLen(stage_json))+" reason="+(stage_publish_ok?"ok":"stage_publish_returned_false"));
+   g_debug.Write("INFO","ea1_publish","publish_build_debug_json_start","checkpoint=publish_build_debug_json_start");
+   const bool debug_json_ok=(StringLen(debug_json)>2);
+   g_debug.Write((debug_json_ok?"INFO":"ERROR"),"ea1_publish",(debug_json_ok?"publish_build_debug_json_ok":"publish_build_debug_json_fail"),
+                 "len="+IntegerToString(StringLen(debug_json))+" reason="+(debug_json_ok?"ok":"debug_json_too_small"));
+   g_debug.Write("INFO","ea1_publish","publish_build_market_dump_start","checkpoint=publish_build_market_dump_start");
    const bool universe_build_ok=ISSX_MarketEngine::BuildUniverseDump(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,broker_dump_json);
+   g_debug.Write((universe_build_ok?"INFO":"ERROR"),"ea1_publish",(universe_build_ok?"publish_build_market_dump_ok":"publish_build_market_dump_fail"),
+                 "len="+IntegerToString(StringLen(broker_dump_json))+" reason="+(universe_build_ok?"ok":"universe_dump_build_failed"));
    string ea1_publish_reason="ok";
    bool publish_ok=false;
    if(stage_publish_ok && universe_build_ok)
@@ -1108,7 +1117,7 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
 int OnInit()
   {
    ISSX_ResolveOperatorContext();
-   if(!g_debug.BeginSession(g_market_log_file_name,_Symbol,_Period,g_operator_server_name,g_operator_broker_name,g_operator_login_id))
+   if(!g_debug.BeginSession(g_market_log_relative_path,_Symbol,_Period,g_operator_server_name,g_operator_broker_name,g_operator_login_id))
       Print("ISSX: debug session failed to open");
    ISSX_SetCheckpoint("oninit_enter");
    g_debug.Write("INFO","lifecycle","oninit_start","build="+IntegerToString((int)__MQLBUILD__));
@@ -1242,8 +1251,6 @@ int OnInit()
 
    g_debug.Write("INFO","timer","event_set_ok","sec="+IntegerToString(ISSX_EVENT_TIMER_SEC));
    g_debug.Write("INFO","lifecycle","oninit_end","result=INIT_SUCCEEDED");
-   Comment("ISSX attached - waiting for timer");
-
    return INIT_SUCCEEDED;
   }
 
@@ -1379,13 +1386,6 @@ void OnTimer()
    g_first_cycle_done=true;
    g_kernel_busy=false;
 
-   string status=(timer_cycle_ok ? "ISSX minimal-debug | firm="+g_firm_id : "ISSX degraded | firm="+g_firm_id);
-   if(status!=g_last_status_comment || (g_timer_pulse_count-g_last_comment_pulse)>=15)
-     {
-      Comment(status);
-      g_last_status_comment=status;
-      g_last_comment_pulse=g_timer_pulse_count;
-     }
   }
 
 void OnTick()
