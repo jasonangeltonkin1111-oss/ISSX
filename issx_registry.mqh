@@ -1796,6 +1796,275 @@ public:
   };
 
 // ============================================================================
+// SECTION 05B: STAGE STATE REGISTRY (RUNTIME STATE ONLY)
+// ============================================================================
+
+enum ISSX_StageStateCode
+  {
+   STAGE_OFF      =0,
+   STAGE_INIT     =1,
+   STAGE_RUNNING  =2,
+   STAGE_READY    =3,
+   STAGE_DEGRADED =4,
+   STAGE_FAILED   =5,
+   STAGE_SKIPPED  =6
+  };
+
+enum ISSX_StageHealthCode
+  {
+   STAGE_HEALTH_UNKNOWN  =0,
+   STAGE_HEALTH_HEALTHY  =1,
+   STAGE_HEALTH_DEGRADED =2,
+   STAGE_HEALTH_FAILED   =3
+  };
+
+struct ISSXStageState
+  {
+   string   stage_name;
+   int      state;
+   string   reason;
+   long     elapsed_ms;
+   int      health_state;
+   datetime last_update;
+
+   void Reset()
+     {
+      stage_name="";
+      state=STAGE_OFF;
+      reason="none";
+      elapsed_ms=0;
+      health_state=STAGE_HEALTH_UNKNOWN;
+      last_update=(datetime)0;
+     }
+  };
+
+class ISSX_StageStateRegistry
+  {
+private:
+   ISSXStageState m_items[];
+   long           m_update_seq;
+
+   int FindIndex(const string stage_name) const
+     {
+      const int n=ArraySize(m_items);
+      for(int i=0;i<n;i++)
+        {
+         if(m_items[i].stage_name==stage_name)
+            return i;
+        }
+      return -1;
+     }
+
+   int EnsureIndex(const string stage_name)
+     {
+      if(ISSX_Util::IsEmpty(stage_name))
+         return -1;
+
+      int idx=FindIndex(stage_name);
+      if(idx>=0)
+         return idx;
+
+      const int n=ArraySize(m_items);
+      if(ArrayResize(m_items,n+1)!=(n+1))
+         return -1;
+
+      idx=n;
+      m_items[idx].Reset();
+      m_items[idx].stage_name=stage_name;
+      m_items[idx].last_update=TimeLocal();
+      return idx;
+     }
+
+   bool IsStateValid(const int state) const
+     {
+      return (state>=STAGE_OFF && state<=STAGE_SKIPPED);
+     }
+
+   bool IsHealthValid(const int health_state) const
+     {
+      return (health_state>=STAGE_HEALTH_UNKNOWN && health_state<=STAGE_HEALTH_FAILED);
+     }
+
+   string NormalizeReason(const string reason) const
+     {
+      if(ISSX_Util::IsEmpty(reason))
+         return "none";
+      return reason;
+     }
+
+   void Touch(const int idx)
+     {
+      if(idx<0 || idx>=ArraySize(m_items))
+         return;
+      m_items[idx].last_update=TimeLocal();
+      m_update_seq++;
+     }
+
+public:
+   ISSX_StageStateRegistry()
+     {
+      Reset();
+     }
+
+   void Reset()
+     {
+      ArrayResize(m_items,0);
+      m_update_seq=0;
+     }
+
+   int Count() const
+     {
+      return ArraySize(m_items);
+     }
+
+   bool SetState(const string stage_name,const int state)
+     {
+      if(!IsStateValid(state))
+         return false;
+
+      const int idx=EnsureIndex(stage_name);
+      if(idx<0)
+         return false;
+
+      if(m_items[idx].state==state)
+         return false;
+
+      m_items[idx].state=state;
+      Touch(idx);
+      return true;
+     }
+
+   bool SetReason(const string stage_name,const string reason)
+     {
+      const int idx=EnsureIndex(stage_name);
+      if(idx<0)
+         return false;
+
+      const string value=NormalizeReason(reason);
+      if(m_items[idx].reason==value)
+         return false;
+
+      m_items[idx].reason=value;
+      Touch(idx);
+      return true;
+     }
+
+   bool SetElapsed(const string stage_name,const long elapsed_ms)
+     {
+      const int idx=EnsureIndex(stage_name);
+      if(idx<0)
+         return false;
+
+      const long value=(elapsed_ms<0 ? 0 : elapsed_ms);
+      if(m_items[idx].elapsed_ms==value)
+         return false;
+
+      m_items[idx].elapsed_ms=value;
+      Touch(idx);
+      return true;
+     }
+
+   bool SetHealth(const string stage_name,const int health_state)
+     {
+      if(!IsHealthValid(health_state))
+         return false;
+
+      const int idx=EnsureIndex(stage_name);
+      if(idx<0)
+         return false;
+
+      if(m_items[idx].health_state==health_state)
+         return false;
+
+      m_items[idx].health_state=health_state;
+      Touch(idx);
+      return true;
+     }
+
+   int GetState(const string stage_name) const
+     {
+      const int idx=FindIndex(stage_name);
+      if(idx<0)
+         return STAGE_OFF;
+      return m_items[idx].state;
+     }
+
+   string GetReason(const string stage_name) const
+     {
+      const int idx=FindIndex(stage_name);
+      if(idx<0)
+         return "none";
+      return m_items[idx].reason;
+     }
+
+   long GetElapsed(const string stage_name) const
+     {
+      const int idx=FindIndex(stage_name);
+      if(idx<0)
+         return 0;
+      return m_items[idx].elapsed_ms;
+     }
+
+   int GetHealth(const string stage_name) const
+     {
+      const int idx=FindIndex(stage_name);
+      if(idx<0)
+         return STAGE_HEALTH_UNKNOWN;
+      return m_items[idx].health_state;
+     }
+
+   datetime GetLastUpdate(const string stage_name) const
+     {
+      const int idx=FindIndex(stage_name);
+      if(idx<0)
+         return (datetime)0;
+      return m_items[idx].last_update;
+     }
+
+   bool GetSnapshot(const string stage_name,ISSXStageState &out_state) const
+     {
+      out_state.Reset();
+      const int idx=FindIndex(stage_name);
+      if(idx<0)
+         return false;
+
+      out_state=m_items[idx];
+      return true;
+     }
+
+   long UpdateSequence() const
+     {
+      return m_update_seq;
+     }
+
+   static string StateToString(const int state)
+     {
+      switch(state)
+        {
+         case STAGE_OFF:      return "off";
+         case STAGE_INIT:     return "init";
+         case STAGE_RUNNING:  return "running";
+         case STAGE_READY:    return "ready";
+         case STAGE_DEGRADED: return "degraded";
+         case STAGE_FAILED:   return "failed";
+         case STAGE_SKIPPED:  return "skipped";
+        }
+      return "off";
+     }
+
+   static string HealthToString(const int health_state)
+     {
+      switch(health_state)
+        {
+         case STAGE_HEALTH_HEALTHY:  return "healthy";
+         case STAGE_HEALTH_DEGRADED: return "degraded";
+         case STAGE_HEALTH_FAILED:   return "failed";
+        }
+      return "unknown";
+     }
+  };
+
+// ============================================================================
 // SECTION 06: REGISTRY BUNDLE
 // ============================================================================
 

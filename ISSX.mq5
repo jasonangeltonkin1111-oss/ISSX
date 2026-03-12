@@ -1,5 +1,5 @@
 ﻿#property strict
-#property version   "1.715"
+#property version   "1.716"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
@@ -47,8 +47,9 @@ input bool   InpGateChartUiUpdates      = true;  // foundation default: chart UI
 input bool   InpGateTickHeavyWork       = false; // enables any non-trivial tick path
 input bool   InpGateUiProjection        = true;  // foundation default: enable HUD projection
 
-ISSX_RegistryBundle g_registry;
-ISSX_StageRuntime   g_runtime;
+ISSX_RegistryBundle   g_registry;
+ISSX_StageRuntime     g_runtime;
+ISSX_StageStateRegistry StageRegistry;
 
 ISSX_EA1_State      g_ea1;
 ISSX_EA2_State      g_ea2;
@@ -374,6 +375,79 @@ string ISSX_StageAlias(const ISSX_StageId stage_id)
    return ISSX_OperatorSurface::StageAlias(stage_id);
   }
 
+string ISSX_EA1StageStateFromRun(const string stage_run)
+  {
+   const string v=ISSX_Util::Lower(ISSX_Util::Trim(stage_run));
+   if(v=="success")
+      return ISSX_StageStateRegistry::StateToString(STAGE_READY);
+   if(v=="degraded")
+      return ISSX_StageStateRegistry::StateToString(STAGE_DEGRADED);
+   if(v=="failed")
+      return ISSX_StageStateRegistry::StateToString(STAGE_FAILED);
+   if(v=="skipped")
+      return ISSX_StageStateRegistry::StateToString(STAGE_SKIPPED);
+   if(v=="running")
+      return ISSX_StageStateRegistry::StateToString(STAGE_RUNNING);
+   if(v=="init")
+      return ISSX_StageStateRegistry::StateToString(STAGE_INIT);
+   return ISSX_StageStateRegistry::StateToString(STAGE_OFF);
+  }
+
+int ISSX_EA1StageCodeFromRun(const string stage_run)
+  {
+   const string v=ISSX_Util::Lower(ISSX_Util::Trim(stage_run));
+   if(v=="success")
+      return STAGE_READY;
+   if(v=="degraded")
+      return STAGE_DEGRADED;
+   if(v=="failed")
+      return STAGE_FAILED;
+   if(v=="skipped")
+      return STAGE_SKIPPED;
+   if(v=="running")
+      return STAGE_RUNNING;
+   if(v=="init")
+      return STAGE_INIT;
+   return STAGE_OFF;
+  }
+
+int ISSX_HealthCodeFromState(const int stage_state)
+  {
+   if(stage_state==STAGE_FAILED)
+      return STAGE_HEALTH_FAILED;
+   if(stage_state==STAGE_DEGRADED)
+      return STAGE_HEALTH_DEGRADED;
+   if(stage_state==STAGE_READY)
+      return STAGE_HEALTH_HEALTHY;
+   return STAGE_HEALTH_UNKNOWN;
+  }
+
+void ISSX_SyncEA1StageRegistry(const string stage_run,const string stage_reason,const long elapsed_ms,const bool emit_diag)
+  {
+   const string stage_name="ea1_market";
+   const int stage_code=ISSX_EA1StageCodeFromRun(stage_run);
+   const int health_code=ISSX_HealthCodeFromState(stage_code);
+
+   const bool state_changed=StageRegistry.SetState(stage_name,stage_code);
+   const bool reason_changed=StageRegistry.SetReason(stage_name,stage_reason);
+   const bool elapsed_changed=StageRegistry.SetElapsed(stage_name,elapsed_ms);
+   const bool health_changed=StageRegistry.SetHealth(stage_name,health_code);
+
+   if(!emit_diag)
+      return;
+
+   if(state_changed || health_changed)
+      g_debug.Write("INFO","stage_registry_update",stage_name,
+                    "state="+ISSX_StageStateRegistry::StateToString(StageRegistry.GetState(stage_name))+
+                    " health="+ISSX_StageStateRegistry::HealthToString(StageRegistry.GetHealth(stage_name)));
+
+   if(reason_changed)
+      g_debug.Write("INFO","stage_registry_reason",stage_name,StageRegistry.GetReason(stage_name));
+
+   if(elapsed_changed)
+      g_debug.Write("INFO","stage_registry_elapsed",stage_name,IntegerToString((int)StageRegistry.GetElapsed(stage_name)));
+  }
+
 void ISSX_ResolveOperatorContext()
   {
    g_operator_broker_name=AccountInfoString(ACCOUNT_COMPANY);
@@ -394,9 +468,9 @@ string ISSX_BuildEA1StageStatusJson()
    j.BeginObject();
    j.NameString("stage_alias",ISSX_StageAlias(issx_stage_ea1));
    j.NameString("internal_stage_id","ea1");
-   j.NameString("stage_run",g_last_ea1_stage_run);
-   j.NameString("stage_reason",g_last_ea1_stage_reason);
-   j.NameInt("stage_elapsed_ms",(int)g_last_ea1_stage_elapsed_ms);
+   j.NameString("stage_run",ISSX_EA1StageStateFromRun(g_last_ea1_stage_run));
+   j.NameString("stage_reason",StageRegistry.GetReason("ea1_market"));
+   j.NameInt("stage_elapsed_ms",(int)StageRegistry.GetElapsed("ea1_market"));
    j.NameString("publish_state",g_last_ea1_publish_state);
    j.NameString("publish_reason",g_last_ea1_publish_reason);
    j.NameBool("requested",InpEnableEA1);
@@ -807,7 +881,7 @@ void ISSX_UpdateHUD()
    if(server_time<=0)
       server_time=TimeCurrent();
 
-   string hud="ISSX Market HUD | v1.714 | pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count)+"\n";
+   string hud="ISSX Market HUD | v1.716 | pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count)+"\n";
    hud+="Broker="+g_operator_broker_name+" | Server="+g_operator_server_name+"\n";
    hud+="Kernel="+g_last_kernel_result+" ("+g_last_kernel_reason+") ms="+IntegerToString((int)g_last_kernel_elapsed_ms)+"\n";
 
@@ -817,8 +891,12 @@ void ISSX_UpdateHUD()
    else if(g_ea1.runtime_state==EA1_STATE_HYDRATING)
       market_state="HYDRATING";
 
-   hud+="EA1="+market_state+" run="+g_last_ea1_stage_run+" reason="+g_last_ea1_stage_reason+
-        " disc="+g_ea1.discovery_status_reason+"("+IntegerToString(g_ea1.discovery_elapsed_ms)+"ms)\n";
+   const string ea1_registry_state=ISSX_StageStateRegistry::StateToString(StageRegistry.GetState("ea1_market"));
+   const string ea1_registry_reason=StageRegistry.GetReason("ea1_market");
+   const long ea1_registry_elapsed=StageRegistry.GetElapsed("ea1_market");
+
+   hud+="EA1="+market_state+" run="+ea1_registry_state+" reason="+ea1_registry_reason+
+        " disc="+g_ea1.discovery_status_reason+"("+IntegerToString((int)ea1_registry_elapsed)+"ms)\n";
    hud+="Universe broker="+IntegerToString(g_ea1.universe.broker_universe)+
         " elig="+IntegerToString(g_ea1.universe.eligible_universe)+
         " rank="+IntegerToString(g_ea1.universe.rankable_universe)+
@@ -906,6 +984,7 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
    ea1_stage_ran=false;
    ea1_stage_result="skipped";
    ea1_stage_reason="none";
+   ISSX_SyncEA1StageRegistry("running","cycle_enter",0,true);
    ISSX_SetCheckpoint("kernel_cycle_enter");
    g_last_kernel_reason="none";
    g_debug.Write("INFO","kernel","cycle_enter","bootstrapped="+(g_bootstrapped?"true":"false"));
@@ -926,6 +1005,10 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       if(!ISSX_MarketEngine::StageBoot(g_ea1))
         {
          ea1_stage_reason="stage_boot_failed";
+         g_last_ea1_stage_run="failed";
+         g_last_ea1_stage_reason=ea1_stage_reason;
+         g_last_ea1_stage_elapsed_ms=0;
+         ISSX_SyncEA1StageRegistry(g_last_ea1_stage_run,g_last_ea1_stage_reason,g_last_ea1_stage_elapsed_ms,true);
          g_debug.Write("ERROR","stage_init","ea1_market","failed reason="+ea1_stage_reason);
          return false;
         }
@@ -940,6 +1023,10 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       g_debug.Write("INFO","stage_reason","ea1_market","requested_off");
       g_last_kernel_reason="no_enabled_stage";
       g_debug.Write("WARN","ea1","disabled","EA1 disabled - no critical module active");
+      g_last_ea1_stage_run="skipped";
+      g_last_ea1_stage_reason="requested_off";
+      g_last_ea1_stage_elapsed_ms=0;
+      ISSX_SyncEA1StageRegistry(g_last_ea1_stage_run,g_last_ea1_stage_reason,g_last_ea1_stage_elapsed_ms,true);
       ea1_stage_reason="requested_off";
       return false;
      }
@@ -958,6 +1045,10 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       g_debug.Write("ERROR","ea1","stage_slice_failed","returned false");
       ea1_stage_result="failed";
       ea1_stage_reason="stage_slice_returned_false";
+      g_last_ea1_stage_run=ea1_stage_result;
+      g_last_ea1_stage_reason=ea1_stage_reason;
+      g_last_ea1_stage_elapsed_ms=0;
+      ISSX_SyncEA1StageRegistry(g_last_ea1_stage_run,g_last_ea1_stage_reason,g_last_ea1_stage_elapsed_ms,true);
       g_debug.Write("ERROR","stage_run","ea1_market",ea1_stage_result);
       g_debug.Write("ERROR","stage_reason","ea1_market",ea1_stage_reason);
       return false;
@@ -1021,6 +1112,7 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
    g_last_ea1_stage_run=ea1_stage_result;
    g_last_ea1_stage_reason=ea1_stage_reason;
    g_last_ea1_stage_elapsed_ms=g_ea1.discovery_elapsed_ms;
+   ISSX_SyncEA1StageRegistry(g_last_ea1_stage_run,g_last_ea1_stage_reason,g_last_ea1_stage_elapsed_ms,true);
 
    string ea1_stage_status_detail="success";
    string ea1_stage_reason_detail="discovery_success";
@@ -1103,6 +1195,7 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
          ea1_stage_reason="publish_degraded_"+ea1_publish_reason;
       g_last_ea1_stage_run=ea1_stage_result;
       g_last_ea1_stage_reason=ea1_stage_reason;
+      ISSX_SyncEA1StageRegistry(g_last_ea1_stage_run,g_last_ea1_stage_reason,g_last_ea1_stage_elapsed_ms,true);
       g_debug.Write("INFO","stage_run","ea1_market",ea1_stage_result);
       g_debug.Write("INFO","stage_reason","ea1_market",ea1_stage_reason);
      }
@@ -1303,6 +1396,8 @@ int OnInit()
 
    // registry + runtime
    g_registry.SeedBlueprintV170();
+   StageRegistry.Reset();
+   ISSX_SyncEA1StageRegistry("init","oninit",0,false);
    string runtime_init_state="skipped | reason="+(InpMinimalDebugMode?"minimal_debug_mode":"gate_off");
    if(ISSX_IsGateOn(InpGateRuntimeScheduler,false))
      {
@@ -1455,6 +1550,7 @@ void OnTimer()
          g_last_ea1_stage_run="skipped";
          g_last_ea1_stage_reason="timer_heavy_gate_off";
          g_last_ea1_stage_elapsed_ms=0;
+         ISSX_SyncEA1StageRegistry(g_last_ea1_stage_run,g_last_ea1_stage_reason,g_last_ea1_stage_elapsed_ms,true);
         }
       if((g_timer_pulse_count%30)==1)
          g_debug.Write("INFO","timer","minimal_heartbeat","pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count));
