@@ -13,9 +13,9 @@
 #include <ISSX/issx_selection_engine.mqh>
 #include <ISSX/issx_correlation_engine.mqh>
 #include <ISSX/issx_contracts.mqh>
+#include <ISSX/issx_ui.mqh>
 #include <ISSX/issx_ui_test.mqh>
 #include <ISSX/issx_debug_engine.mqh>
-#include <ISSX/issx_menu.mqh>
 
 input string InpFirmId                  = "default_firm";
 input bool   InpIncludeCustomSymbols    = false;
@@ -43,8 +43,6 @@ input bool   InpIsolationMode            = true;  // force EA1-only during foren
 input bool   InpMinimalDebugMode        = true;  // default: wrapper shell + heartbeat only
 input bool   InpGateRuntimeScheduler    = false; // enables runtime init + kernel pulse
 input bool   InpGateTimerHeavyWork      = true;  // foundation default: enables ISSX_RunKernelCycle from timer
-input bool   InpGateMenuEngine          = true;  // foundation default: menu visibility with safety locks
-input bool   InpGateChartUiUpdates      = true;  // foundation default: chart UI events for safe menu diagnostics
 input bool   InpGateTickHeavyWork       = false; // enables any non-trivial tick path
 input bool   InpGateUiProjection        = true;  // foundation default: enable HUD projection
 input bool   InpEnableRuntimeSchedulerLayer = false;
@@ -73,9 +71,8 @@ long                g_writer_generation         = 0;
 long                g_sequence_seed             = 0;
 long                g_last_ea5_export_minute_id = 0;
 ISSX_DebugEngine    g_debug;
-ISSX_MenuEngine     g_menu;
+ISSX_UI             g_ui;
 bool                g_ea_enabled[5]={true,false,false,false,false};
-string              g_menu_prefix               = "";
 string              g_last_checkpoint           = "boot";
 bool                g_first_tick_logged         = false;
 bool                g_first_timer_logged        = false;
@@ -85,19 +82,28 @@ ulong               g_last_comment_pulse        = 0;
 string              g_last_status_comment       = "";
 bool                g_logged_timer_heavy_skip   = false;
 bool                g_logged_tick_heavy_skip    = false;
-bool                g_logged_chart_ui_skip      = false;
 string              g_last_feature_runtime_scheduler = "";
 string              g_last_feature_timer_heavy       = "";
 string              g_last_feature_init_runtime_scheduler = "";
-string              g_last_feature_init_menu_engine       = "";
 string              g_last_feature_run_tick_heavy         = "";
-string              g_last_feature_run_chart_ui           = "";
 string              g_last_kernel_result             = "unknown";
 string              g_last_kernel_reason             = "none";
 long                g_last_kernel_elapsed_ms         = 0;
 string              g_last_ea1_stage_run             = "skipped";
 string              g_last_ea1_stage_reason          = "none";
 long                g_last_ea1_stage_elapsed_ms      = 0;
+string              g_last_ea2_stage_run             = "skipped";
+string              g_last_ea2_stage_reason          = "none";
+long                g_last_ea2_stage_elapsed_ms      = 0;
+string              g_last_ea3_stage_run             = "skipped";
+string              g_last_ea3_stage_reason          = "none";
+long                g_last_ea3_stage_elapsed_ms      = 0;
+string              g_last_ea4_stage_run             = "skipped";
+string              g_last_ea4_stage_reason          = "none";
+long                g_last_ea4_stage_elapsed_ms      = 0;
+string              g_last_ea5_stage_run             = "skipped";
+string              g_last_ea5_stage_reason          = "none";
+long                g_last_ea5_stage_elapsed_ms      = 0;
 string              g_last_ea1_publish_state         = "unknown";
 string              g_last_ea1_publish_reason        = "none";
 string              g_last_ea1_stage_json_state      = "unknown";
@@ -122,8 +128,6 @@ string              g_market_json_relative_path    = "";
 string              g_market_log_relative_path     = "";
 string              g_operator_root_relative       = "ISSX";
 string              g_startup_profile           = "unknown";
-
-#define ISSX_HUD_OBJECT_NAME "ISSX_HUD"
 
 string ISSX_LongIdPart(const long value)
   {
@@ -182,8 +186,8 @@ string ISSX_WrapperTerminalIdentity()
 
 string ISSX_ResolveFirmId()
   {
-   if(StringLen(InpFirmId)>0 && InpFirmId!="default_firm")
-      return InpFirmId;
+   if(StringLen(Config.GetString("firm_id"))>0 && Config.GetString("firm_id")!="default_firm")
+      return Config.GetString("firm_id");
 
    string broker=AccountInfoString(ACCOUNT_COMPANY);
    string server=AccountInfoString(ACCOUNT_SERVER);
@@ -403,7 +407,7 @@ string ISSX_BuildEA1StageStatusJson()
    j.NameInt("stage_elapsed_ms",(int)g_last_ea1_stage_elapsed_ms);
    j.NameString("publish_state",g_last_ea1_publish_state);
    j.NameString("publish_reason",g_last_ea1_publish_reason);
-   j.NameBool("requested",InpEnableEA1);
+   j.NameBool("requested",Config.GetBool("ea1_enabled"));
    j.NameBool("effective",g_ea_enabled[0]);
    j.EndObject();
    return j.ToString();
@@ -525,7 +529,7 @@ bool ISSX_ProjectEA1(const string stage_json,
    g_last_ea1_universe_write_state=((universe_rotate_ok && universe_write_ok)?"success":"failed");
 
    bool debug_write_ok=true;
-   if(InpProjectDebugSnapshots)
+   if(Config.GetBool("project_debug_snapshots"))
       debug_write_ok=ISSX_UI_Test::ProjectStageSnapshot(g_firm_id,issx_stage_ea1,debug_snapshot_json);
    g_last_ea1_debug_write_state=(debug_write_ok?"success":"failed");
 
@@ -584,7 +588,7 @@ void ISSX_ProjectEA2(const string stage_json,
 
    ISSX_PersistStageJson(issx_stage_ea2,g_ea2.header,g_ea2.manifest,stage_json);
 
-   if(InpProjectDebugSnapshots)
+   if(Config.GetBool("project_debug_snapshots"))
       ISSX_UI_Test::ProjectStageSnapshot(g_firm_id,issx_stage_ea2,debug_snapshot_json);
   }
 
@@ -604,7 +608,7 @@ void ISSX_ProjectEA3(const string stage_json,
 
    ISSX_PersistStageJson(issx_stage_ea3,g_ea3.header,g_ea3.manifest,stage_json);
 
-   if(InpProjectDebugSnapshots)
+   if(Config.GetBool("project_debug_snapshots"))
       ISSX_UI_Test::ProjectStageSnapshot(g_firm_id,issx_stage_ea3,debug_snapshot_json);
   }
 
@@ -624,7 +628,7 @@ void ISSX_ProjectEA4(const string stage_json,
 
    ISSX_PersistStageJson(issx_stage_ea4,g_ea4.header,g_ea4.manifest,stage_json);
 
-   if(InpProjectDebugSnapshots)
+   if(Config.GetBool("project_debug_snapshots"))
       ISSX_UI_Test::ProjectStageSnapshot(g_firm_id,issx_stage_ea4,debug_snapshot_json);
   }
 
@@ -645,7 +649,7 @@ void ISSX_ProjectEA5(const string export_json,
    ISSX_PersistStageJson(issx_stage_ea5,g_ea5.header,g_ea5.manifest,export_json);
    ISSX_FileIO::WriteText(ISSX_PersistencePath::RootExport(g_firm_id),export_json);
 
-   if(InpProjectDebugSnapshots)
+   if(Config.GetBool("project_debug_snapshots"))
       ISSX_UI_Test::ProjectStageSnapshot(g_firm_id,issx_stage_ea5,debug_json);
   }
 
@@ -679,8 +683,8 @@ void ISSX_LogFoundationStartupProfile(const bool ea1_enabled,const bool timer_he
 
    g_debug.Write((g_startup_profile=="invalid_contradictory"?"WARN":"INFO"),"startup","profile",
                  "mode="+g_startup_profile+
-                 " minimal_debug="+ISSX_OnOff(InpMinimalDebugMode)+
-                 " isolation="+ISSX_OnOff(InpIsolationMode)+
+                 " minimal_debug="+ISSX_OnOff(Config.GetBool("minimal_debug_mode"))+
+                 " isolation="+ISSX_OnOff(Config.GetBool("isolation_mode"))+
                  " ea1="+ISSX_OnOff(ea1_enabled)+
                  " timer_heavy="+ISSX_OnOff(timer_heavy_enabled));
   }
@@ -689,58 +693,37 @@ void ISSX_SetCheckpoint(const string cp)
   {
    g_last_checkpoint=cp;
    g_debug.Write("INFO","checkpoint","set",cp);
+   g_telemetry.Checkpoint(cp);
   }
 
 bool ISSX_IsGateOn(const bool gate_value,const bool minimal_default_on)
   {
-   if(InpMinimalDebugMode)
+   if(Config.GetBool("minimal_debug_mode"))
       return minimal_default_on;
    return gate_value;
   }
 
 bool ISSX_IsTimerHeavyWorkOn()
   {
-   if(InpGateTimerHeavyWork)
-      return true;
-   return ISSX_IsGateOn(InpGateTimerHeavyWork,false);
+   return Config.GetBool("timer_heavy_work_enabled");
   }
 
 bool ISSX_IsUiProjectionOn()
   {
-   if(InpGateUiProjection)
-      return true;
-   return ISSX_IsGateOn(InpGateUiProjection,false);
-  }
-
-bool ISSX_IsMenuEngineOn()
-  {
-   if(InpGateMenuEngine)
-      return true;
-   return ISSX_IsGateOn(InpGateMenuEngine,false);
-  }
-
-bool ISSX_IsChartUiUpdatesOn()
-  {
-   if(InpGateChartUiUpdates)
-      return true;
-   return ISSX_IsGateOn(InpGateChartUiUpdates,false);
+   return Config.GetBool("ui_projection_enabled");
   }
 
 void ISSX_LogGateSnapshot()
   {
-   const bool gate_runtime_scheduler=ISSX_IsGateOn(InpGateRuntimeScheduler,false);
+   const bool gate_runtime_scheduler=Config.GetBool("runtime_scheduler_enabled");
    const bool gate_timer_heavy=ISSX_IsTimerHeavyWorkOn();
-   const bool gate_menu=ISSX_IsMenuEngineOn();
-   const bool gate_chart_ui=ISSX_IsChartUiUpdatesOn();
    const bool gate_tick_heavy=ISSX_IsGateOn(InpGateTickHeavyWork,false);
    const bool gate_ui_projection=ISSX_IsUiProjectionOn();
 
    g_debug.Write("INFO","gates","snapshot",
-                 "minimal_debug="+(InpMinimalDebugMode?"on":"off")+
+                 "minimal_debug="+(Config.GetBool("minimal_debug_mode")?"on":"off")+
                  " runtime_scheduler="+(gate_runtime_scheduler?"on":"off")+
                  " timer_heavy_work="+(gate_timer_heavy?"on":"off")+
-                 " menu_engine="+(gate_menu?"on":"off")+
-                 " chart_ui_updates="+(gate_chart_ui?"on":"off")+
                  " tick_heavy_work="+(gate_tick_heavy?"on":"off")+
                  " ui_projection="+(gate_ui_projection?"on":"off"));
   }
@@ -772,94 +755,6 @@ string ISSX_FormatHudTime(const datetime t)
    return TimeToString(t,TIME_DATE|TIME_SECONDS);
   }
 
-void ISSX_CleanupLegacyUiObjects()
-  {
-   const int total=ObjectsTotal(0,-1,-1);
-   int removed=0;
-   for(int i=total-1;i>=0;i--)
-     {
-      string name=ObjectName(0,i,-1,-1);
-      if(StringLen(name)<=0)
-         continue;
-
-      const bool is_hud=(StringFind(name,"ISSX_HUD")==0);
-      const bool is_menu=(StringFind(name,"ISSX_MENU_OPERATOR_")==0);
-      if(!is_hud && !is_menu)
-         continue;
-
-      if(ObjectDelete(0,name))
-         removed++;
-     }
-
-   g_debug.Write("INFO","ui","cleanup_legacy_objects",
-                 "removed="+IntegerToString(removed)+" scanned="+IntegerToString(total));
-  }
-
-void ISSX_UpdateHUD()
-  {
-   if(!ISSX_IsUiProjectionOn())
-      return;
-
-   const bool gate_runtime_scheduler=ISSX_IsGateOn(InpGateRuntimeScheduler,false);
-   const bool gate_timer_heavy=ISSX_IsTimerHeavyWorkOn();
-   const bool gate_tick_heavy=ISSX_IsGateOn(InpGateTickHeavyWork,false);
-   const bool gate_menu=ISSX_IsMenuEngineOn();
-   const bool gate_chart_ui=ISSX_IsChartUiUpdatesOn();
-   const bool gate_ui_projection=ISSX_IsUiProjectionOn();
-
-   datetime server_time=TimeTradeServer();
-   if(server_time<=0)
-      server_time=TimeCurrent();
-
-   string hud="ISSX Market HUD | v1.714 | pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count)+"\n";
-   hud+="Broker="+g_operator_broker_name+" | Server="+g_operator_server_name+"\n";
-   hud+="Kernel="+g_last_kernel_result+" ("+g_last_kernel_reason+") ms="+IntegerToString((int)g_last_kernel_elapsed_ms)+"\n";
-
-   string market_state="READY";
-   if(g_ea1.runtime_state==EA1_STATE_DISCOVERY)
-      market_state="DISCOVERY";
-   else if(g_ea1.runtime_state==EA1_STATE_HYDRATING)
-      market_state="HYDRATING";
-
-   hud+="EA1="+market_state+" run="+g_last_ea1_stage_run+" reason="+g_last_ea1_stage_reason+
-        " disc="+g_ea1.discovery_status_reason+"("+IntegerToString(g_ea1.discovery_elapsed_ms)+"ms)\n";
-   hud+="Universe broker="+IntegerToString(g_ea1.universe.broker_universe)+
-        " elig="+IntegerToString(g_ea1.universe.eligible_universe)+
-        " rank="+IntegerToString(g_ea1.universe.rankable_universe)+
-        " pub="+IntegerToString(g_ea1.universe.publishable_universe)+"\n";
-   hud+="Hydration "+IntegerToString(g_ea1.hydration_processed)+"/"+IntegerToString(g_ea1.hydration_total)+
-        " batch="+IntegerToString(g_ea1.hydration_batch_size)+" publish="+g_last_ea1_publish_state+"/"+g_last_ea1_publish_reason+"\n";
-   hud+="Publish ckpt="+g_ea1.publish_last_checkpoint+" err="+g_ea1.publish_last_error+
-        " sym="+IntegerToString(g_ea1.publish_symbols_serialized)+" bytes s/u/d="+
-        IntegerToString(g_ea1.publish_stage_json_bytes)+"/"+
-        IntegerToString(g_ea1.publish_universe_json_bytes)+"/"+
-        IntegerToString(g_ea1.publish_debug_json_bytes)+"\n";
-   hud+="Writes internal="+g_last_ea1_stage_write_state+" universe="+g_last_ea1_universe_write_state+
-        " root_json="+g_last_ea1_root_status_state+" root_log="+g_last_ea1_root_debug_state+"\n";
-   hud+="EA2="+ISSX_OnOff(g_ea_enabled[1])+" EA3="+ISSX_OnOff(g_ea_enabled[2])+" EA4="+ISSX_OnOff(g_ea_enabled[3])+" EA5="+ISSX_OnOff(g_ea_enabled[4])+
-        " | menu="+ISSX_OnOff(gate_menu)+" ui="+ISSX_OnOff(gate_chart_ui)+" proj="+ISSX_OnOff(gate_ui_projection)+"\n";
-   hud+="Files: "+g_market_json_file_name+" | "+g_market_log_file_name;
-
-   if(ObjectFind(0,ISSX_HUD_OBJECT_NAME)<0)
-     {
-      if(!ObjectCreate(0,ISSX_HUD_OBJECT_NAME,OBJ_LABEL,0,0,0))
-        {
-         g_debug.Write("WARN","hud","create_failed","name="+ISSX_HUD_OBJECT_NAME);
-         return;
-        }
-      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_CORNER,CORNER_LEFT_UPPER);
-      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_XDISTANCE,6);
-      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_YDISTANCE,8);
-      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_FONTSIZE,8);
-      ObjectSetString(0,ISSX_HUD_OBJECT_NAME,OBJPROP_FONT,"Consolas");
-      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_COLOR,clrLightGray);
-      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_SELECTABLE,false);
-      ObjectSetInteger(0,ISSX_HUD_OBJECT_NAME,OBJPROP_HIDDEN,true);
-     }
-
-   ObjectSetString(0,ISSX_HUD_OBJECT_NAME,OBJPROP_TEXT,hud);
-  }
-
 bool ISSX_RunUiProjectionSafe()
   {
    ISSX_SetCheckpoint("ui_projection_enter");
@@ -870,14 +765,14 @@ bool ISSX_RunUiProjectionSafe()
       return true;
      }
 
-   if(!InpProjectStageStatusRoot && !InpProjectUniverseSnapshot && !InpProjectDebugSnapshots)
+   if(!Config.GetBool("project_stage_status_root") && !Config.GetBool("project_universe_snapshot") && !Config.GetBool("project_debug_snapshots"))
      {
       g_debug.Write("INFO","ui","projection_skipped","all ui projections disabled");
       return true;
      }
 
    // Avoid high-risk aggregate calls when modules are intentionally disabled during isolation.
-   if(InpIsolationMode)
+   if(Config.GetBool("isolation_mode"))
      {
       g_debug.Write("INFO","ui","projection_isolation_mode","skipping BuildAggregate heavy projection");
       return true;
@@ -886,12 +781,12 @@ bool ISSX_RunUiProjectionSafe()
    ISSX_DebugAggregate agg=ISSX_UI_Test::BuildAggregate(g_firm_id,g_runtime.State(),g_ea1,g_ea2,g_ea3,g_ea4,g_ea5);
    ISSX_UI_Test::ProjectDebugRoot(g_firm_id,agg);
 
-   if(InpProjectStageStatusRoot)
+   if(Config.GetBool("project_stage_status_root"))
       ISSX_UI_Test::ProjectStageStatusRoot(g_firm_id,agg);
-   if(InpProjectUniverseSnapshot)
+   if(Config.GetBool("project_universe_snapshot"))
       ISSX_UI_Test::ProjectUniverseSnapshotRoot(g_firm_id,g_runtime.State());
 
-   if(InpProjectDebugSnapshots)
+   if(Config.GetBool("project_debug_snapshots"))
      {
       ISSX_UI_Test::ProjectStageSnapshot(g_firm_id,issx_stage_ea1,ISSX_UI_Test::BuildStageSnapshotEA1(g_ea1));
       ISSX_UI_Test::ProjectStageSnapshot(g_firm_id,issx_stage_ea2,ISSX_UI_Test::BuildStageSnapshotEA2(g_ea2));
@@ -900,7 +795,6 @@ bool ISSX_RunUiProjectionSafe()
       ISSX_UI_Test::ProjectStageSnapshot(g_firm_id,issx_stage_ea5,ISSX_UI_Test::BuildStageSnapshotEA5(g_ea5));
      }
 
-   // HUD rendering is handled by ISSX_UpdateHUD() as a read-only chart projection.
    ISSX_SetCheckpoint("ui_projection_ok");
    return true;
   }
@@ -911,12 +805,18 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
    ea1_stage_result="skipped";
    ea1_stage_reason="none";
    ISSX_SetCheckpoint("kernel_cycle_enter");
+   g_telemetry.Event("kernel_cycle_enter","kernel_cycle_enter");
+   g_telemetry.StageStart(issx_telemetry_stage_kernel);
    g_last_kernel_reason="none";
    g_debug.Write("INFO","kernel","cycle_enter","bootstrapped="+(g_bootstrapped?"true":"false"));
-   if(ISSX_IsGateOn(InpGateRuntimeScheduler,false))
+   if(Config.GetBool("runtime_scheduler_enabled"))
       g_runtime.OnPulse();
+     }
    else
+     {
+      g_telemetry.Event("runtime_scheduler_state","skipped");
       g_debug.Write("INFO","kernel","runtime_scheduler_skipped","disabled_by_gate");
+     }
 
    g_scheduler.BeginCycle();
 
@@ -953,6 +853,7 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
      }
 
    ISSX_SetCheckpoint("ea1_stage_slice_enter");
+   g_telemetry.StageStart(issx_telemetry_stage_ea1_market);
    g_debug.Write("INFO","stage_init","ea1_market","success");
    g_debug.Write("INFO","ea1","stage_slice","enter");
    ea1_stage_ran=true;
@@ -975,7 +876,8 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       g_last_kernel_reason="ea1_stage_slice_false";
       g_debug.Write("WARN","ea1_market","discovery_failed","reason=stage_slice_returned_false");
       g_debug.Write("ERROR","ea1","stage_slice_failed","returned false");
-      ea1_stage_result="failed";
+      g_telemetry.Error(issx_telemetry_stage_ea1_market,1,"stage_slice_returned_false");
+      ea1_stage_result="ERROR";
       ea1_stage_reason="stage_slice_returned_false";
       g_debug.Write("ERROR","stage_run","ea1_market",ea1_stage_result);
       g_debug.Write("ERROR","stage_reason","ea1_market",ea1_stage_reason);
@@ -999,6 +901,9 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       if(g_ea1.hydration_last_symbol_done!="")
          g_debug.Write("INFO","ea1_hydration","ea1_hydration_symbol_done","symbol="+g_ea1.hydration_last_symbol_done);
       g_debug.Write("INFO","ea1_hydration","ea1_hydration_progress","processed="+IntegerToString(g_ea1.hydration_processed)+" total="+IntegerToString(g_ea1.hydration_total)+" remaining="+IntegerToString(MathMax(0,g_ea1.hydration_total-g_ea1.hydration_processed)));
+      g_telemetry.BatchProgress(issx_telemetry_stage_ea1_market,g_ea1.hydration_processed,g_ea1.hydration_total);
+      g_telemetry.CursorPosition(issx_telemetry_stage_ea1_market,g_ea1.hydration_cursor,g_ea1.hydration_batch_size);
+      g_telemetry.SymbolProgress(issx_telemetry_stage_ea1_market,g_ea1.hydration_last_symbol_done);
      }
    else if(g_ea1.hydration_complete)
       g_debug.Write("INFO","ea1_hydration","ea1_hydration_complete","processed="+IntegerToString(g_ea1.hydration_processed)+" total="+IntegerToString(g_ea1.hydration_total));
@@ -1088,7 +993,9 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       g_debug.Write("INFO","ea1_publish","publish_enter","checkpoint=publish_enter");
       g_debug.Write("INFO","ea1_publish","json_build_start","checkpoint=json_build_start");
       const bool stage_publish_ok=ISSX_MarketEngine::StagePublish(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,stage_json,broker_dump_json,debug_json);
-      g_debug.Write((stage_publish_ok?"INFO":"ERROR"),"ea1_publish",(stage_publish_ok?"json_build_complete":"json_fail"),
+      g_telemetry.Payload(issx_telemetry_stage_ea1_market,StringLen(stage_json));
+      g_telemetry.MemoryEstimate(issx_telemetry_stage_ea1_market,(long)StringLen(stage_json)+(long)StringLen(debug_json)+(long)StringLen(broker_dump_json));
+      g_debug.Write((stage_publish_ok?"INFO":"ERROR"),"ea1_publish",(stage_publish_ok?"publish_build_stage_json_ok":"publish_build_stage_json_fail"),
                     "stage_len="+IntegerToString(g_ea1.publish_stage_json_bytes)+
                     " universe_len="+IntegerToString(g_ea1.publish_universe_json_bytes)+
                     " debug_len="+IntegerToString(g_ea1.publish_debug_json_bytes)+
@@ -1146,11 +1053,12 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
    if(g_ea_enabled[1] && !g_bootstrapped)
      {
       g_debug.Write("INFO","ea2","stage_boot","start");
-      ISSX_HistoryEngine::StageBoot(g_ea2,ea1_symbols,InpEA2DeepProfileDefault);
+      ISSX_HistoryEngine::StageBoot(g_ea2,ea1_symbols,Config.GetBool("ea2_deep_profile_default"));
      }
 
    if(g_ea_enabled[1])
      {
+      g_telemetry.StageStart(issx_telemetry_stage_ea2_history);
       ISSX_SetCheckpoint("ea2_stage_slice_start");
       g_debug.Write("INFO","ea2","stage_slice","start");
       const int ea2_batch_limit=g_scheduler.LastBatchLimit("ea2_history",InpEA2MaxSymbolsPerSlice);
@@ -1165,9 +1073,17 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       stage_json=ISSX_HistoryEngine::StagePublish(g_ea2);
       debug_json=ISSX_HistoryEngine::BuildDebugSnapshot(g_ea2);
       ISSX_ProjectEA2(stage_json,debug_json);
+      g_last_ea2_stage_run="success";
+      g_last_ea2_stage_reason=g_ea2.dependency_block_reason;
+      g_last_ea2_stage_elapsed_ms=0;
      }
    else
+     {
       g_debug.Write("INFO","ea2","disabled","stage skipped");
+      g_last_ea2_stage_run="skipped";
+      g_last_ea2_stage_reason="disabled";
+      g_last_ea2_stage_elapsed_ms=0;
+     }
 
    if(g_ea_enabled[2] && !g_bootstrapped)
      {
@@ -1177,15 +1093,24 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
 
    if(g_ea_enabled[2])
      {
+      g_telemetry.StageStart(issx_telemetry_stage_ea3_selection);
       ISSX_SetCheckpoint("ea3_stage_slice_start");
       g_debug.Write("INFO","ea3","stage_slice","start");
       ISSX_SelectionEngine::StageSlice(g_firm_id,g_ea1,g_ea2,g_ea3);
       string ea3_debug="";
       ISSX_SelectionEngine::StagePublish(g_ea3,stage_json,ea3_debug);
       ISSX_ProjectEA3(stage_json,ea3_debug);
+      g_last_ea3_stage_run="success";
+      g_last_ea3_stage_reason=g_ea3.dependency_block_reason;
+      g_last_ea3_stage_elapsed_ms=0;
      }
    else
+     {
       g_debug.Write("INFO","ea3","disabled","stage skipped");
+      g_last_ea3_stage_run="skipped";
+      g_last_ea3_stage_reason="disabled";
+      g_last_ea3_stage_elapsed_ms=0;
+     }
 
    if(g_ea_enabled[3] && !g_bootstrapped)
      {
@@ -1195,15 +1120,24 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
 
    if(g_ea_enabled[3])
      {
+      g_telemetry.StageStart(issx_telemetry_stage_ea4_correlation);
       ISSX_SetCheckpoint("ea4_stage_slice_start");
       g_debug.Write("INFO","ea4","stage_slice","start");
       ISSX_CorrelationEngine::StageSlice(g_ea4,g_firm_id,g_ea1,g_ea3,ISSX_CurrentKernelMinuteId());
       string ea4_debug="";
       ISSX_CorrelationEngine::StagePublish(g_ea4,stage_json,ea4_debug);
       ISSX_ProjectEA4(stage_json,ea4_debug);
+      g_last_ea4_stage_run="success";
+      g_last_ea4_stage_reason=g_ea4.dependency_block_reason;
+      g_last_ea4_stage_elapsed_ms=0;
      }
    else
+     {
       g_debug.Write("INFO","ea4","disabled","stage skipped");
+      g_last_ea4_stage_run="skipped";
+      g_last_ea4_stage_reason="disabled";
+      g_last_ea4_stage_elapsed_ms=0;
+     }
 
    ISSX_EA4_OptionalIntelligenceExport ea4_optional_intel[];
    ISSX_EA5_OptionalIntelligence optional_intel[];
@@ -1212,6 +1146,7 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
 
    if(g_ea_enabled[4])
      {
+      g_telemetry.StageStart(issx_telemetry_stage_ea5_contracts);
       ISSX_CorrelationEngine::ExportOptionalIntelligence(g_ea4,ea4_optional_intel);
       ISSX_ConvertEA4OptionalIntelligence(ea4_optional_intel,optional_intel);
 
@@ -1228,15 +1163,31 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
          string export_json=ISSX_Contracts::ToStageJson(g_ea5,g_registry.fields,g_registry.enums);
          string ea5_debug=ISSX_Contracts::ToDebugJson(g_ea5);
          ISSX_ProjectEA5(export_json,ea5_debug);
+         g_telemetry.Payload(issx_telemetry_stage_ea5_contracts,StringLen(export_json));
          g_last_ea5_export_minute_id=current_minute_id;
+         g_last_ea5_stage_run="success";
+         g_last_ea5_stage_reason="export_due";
+         g_last_ea5_stage_elapsed_ms=0;
         }
+      g_telemetry.StageEnd(issx_telemetry_stage_ea5_contracts,"READY",0);
      }
    else
+     {
       g_debug.Write("INFO","ea5","disabled","stage skipped");
+      g_last_ea5_stage_run="skipped";
+      g_last_ea5_stage_reason="disabled";
+      g_last_ea5_stage_elapsed_ms=0;
+     }
 
+   g_telemetry.StageStart(issx_telemetry_stage_ui);
    g_debug.Write("INFO","ui","aggregate","building snapshots");
    if(!ISSX_RunUiProjectionSafe())
+     {
       g_debug.Write("WARN","ui","projection_failed","non-critical; continuing");
+      g_telemetry.StageEnd(issx_telemetry_stage_ui,"DEGRADED",0);
+     }
+   else
+      g_telemetry.StageEnd(issx_telemetry_stage_ui,"READY",0);
    g_bootstrapped=true;
    g_scheduler.EndCycle();
    g_debug.Write("INFO","kernel","cycle_exit","ok=true");
@@ -1249,6 +1200,8 @@ int OnInit()
    if(!g_debug.BeginSession(g_market_log_relative_path,_Symbol,_Period,g_operator_server_name,g_operator_broker_name,g_operator_login_id))
       Print("ISSX: debug session failed to open");
    ISSX_SetCheckpoint("oninit_enter");
+   g_telemetry.Init();
+   g_telemetry.Event("system_boot","system_boot");
    g_debug.Write("INFO","lifecycle","oninit_start","build="+IntegerToString((int)__MQLBUILD__));
    g_debug.Write("INFO","debug","sink","mode="+g_debug.ActiveMode()+" path="+g_debug.ActivePath());
 
@@ -1266,48 +1219,34 @@ int OnInit()
    g_debug.Write("INFO","context","terminal","company="+TerminalInfoString(TERMINAL_COMPANY)+" name="+TerminalInfoString(TERMINAL_NAME));
    g_debug.Write("INFO","context","account","broker="+g_operator_broker_name+" server="+g_operator_server_name+" login="+IntegerToString((int)g_operator_login_id));
 
-   g_ea_enabled[0]=true;
-   g_ea_enabled[1]=false;
-   g_ea_enabled[2]=false;
-   g_ea_enabled[3]=false;
-   g_ea_enabled[4]=false;
-   if(!InpIsolationMode)
-     {
-      g_ea_enabled[0]=InpEnableEA1;
-      g_ea_enabled[1]=InpEnableEA2;
-      g_ea_enabled[2]=InpEnableEA3;
-      g_ea_enabled[3]=InpEnableEA4;
-      g_ea_enabled[4]=InpEnableEA5;
-     }
+   g_ea_enabled[0]=Config.IsEAEnabled(issx_stage_ea1);
+   g_ea_enabled[1]=Config.IsEAEnabled(issx_stage_ea2);
+   g_ea_enabled[2]=Config.IsEAEnabled(issx_stage_ea3);
+   g_ea_enabled[3]=Config.IsEAEnabled(issx_stage_ea4);
+   g_ea_enabled[4]=Config.IsEAEnabled(issx_stage_ea5);
    g_debug.Write("INFO","modules","states_forced",
                  "ea1="+(g_ea_enabled[0]?"on":"off")+
                  " ea2="+(g_ea_enabled[1]?"on":"off")+
                  " ea3="+(g_ea_enabled[2]?"on":"off")+
                  " ea4="+(g_ea_enabled[3]?"on":"off")+
-                 " ea5="+(g_ea_enabled[4]?"on":"off")+" isolation="+(InpIsolationMode?"true":"false"));
+                 " ea5="+(g_ea_enabled[4]?"on":"off")+" isolation="+(Config.GetBool("isolation_mode")?"true":"false"));
 
    const bool req_runtime_scheduler=InpGateRuntimeScheduler;
    const bool req_timer_heavy=InpGateTimerHeavyWork;
    const bool req_tick_heavy=InpGateTickHeavyWork;
-   const bool req_menu_engine=InpGateMenuEngine;
-   const bool req_chart_ui=InpGateChartUiUpdates;
    const bool req_ui_projection=InpGateUiProjection;
 
-   const bool eff_runtime_scheduler=ISSX_IsGateOn(req_runtime_scheduler,false);
+   const bool eff_runtime_scheduler=Config.GetBool("runtime_scheduler_enabled");
    const bool eff_timer_heavy=ISSX_IsTimerHeavyWorkOn();
    const bool eff_tick_heavy=ISSX_IsGateOn(req_tick_heavy,false);
-   const bool eff_menu_engine=ISSX_IsMenuEngineOn();
-   const bool eff_chart_ui=ISSX_IsChartUiUpdatesOn();
    const bool eff_ui_projection=ISSX_IsUiProjectionOn();
 
    g_debug.Write("INFO","feature_state","session_snapshot",
-                 "minimal_debug=requested="+ISSX_OnOff(InpMinimalDebugMode)+" effective="+ISSX_OnOff(InpMinimalDebugMode)+
-                 " isolation=requested="+ISSX_OnOff(InpIsolationMode)+" effective="+ISSX_OnOff(InpIsolationMode)+
+                 "minimal_debug=requested="+ISSX_OnOff(Config.GetBool("minimal_debug_mode"))+" effective="+ISSX_OnOff(Config.GetBool("minimal_debug_mode"))+
+                 " isolation=requested="+ISSX_OnOff(Config.GetBool("isolation_mode"))+" effective="+ISSX_OnOff(Config.GetBool("isolation_mode"))+
                  " runtime_scheduler=requested="+ISSX_OnOff(req_runtime_scheduler)+" effective="+ISSX_OnOff(eff_runtime_scheduler)+
                  " timer_heavy_work=requested="+ISSX_OnOff(req_timer_heavy)+" effective="+ISSX_OnOff(eff_timer_heavy)+
                  " tick_heavy_work=requested="+ISSX_OnOff(req_tick_heavy)+" effective="+ISSX_OnOff(eff_tick_heavy)+
-                 " menu_engine=requested="+ISSX_OnOff(req_menu_engine)+" effective="+ISSX_OnOff(eff_menu_engine)+
-                 " chart_ui_updates=requested="+ISSX_OnOff(req_chart_ui)+" effective="+ISSX_OnOff(eff_chart_ui)+
                  " ui_projection=requested="+ISSX_OnOff(req_ui_projection)+" effective="+ISSX_OnOff(eff_ui_projection));
 
    g_debug.Write("INFO","feature_state","minimal_debug_mode","requested="+ISSX_OnOff(InpMinimalDebugMode)+" effective="+ISSX_OnOff(InpMinimalDebugMode));
@@ -1315,17 +1254,15 @@ int OnInit()
    g_debug.Write("INFO","feature_state","runtime_scheduler","requested="+ISSX_OnOff(req_runtime_scheduler)+" effective="+ISSX_OnOff(eff_runtime_scheduler)+" reason="+(eff_runtime_scheduler?"active":(InpMinimalDebugMode?"minimal_debug_mode":"gate_off")));
    g_debug.Write("INFO","feature_state","timer_heavy_work","requested="+ISSX_OnOff(req_timer_heavy)+" effective="+ISSX_OnOff(eff_timer_heavy)+" reason="+(eff_timer_heavy?"active":(InpMinimalDebugMode?"minimal_debug_mode":"gate_off")));
    g_debug.Write("INFO","feature_state","tick_heavy_work","requested="+ISSX_OnOff(req_tick_heavy)+" effective="+ISSX_OnOff(eff_tick_heavy)+" reason="+(eff_tick_heavy?"active":(InpMinimalDebugMode?"minimal_debug_mode":"gate_off")));
-   g_debug.Write("INFO","feature_state","menu_engine","requested="+ISSX_OnOff(req_menu_engine)+" effective="+ISSX_OnOff(eff_menu_engine)+" reason="+(eff_menu_engine?"active":(InpMinimalDebugMode?"minimal_debug_mode":"gate_off")));
-   g_debug.Write("INFO","feature_state","chart_ui_updates","requested="+ISSX_OnOff(req_chart_ui)+" effective="+ISSX_OnOff(eff_chart_ui)+" reason="+(eff_chart_ui?"active":(InpMinimalDebugMode?"minimal_debug_mode":"gate_off")));
    g_debug.Write("INFO","feature_state","ui_projection","requested="+ISSX_OnOff(req_ui_projection)+" effective="+ISSX_OnOff(eff_ui_projection)+" reason="+(eff_ui_projection?"active":(InpMinimalDebugMode?"minimal_debug_mode":"gate_off")));
 
    g_debug.Write("INFO","feature_state","ea1_market","requested="+ISSX_OnOff(InpEnableEA1)+" effective="+ISSX_OnOff(g_ea_enabled[0])+" reason="+((InpIsolationMode && !InpEnableEA1)?"isolation_forced_on":(g_ea_enabled[0]?"active":"requested_off")));
    g_debug.Write("INFO","stage_state","ea1_market","requested="+ISSX_OnOff(InpEnableEA1));
    g_debug.Write("INFO","stage_state","ea1_market","effective="+ISSX_OnOff(g_ea_enabled[0]));
-   g_debug.Write("INFO","feature_state","ea2_history","requested="+ISSX_OnOff(InpEnableEA2)+" effective="+ISSX_OnOff(g_ea_enabled[1])+" reason="+(g_ea_enabled[1]?"active":(InpIsolationMode?"isolation_forced_off":"requested_off")));
-   g_debug.Write("INFO","feature_state","ea3_selection","requested="+ISSX_OnOff(InpEnableEA3)+" effective="+ISSX_OnOff(g_ea_enabled[2])+" reason="+(g_ea_enabled[2]?"active":(InpIsolationMode?"isolation_forced_off":"requested_off")));
-   g_debug.Write("INFO","feature_state","ea4_correlation","requested="+ISSX_OnOff(InpEnableEA4)+" effective="+ISSX_OnOff(g_ea_enabled[3])+" reason="+(g_ea_enabled[3]?"active":(InpIsolationMode?"isolation_forced_off":"requested_off")));
-   g_debug.Write("INFO","feature_state","ea5_contracts","requested="+ISSX_OnOff(InpEnableEA5)+" effective="+ISSX_OnOff(g_ea_enabled[4])+" reason="+(g_ea_enabled[4]?"active":(InpIsolationMode?"isolation_forced_off":"requested_off")));
+   g_debug.Write("INFO","feature_state","ea2_history","requested="+ISSX_OnOff(Config.GetBool("ea2_enabled"))+" effective="+ISSX_OnOff(g_ea_enabled[1])+" reason="+(g_ea_enabled[1]?"active":(Config.GetBool("isolation_mode")?"isolation_forced_off":"requested_off")));
+   g_debug.Write("INFO","feature_state","ea3_selection","requested="+ISSX_OnOff(Config.GetBool("ea3_enabled"))+" effective="+ISSX_OnOff(g_ea_enabled[2])+" reason="+(g_ea_enabled[2]?"active":(Config.GetBool("isolation_mode")?"isolation_forced_off":"requested_off")));
+   g_debug.Write("INFO","feature_state","ea4_correlation","requested="+ISSX_OnOff(Config.GetBool("ea4_enabled"))+" effective="+ISSX_OnOff(g_ea_enabled[3])+" reason="+(g_ea_enabled[3]?"active":(Config.GetBool("isolation_mode")?"isolation_forced_off":"requested_off")));
+   g_debug.Write("INFO","feature_state","ea5_contracts","requested="+ISSX_OnOff(Config.GetBool("ea5_enabled"))+" effective="+ISSX_OnOff(g_ea_enabled[4])+" reason="+(g_ea_enabled[4]?"active":(Config.GetBool("isolation_mode")?"isolation_forced_off":"requested_off")));
 
    ISSX_LogFoundationStartupProfile(g_ea_enabled[0],eff_timer_heavy);
    g_debug.Write("INFO","paths","operator_layout",
@@ -1339,8 +1276,8 @@ int OnInit()
 
    // registry + runtime
    g_registry.SeedBlueprintV170();
-   string runtime_init_state="skipped | reason="+(InpMinimalDebugMode?"minimal_debug_mode":"gate_off");
-   if(ISSX_IsGateOn(InpGateRuntimeScheduler,false))
+   string runtime_init_state="skipped | reason="+(Config.GetBool("minimal_debug_mode")?"minimal_debug_mode":"gate_off");
+   if(Config.GetBool("runtime_scheduler_enabled"))
      {
       g_runtime.Init();
       runtime_init_state="success";
@@ -1354,27 +1291,6 @@ int OnInit()
    g_first_cycle_done = false;
    g_kernel_busy      = false;
 
-   ISSX_CleanupLegacyUiObjects();
-
-   g_menu_prefix="ISSX_MENU_OPERATOR_"+ISSX_LongIdPart((long)ChartID())+"_"+ISSX_LongIdPart((long)TimeLocal());
-   string menu_init_state="skipped | reason="+(InpMinimalDebugMode?"minimal_debug_mode":"gate_off");
-   if(ISSX_IsMenuEngineOn())
-     {
-      g_menu.Init(g_menu_prefix);
-      if(!g_menu.Build(g_ea_enabled))
-        {
-         g_debug.Write("WARN","ui","menu_build_failed","non-critical UI failure, continuing | "+g_menu.LastError());
-         menu_init_state="failed | reason=menu_build_failed";
-        }
-      else
-        {
-         g_debug.Write("INFO","ui","menu_build_ok","prefix="+g_menu_prefix);
-         menu_init_state="success";
-        }
-     }
-   else
-      g_debug.Write("INFO","ui","menu_init_skipped","disabled_by_gate");
-   ISSX_LogFeatureStatus("feature_init","menu_engine",menu_init_state,g_last_feature_init_menu_engine,false);
 
    if(!EventSetTimer(ISSX_EVENT_TIMER_SEC))
      {
@@ -1384,6 +1300,7 @@ int OnInit()
      }
 
    g_debug.Write("INFO","timer","event_set_ok","sec="+IntegerToString(ISSX_EVENT_TIMER_SEC));
+   g_ui.Init(g_debug);
    g_debug.Write("INFO","lifecycle","oninit_end","result=INIT_SUCCEEDED");
    return INIT_SUCCEEDED;
   }
@@ -1391,13 +1308,12 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    EventKillTimer();
+   g_ui.Shutdown(g_debug);
    g_kernel_busy=false;
-   if(ISSX_IsMenuEngineOn())
-      g_menu.Destroy();
-   ObjectDelete(0,ISSX_HUD_OBJECT_NAME);
    g_last_deinit_reason_code=reason;
    g_last_deinit_reason_text=ISSX_DeinitReasonText(reason);
    g_debug.Write("INFO","lifecycle","ondeinit","reason="+IntegerToString(reason)+" reason_text="+g_last_deinit_reason_text+" last_checkpoint="+g_last_checkpoint+" self_remove=false");
+   g_telemetry.Flush();
    g_debug.Close(reason,"last_checkpoint="+g_last_checkpoint+" file_mode="+g_debug.ActiveMode()+" file_path="+g_debug.ActivePath());
   }
 
@@ -1420,6 +1336,7 @@ void OnTimer()
    g_kernel_busy=true;
 
    ISSX_SetCheckpoint("ontimer_enter");
+   g_telemetry.Event("timer_heartbeat","timer_heartbeat");
    g_timer_pulse_count++;
    if(!g_first_timer_logged)
      {
@@ -1428,7 +1345,7 @@ void OnTimer()
      }
    const ulong timer_start_us=(ulong)GetMicrosecondCount();
    const bool sampled=((g_timer_pulse_count%15)==1);
-   const bool gate_runtime_scheduler=ISSX_IsGateOn(InpGateRuntimeScheduler,false);
+   const bool gate_runtime_scheduler=Config.GetBool("runtime_scheduler_enabled");
    const bool gate_timer_heavy=ISSX_IsTimerHeavyWorkOn();
 
    if(sampled || !g_first_cycle_done)
@@ -1438,7 +1355,7 @@ void OnTimer()
       g_debug.Write("INFO","timer","heartbeat",
                     "pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count)+
                     " first_cycle="+(!g_first_cycle_done?"true":"false")+
-                    " minimal_mode="+(InpMinimalDebugMode?"true":"false")+
+                    " minimal_mode="+(Config.GetBool("minimal_debug_mode")?"true":"false")+
                     " runtime_scheduler="+(gate_runtime_scheduler?"on":"off")+
                     " heavy_timer_work="+(gate_timer_heavy?"on":"off"));
 
@@ -1503,6 +1420,7 @@ void OnTimer()
 
    g_last_kernel_result=(timer_cycle_ok?"ok":"degraded");
    g_last_kernel_elapsed_ms=timer_kernel_elapsed_ms;
+   g_telemetry.Metric("kernel_elapsed_ms",(double)timer_kernel_elapsed_ms);
    if(kernel_reason=="none")
       kernel_reason=(gate_timer_heavy?"active":"timer_heavy_off");
    g_last_kernel_reason=kernel_reason;
@@ -1514,7 +1432,18 @@ void OnTimer()
    if(sampled || !timer_cycle_ok)
       g_debug.Write("INFO","timer","elapsed_us","value="+ISSX_Util::ULongToStringX(elapsed_us));
 
-   ISSX_UpdateHUD();
+
+   g_ui.Render(g_debug,"1.715",g_boot_id,g_timer_pulse_count,InpMinimalDebugMode,InpIsolationMode,
+               (ISSX_IsGateOn(InpGateRuntimeScheduler,false)?"on":"off"),
+               g_last_kernel_result,g_last_kernel_reason,g_last_kernel_elapsed_ms,
+               g_operator_broker_name,g_operator_server_name,g_ea_enabled,
+               g_ea1,g_ea2,g_ea3,g_ea4,g_ea5,
+               g_last_ea1_stage_run,g_last_ea1_stage_reason,g_last_ea1_stage_elapsed_ms,g_last_ea1_publish_state,
+               g_last_ea2_stage_run,g_last_ea2_stage_reason,g_last_ea2_stage_elapsed_ms,
+               g_last_ea3_stage_run,g_last_ea3_stage_reason,g_last_ea3_stage_elapsed_ms,
+               g_last_ea4_stage_run,g_last_ea4_stage_reason,g_last_ea4_stage_elapsed_ms,
+               g_last_ea5_stage_run,g_last_ea5_stage_reason,g_last_ea5_stage_elapsed_ms,
+               g_last_kernel_result+"/"+g_last_kernel_reason);
 
    g_first_cycle_done=true;
    g_kernel_busy=false;
@@ -1531,14 +1460,14 @@ void OnTick()
       g_first_tick_logged=true;
      }
    const bool tick_sampled=((tick_count%100)==0);
-   if(!ISSX_IsGateOn(InpGateTickHeavyWork,false))
+   if(!Config.GetBool("tick_heavy_work_enabled"))
      {
       if(!g_logged_tick_heavy_skip)
         {
          g_debug.Write("INFO","tick","heavy_work_skipped","disabled_by_gate");
          g_logged_tick_heavy_skip=true;
         }
-      ISSX_LogFeatureStatus("feature_run","tick_heavy_work","skipped | reason="+(InpMinimalDebugMode?"minimal_debug_mode":"gate_off"),g_last_feature_run_tick_heavy,tick_sampled);
+      ISSX_LogFeatureStatus("feature_run","tick_heavy_work","skipped | reason="+(Config.GetBool("minimal_debug_mode")?"minimal_debug_mode":"gate_off"),g_last_feature_run_tick_heavy,tick_sampled);
       if(tick_sampled)
          g_debug.Write("INFO","tick","heartbeat","count="+IntegerToString((int)tick_count)+" mode=minimal");
       return;
@@ -1549,73 +1478,3 @@ void OnTick()
       g_debug.Write("INFO","tick","heartbeat","count="+IntegerToString((int)tick_count)+" mode=heavy_enabled");
   }
 
-void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
-  {
-   if(!g_first_chart_event_logged)
-     {
-      g_debug.Write("INFO","chart_event","first_heartbeat","first chart event reached");
-      g_first_chart_event_logged=true;
-     }
-   g_debug.Write("INFO","chart_event","event","id="+IntegerToString(id)+" obj="+sparam+" lparam="+IntegerToString((int)lparam)+" dparam="+DoubleToString(dparam,4)+" requested_action=inspect effective_action=none");
-   static long chart_event_count=0;
-   chart_event_count++;
-   const bool chart_sampled=((chart_event_count%25)==0);
-   const bool chart_ui_on=ISSX_IsChartUiUpdatesOn();
-   const bool menu_on=ISSX_IsMenuEngineOn();
-
-   if(!chart_ui_on || !menu_on)
-     {
-      if(!g_logged_chart_ui_skip)
-        {
-         g_debug.Write("INFO","chart_event","ui_skip","chart_ui="+ISSX_OnOff(chart_ui_on)+" menu="+ISSX_OnOff(menu_on));
-         g_logged_chart_ui_skip=true;
-        }
-      ISSX_LogFeatureStatus("feature_run","chart_ui_updates","skipped | reason=gate_off chart_ui="+ISSX_OnOff(chart_ui_on)+" menu="+ISSX_OnOff(menu_on),g_last_feature_run_chart_ui,chart_sampled);
-      return;
-     }
-
-   ISSX_LogFeatureStatus("feature_run","chart_ui_updates","success",g_last_feature_run_chart_ui,chart_sampled);
-
-   if(id==CHARTEVENT_OBJECT_CLICK)
-     {
-      if(!g_menu.IsOwnedObject(sparam))
-        {
-         if(chart_sampled)
-            g_debug.Write("INFO","ui","menu_click_external","obj="+sparam);
-         return;
-        }
-
-      const bool allow_toggle=(!InpIsolationMode);
-      bool before_state[5];
-      for(int i=0;i<5;i++)
-         before_state[i]=g_ea_enabled[i];
-
-      const bool clicked_ok=g_menu.HandleClick(sparam,g_ea_enabled,allow_toggle);
-      if(clicked_ok)
-        {
-         const bool build_ok=g_menu.Build(g_ea_enabled);
-         g_last_chart_action="menu_toggle_success obj="+sparam;
-         g_debug.Write("INFO","ui","menu_toggle",
-                       "obj="+sparam+
-                       " allow_toggle="+(allow_toggle?"true":"false")+
-                       " build="+(build_ok?"ok":"fail")+
-                       " ea1="+(g_ea_enabled[0]?"on":"off")+
-                       " ea2="+(g_ea_enabled[1]?"on":"off")+
-                       " ea3="+(g_ea_enabled[2]?"on":"off")+
-                       " ea4="+(g_ea_enabled[3]?"on":"off")+
-                       " ea5="+(g_ea_enabled[4]?"on":"off"));
-        }
-      else
-        {
-         for(int i=0;i<5;i++)
-            g_ea_enabled[i]=before_state[i];
-         g_last_chart_action="menu_click_blocked reason="+g_menu.LastError();
-         g_debug.Write("WARN","ui","menu_click_blocked",
-                       "obj="+sparam+
-                       " allow_toggle="+(allow_toggle?"true":"false")+
-                       " requested_action=toggle_stage effective_action=blocked reason="+g_menu.LastError()+
-                       " ea1="+(g_ea_enabled[0]?"on":"off")+
-                       " timer_heavy="+ISSX_OnOff(ISSX_IsTimerHeavyWorkOn()));
-        }
-     }
-  }
