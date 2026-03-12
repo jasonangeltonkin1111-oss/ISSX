@@ -767,25 +767,20 @@ void OnTimer()
 
    g_kernel_busy=true;
 
-   g_timer_count++;
-
    ISSX_SetCheckpoint("ontimer_enter");
    if(!g_first_timer_logged)
      {
       g_debug.Write("INFO","timer","first_heartbeat","first timer heartbeat reached");
       g_first_timer_logged=true;
      }
-   if((g_timer_count%15)==1)
-      g_debug.Write("INFO","timer","heartbeat","count="+IntegerToString((int)g_timer_count)+" first_cycle="+(!g_first_cycle_done?"true":"false"));
+   g_debug.Write("INFO","timer","heartbeat","first_cycle="+(!g_first_cycle_done?"true":"false"));
 
    const long kernel_start_ms=(long)GetTickCount64();
    bool ok=ISSX_RunKernelCycle();
    const long kernel_elapsed_ms=(long)GetTickCount64()-kernel_start_ms;
 
-   if((g_timer_count%15)==1 || !ok)
-      g_debug.Write("INFO","timer","kernel_result",(ok?"ok":"degraded")+" elapsed_ms="+IntegerToString((int)kernel_elapsed_ms));
-   if(kernel_elapsed_ms>700)
-      g_debug.Write("WARN","timer","slow_slice","elapsed_ms="+IntegerToString((int)kernel_elapsed_ms));
+   if((timer_count%15)==1 || !ok)
+      g_debug.Write("INFO","timer","kernel_result",(ok?"ok":"degraded"));
 
    g_first_cycle_done=true;
    g_kernel_busy=false;

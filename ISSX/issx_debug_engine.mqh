@@ -12,9 +12,6 @@ private:
    string m_file_name;
    string m_terminal_data_path;
    string m_terminal_common_data_path;
-   string m_active_mode;
-   string m_active_path;
-   int    m_write_count;
 
    string BuildTimestamp() const
      {
@@ -71,9 +68,6 @@ public:
       m_file_name="";
       m_terminal_data_path="";
       m_terminal_common_data_path="";
-      m_active_mode="none";
-      m_active_path="";
-      m_write_count=0;
      }
 
    bool BeginSession(const string ea_name,const string symbol,const ENUM_TIMEFRAMES tf)
@@ -99,11 +93,6 @@ public:
          EnsureFolderTree(ISSX_DEBUG_EXPORT_ROOT_REL,false);
          ResetLastError();
          m_file_handle=FileOpen(common_rel,FILE_WRITE|FILE_READ|FILE_TXT|FILE_ANSI|FILE_SHARE_READ|FILE_SHARE_WRITE);
-         if(m_file_handle!=INVALID_HANDLE)
-           {
-            m_active_mode="local";
-            m_active_path=common_rel;
-           }
          if(m_file_handle==INVALID_HANDLE)
            {
             const int local_err=GetLastError();
@@ -112,15 +101,9 @@ public:
            }
         }
 
-      if(m_active_mode=="none")
-        {
-         m_active_mode="common";
-         m_active_path=common_rel;
-        }
-
       m_ready=true;
-      PrintWithLevel("INFO","Debug session started rel="+common_rel+" mode="+m_active_mode+" terminal_data="+m_terminal_data_path+" terminal_common="+m_terminal_common_data_path);
-      Write("INFO","session","begin","file_rel="+common_rel+" mode="+m_active_mode+" symbol="+symbol+" tf="+EnumToString(tf));
+      PrintWithLevel("INFO","Debug session started rel="+common_rel+" terminal_data="+m_terminal_data_path+" terminal_common="+m_terminal_common_data_path);
+      Write("INFO","session","begin","file_rel="+common_rel+" symbol="+symbol+" tf="+EnumToString(tf));
       return true;
      }
 
