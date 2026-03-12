@@ -15,6 +15,7 @@
 #include <ISSX/issx_ui_test.mqh>
 #include <ISSX/issx_debug_engine.mqh>
 #include <ISSX/issx_menu.mqh>
+#include <ISSX/issx_telemetry.mqh>
 
 input string InpFirmId                  = "default_firm";
 input bool   InpIncludeCustomSymbols    = false;
@@ -70,6 +71,7 @@ long                g_sequence_seed             = 0;
 long                g_last_ea5_export_minute_id = 0;
 ISSX_DebugEngine    g_debug;
 ISSX_MenuEngine     g_menu;
+ISSX_TelemetryEngine g_telemetry;
 bool                g_ea_enabled[5]={true,false,false,false,false};
 string              g_menu_prefix               = "";
 string              g_last_checkpoint           = "boot";
@@ -685,6 +687,7 @@ void ISSX_SetCheckpoint(const string cp)
   {
    g_last_checkpoint=cp;
    g_debug.Write("INFO","checkpoint","set",cp);
+   g_telemetry.Checkpoint(cp);
   }
 
 bool ISSX_IsGateOn(const bool gate_value,const bool minimal_default_on)
@@ -907,12 +910,20 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
    ea1_stage_result="skipped";
    ea1_stage_reason="none";
    ISSX_SetCheckpoint("kernel_cycle_enter");
+   g_telemetry.Event("kernel_cycle_enter","kernel_cycle_enter");
+   g_telemetry.StageStart(issx_telemetry_stage_kernel);
    g_last_kernel_reason="none";
    g_debug.Write("INFO","kernel","cycle_enter","bootstrapped="+(g_bootstrapped?"true":"false"));
    if(ISSX_IsGateOn(InpGateRuntimeScheduler,false))
+     {
+      g_telemetry.Event("runtime_scheduler_state","running");
       g_runtime.OnPulse();
+     }
    else
+     {
+      g_telemetry.Event("runtime_scheduler_state","skipped");
       g_debug.Write("INFO","kernel","runtime_scheduler_skipped","disabled_by_gate");
+     }
 
    string stage_json="";
    string broker_dump_json="";
@@ -927,6 +938,8 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
         {
          ea1_stage_reason="stage_boot_failed";
          g_debug.Write("ERROR","stage_init","ea1_market","failed reason="+ea1_stage_reason);
+         g_telemetry.Error(issx_telemetry_stage_ea1_market,2,ea1_stage_reason);
+         g_telemetry.StageEnd(issx_telemetry_stage_kernel,"ERROR",0);
          return false;
         }
       g_debug.Write("INFO","stage_init","ea1_market","success");
@@ -941,10 +954,14 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       g_last_kernel_reason="no_enabled_stage";
       g_debug.Write("WARN","ea1","disabled","EA1 disabled - no critical module active");
       ea1_stage_reason="requested_off";
+      g_telemetry.StageEnd(issx_telemetry_stage_ea1_market,"SKIPPED",0);
+      g_telemetry.StageReason(issx_telemetry_stage_ea1_market,ea1_stage_reason);
+      g_telemetry.StageEnd(issx_telemetry_stage_kernel,"DEGRADED",0);
       return false;
      }
 
    ISSX_SetCheckpoint("ea1_stage_slice_enter");
+   g_telemetry.StageStart(issx_telemetry_stage_ea1_market);
    g_debug.Write("INFO","stage_init","ea1_market","success");
    g_debug.Write("INFO","ea1","stage_slice","enter");
    ea1_stage_ran=true;
@@ -956,7 +973,8 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       g_last_kernel_reason="ea1_stage_slice_false";
       g_debug.Write("WARN","ea1_market","discovery_failed","reason=stage_slice_returned_false");
       g_debug.Write("ERROR","ea1","stage_slice_failed","returned false");
-      ea1_stage_result="failed";
+      g_telemetry.Error(issx_telemetry_stage_ea1_market,1,"stage_slice_returned_false");
+      ea1_stage_result="ERROR";
       ea1_stage_reason="stage_slice_returned_false";
       g_debug.Write("ERROR","stage_run","ea1_market",ea1_stage_result);
       g_debug.Write("ERROR","stage_reason","ea1_market",ea1_stage_reason);
@@ -977,6 +995,9 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       if(g_ea1.hydration_last_symbol_done!="")
          g_debug.Write("INFO","ea1_hydration","ea1_hydration_symbol_done","symbol="+g_ea1.hydration_last_symbol_done);
       g_debug.Write("INFO","ea1_hydration","ea1_hydration_progress","processed="+IntegerToString(g_ea1.hydration_processed)+" total="+IntegerToString(g_ea1.hydration_total)+" remaining="+IntegerToString(MathMax(0,g_ea1.hydration_total-g_ea1.hydration_processed)));
+      g_telemetry.BatchProgress(issx_telemetry_stage_ea1_market,g_ea1.hydration_processed,g_ea1.hydration_total);
+      g_telemetry.CursorPosition(issx_telemetry_stage_ea1_market,g_ea1.hydration_cursor,g_ea1.hydration_batch_size);
+      g_telemetry.SymbolProgress(issx_telemetry_stage_ea1_market,g_ea1.hydration_last_symbol_done);
      }
    else if(g_ea1.hydration_complete)
       g_debug.Write("INFO","ea1_hydration","ea1_hydration_complete","processed="+IntegerToString(g_ea1.hydration_processed)+" total="+IntegerToString(g_ea1.hydration_total));
@@ -1065,7 +1086,9 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       g_debug.Write("INFO","ea1_publish","publish_enter","checkpoint=publish_enter");
       g_debug.Write("INFO","ea1_publish","json_build_start","checkpoint=json_build_start");
       const bool stage_publish_ok=ISSX_MarketEngine::StagePublish(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,stage_json,broker_dump_json,debug_json);
-      g_debug.Write((stage_publish_ok?"INFO":"ERROR"),"ea1_publish",(stage_publish_ok?"json_build_complete":"json_fail"),
+      g_telemetry.Payload(issx_telemetry_stage_ea1_market,StringLen(stage_json));
+      g_telemetry.MemoryEstimate(issx_telemetry_stage_ea1_market,(long)StringLen(stage_json)+(long)StringLen(debug_json)+(long)StringLen(broker_dump_json));
+      g_debug.Write((stage_publish_ok?"INFO":"ERROR"),"ea1_publish",(stage_publish_ok?"publish_build_stage_json_ok":"publish_build_stage_json_fail"),
                     "stage_len="+IntegerToString(g_ea1.publish_stage_json_bytes)+
                     " universe_len="+IntegerToString(g_ea1.publish_universe_json_bytes)+
                     " debug_len="+IntegerToString(g_ea1.publish_debug_json_bytes)+
@@ -1127,15 +1150,21 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
 
    if(g_ea_enabled[1])
      {
+      g_telemetry.StageStart(issx_telemetry_stage_ea2_history);
       ISSX_SetCheckpoint("ea2_stage_slice_start");
       g_debug.Write("INFO","ea2","stage_slice","start");
       ISSX_HistoryEngine::StageSlice(g_ea2,ea1_symbols,InpEA2DeepProfileDefault,InpEA2MaxSymbolsPerSlice);
       stage_json=ISSX_HistoryEngine::StagePublish(g_ea2);
       debug_json=ISSX_HistoryEngine::BuildDebugSnapshot(g_ea2);
       ISSX_ProjectEA2(stage_json,debug_json);
+      g_telemetry.Payload(issx_telemetry_stage_ea2_history,StringLen(stage_json));
+      g_telemetry.StageEnd(issx_telemetry_stage_ea2_history,"READY",0);
      }
    else
+     {
       g_debug.Write("INFO","ea2","disabled","stage skipped");
+      g_telemetry.StageEnd(issx_telemetry_stage_ea2_history,"SKIPPED",0);
+     }
 
    if(g_ea_enabled[2] && !g_bootstrapped)
      {
@@ -1145,15 +1174,21 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
 
    if(g_ea_enabled[2])
      {
+      g_telemetry.StageStart(issx_telemetry_stage_ea3_selection);
       ISSX_SetCheckpoint("ea3_stage_slice_start");
       g_debug.Write("INFO","ea3","stage_slice","start");
       ISSX_SelectionEngine::StageSlice(g_firm_id,g_ea1,g_ea2,g_ea3);
       string ea3_debug="";
       ISSX_SelectionEngine::StagePublish(g_ea3,stage_json,ea3_debug);
       ISSX_ProjectEA3(stage_json,ea3_debug);
+      g_telemetry.Payload(issx_telemetry_stage_ea3_selection,StringLen(stage_json));
+      g_telemetry.StageEnd(issx_telemetry_stage_ea3_selection,"READY",0);
      }
    else
+     {
       g_debug.Write("INFO","ea3","disabled","stage skipped");
+      g_telemetry.StageEnd(issx_telemetry_stage_ea3_selection,"SKIPPED",0);
+     }
 
    if(g_ea_enabled[3] && !g_bootstrapped)
      {
@@ -1163,15 +1198,21 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
 
    if(g_ea_enabled[3])
      {
+      g_telemetry.StageStart(issx_telemetry_stage_ea4_correlation);
       ISSX_SetCheckpoint("ea4_stage_slice_start");
       g_debug.Write("INFO","ea4","stage_slice","start");
       ISSX_CorrelationEngine::StageSlice(g_ea4,g_firm_id,g_ea1,g_ea3,ISSX_CurrentKernelMinuteId());
       string ea4_debug="";
       ISSX_CorrelationEngine::StagePublish(g_ea4,stage_json,ea4_debug);
       ISSX_ProjectEA4(stage_json,ea4_debug);
+      g_telemetry.Payload(issx_telemetry_stage_ea4_correlation,StringLen(stage_json));
+      g_telemetry.StageEnd(issx_telemetry_stage_ea4_correlation,"READY",0);
      }
    else
+     {
       g_debug.Write("INFO","ea4","disabled","stage skipped");
+      g_telemetry.StageEnd(issx_telemetry_stage_ea4_correlation,"SKIPPED",0);
+     }
 
    ISSX_EA4_OptionalIntelligenceExport ea4_optional_intel[];
    ISSX_EA5_OptionalIntelligence optional_intel[];
@@ -1180,6 +1221,7 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
 
    if(g_ea_enabled[4])
      {
+      g_telemetry.StageStart(issx_telemetry_stage_ea5_contracts);
       ISSX_CorrelationEngine::ExportOptionalIntelligence(g_ea4,ea4_optional_intel);
       ISSX_ConvertEA4OptionalIntelligence(ea4_optional_intel,optional_intel);
 
@@ -1196,16 +1238,31 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
          string export_json=ISSX_Contracts::ToStageJson(g_ea5,g_registry.fields,g_registry.enums);
          string ea5_debug=ISSX_Contracts::ToDebugJson(g_ea5);
          ISSX_ProjectEA5(export_json,ea5_debug);
+         g_telemetry.Payload(issx_telemetry_stage_ea5_contracts,StringLen(export_json));
          g_last_ea5_export_minute_id=current_minute_id;
         }
+      g_telemetry.StageEnd(issx_telemetry_stage_ea5_contracts,"READY",0);
      }
    else
+     {
       g_debug.Write("INFO","ea5","disabled","stage skipped");
+      g_telemetry.StageEnd(issx_telemetry_stage_ea5_contracts,"SKIPPED",0);
+     }
 
+   g_telemetry.StageStart(issx_telemetry_stage_ui);
    g_debug.Write("INFO","ui","aggregate","building snapshots");
    if(!ISSX_RunUiProjectionSafe())
+     {
       g_debug.Write("WARN","ui","projection_failed","non-critical; continuing");
+      g_telemetry.StageEnd(issx_telemetry_stage_ui,"DEGRADED",0);
+     }
+   else
+      g_telemetry.StageEnd(issx_telemetry_stage_ui,"READY",0);
    g_bootstrapped=true;
+   g_telemetry.StageEnd(issx_telemetry_stage_ea1_market,(ea1_stage_result=="success"?"READY":ea1_stage_result),g_last_ea1_stage_elapsed_ms);
+   g_telemetry.StageReason(issx_telemetry_stage_ea1_market,ea1_stage_reason);
+   g_telemetry.StageEnd(issx_telemetry_stage_kernel,"READY",g_last_kernel_elapsed_ms);
+   g_telemetry.Event("kernel_cycle_exit","kernel_cycle_exit");
    g_debug.Write("INFO","kernel","cycle_exit","ok=true");
    return true;
   }
@@ -1216,6 +1273,8 @@ int OnInit()
    if(!g_debug.BeginSession(g_market_log_relative_path,_Symbol,_Period,g_operator_server_name,g_operator_broker_name,g_operator_login_id))
       Print("ISSX: debug session failed to open");
    ISSX_SetCheckpoint("oninit_enter");
+   g_telemetry.Init();
+   g_telemetry.Event("system_boot","system_boot");
    g_debug.Write("INFO","lifecycle","oninit_start","build="+IntegerToString((int)__MQLBUILD__));
    g_debug.Write("INFO","debug","sink","mode="+g_debug.ActiveMode()+" path="+g_debug.ActivePath());
 
@@ -1362,6 +1421,7 @@ void OnDeinit(const int reason)
    g_last_deinit_reason_code=reason;
    g_last_deinit_reason_text=ISSX_DeinitReasonText(reason);
    g_debug.Write("INFO","lifecycle","ondeinit","reason="+IntegerToString(reason)+" reason_text="+g_last_deinit_reason_text+" last_checkpoint="+g_last_checkpoint+" self_remove=false");
+   g_telemetry.Flush();
    g_debug.Close(reason,"last_checkpoint="+g_last_checkpoint+" file_mode="+g_debug.ActiveMode()+" file_path="+g_debug.ActivePath());
   }
 
@@ -1384,6 +1444,7 @@ void OnTimer()
    g_kernel_busy=true;
 
    ISSX_SetCheckpoint("ontimer_enter");
+   g_telemetry.Event("timer_heartbeat","timer_heartbeat");
    g_timer_pulse_count++;
    if(!g_first_timer_logged)
      {
@@ -1467,6 +1528,7 @@ void OnTimer()
 
    g_last_kernel_result=(timer_cycle_ok?"ok":"degraded");
    g_last_kernel_elapsed_ms=timer_kernel_elapsed_ms;
+   g_telemetry.Metric("kernel_elapsed_ms",(double)timer_kernel_elapsed_ms);
    if(kernel_reason=="none")
       kernel_reason=(gate_timer_heavy?"active":"timer_heavy_off");
    g_last_kernel_reason=kernel_reason;
