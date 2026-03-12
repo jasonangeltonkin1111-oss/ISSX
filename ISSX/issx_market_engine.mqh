@@ -7,7 +7,7 @@
 #include <ISSX/issx_persistence.mqh>
 
 // ============================================================================
-// ISSX MARKET ENGINE v1.706
+// ISSX MARKET ENGINE v1.708
 // EA1 shared engine for MarketStateCore.
 //
 // HARDENING NOTES
@@ -24,7 +24,7 @@
 //   owner runtime/persistence layer
 // ============================================================================
 
-#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.706"
+#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.708"
 
 // ============================================================================
 // SECTION 01: EA1 PHASE IDS
@@ -75,7 +75,7 @@ enum ISSX_EA1_SessionPhase
    issx_ea1_session_rollover
   };
 
-// Legacy owner-side bridge for pre-v1.706 EA1 session labels.
+// Legacy owner-side bridge for pre-v1.708 EA1 session labels.
 #define issx_ea1_session_preopen    issx_ea1_session_pre_open
 #define issx_ea1_session_transition issx_ea1_session_rollover
 
@@ -763,6 +763,9 @@ struct ISSX_EA1_State
    string                   stage_publishability_state;
    string                   dependency_block_reason;
    string                   debug_weak_link_code;
+   bool                     deterministic_sort_applied;
+   int                      deterministic_sorted_count;
+   string                   deterministic_sort_basis;
 
    void Reset()
      {
@@ -797,6 +800,9 @@ struct ISSX_EA1_State
       stage_publishability_state="not_ready";
       dependency_block_reason="none";
       debug_weak_link_code="none";
+      deterministic_sort_applied=false;
+      deterministic_sorted_count=0;
+      deterministic_sort_basis="none";
      }
   };
 
@@ -985,14 +991,14 @@ public:
 // SECTION 05: MARKET ENGINE
 // ============================================================================
 
-int g_ea1_last_discovery_minute;
-int g_ea1_last_skip_log_minute;
-bool g_ea1_last_discovery_attempted;
-bool g_ea1_last_discovery_skipped;
-bool g_ea1_last_discovery_no_change;
-int g_ea1_last_discovery_symbols;
-long g_ea1_last_discovery_elapsed_ms;
-string g_ea1_last_discovery_error;
+int g_ea1_last_discovery_minute=-1;
+int g_ea1_last_skip_log_minute=-1;
+bool g_ea1_last_discovery_attempted=false;
+bool g_ea1_last_discovery_skipped=false;
+bool g_ea1_last_discovery_no_change=false;
+int g_ea1_last_discovery_symbols=0;
+long g_ea1_last_discovery_elapsed_ms=0;
+string g_ea1_last_discovery_error="";
 
 class ISSX_MarketEngine
   {
@@ -1023,7 +1029,7 @@ private:
          len=(int)StringLen(s);
         }
 
-      string suffixes[]={"MICRO","MINI","PRO","RAW","ECN","STD","CASH","SPOT","PLUS","M","I","P"};
+      string suffixes[]={"MICRO","MINI","PRO","RAW","ECN","STD","CASH","SPOT","PLUS","NX","A","M","I","P"};
       for(int i=0;i<ArraySize(suffixes);i++)
         {
          string sf=suffixes[i];
@@ -2331,6 +2337,52 @@ public:
          NormalizeIdentity(io_state.symbols[i].raw_broker_observation,io_state.symbols[i].normalized_identity);
      }
 
+   static void CanonicalizeDeterministicOrder(ISSX_EA1_State &io_state)
+     {
+      const int n=ArraySize(io_state.symbols);
+      if(n<=1)
+        {
+         io_state.deterministic_sort_applied=(n>0);
+         io_state.deterministic_sorted_count=n;
+         io_state.deterministic_sort_basis="symbol_norm";
+         return;
+        }
+
+      for(int i=0;i<n-1;i++)
+        {
+         int best=i;
+         string best_key=io_state.symbols[i].normalized_identity.symbol_norm;
+         if(best_key=="")
+            best_key=io_state.symbols[i].raw_broker_observation.symbol_raw;
+
+         for(int j=i+1;j<n;j++)
+           {
+            string key=io_state.symbols[j].normalized_identity.symbol_norm;
+            if(key=="")
+               key=io_state.symbols[j].raw_broker_observation.symbol_raw;
+            if(StringCompare(key,best_key)<0)
+              {
+               best=j;
+               best_key=key;
+              }
+           }
+
+         if(best!=i)
+           {
+            ISSX_EA1_SymbolState tmp=io_state.symbols[i];
+            io_state.symbols[i]=io_state.symbols[best];
+            io_state.symbols[best]=tmp;
+           }
+        }
+
+      for(int k=0;k<n;k++)
+         io_state.symbols[k].symbol_id=k;
+
+      io_state.deterministic_sort_applied=true;
+      io_state.deterministic_sorted_count=n;
+      io_state.deterministic_sort_basis="symbol_norm";
+     }
+
    static void BuildRuntimePhase(ISSX_EA1_State &io_state)
      {
       io_state.scheduler.phase_id=ISSX_EA1_MapToRuntimePhase(issx_ea1_phase_sample_runtime_delta_first);
@@ -2446,10 +2498,10 @@ public:
       UpdateGlobalStateFlags(io_state);
      }
 
-   static void RefreshDiscoveryOnly(ISSX_EA1_State &io_state)
+   static bool RefreshDiscoveryOnly(ISSX_EA1_State &io_state)
      {
       io_state.scheduler.phase_id=ISSX_EA1_MapToRuntimePhase(issx_ea1_phase_discover_symbols);
-      DiscoverUniverse(io_state,false,0);
+      return DiscoverUniverse(io_state,false,0);
      }
 
    static void AdvanceOneCycle(ISSX_EA1_State &io_state)
@@ -2463,6 +2515,7 @@ public:
          m_last_discovery_minute=io_state.minute_id;
         }
       BuildIdentityPhase(io_state);
+      CanonicalizeDeterministicOrder(io_state);
       BuildRuntimePhase(io_state);
       BuildClassificationPhase(io_state);
       BuildTradeabilityPhase(io_state);
@@ -2518,6 +2571,13 @@ public:
                           const string writer_nonce,
                           const int max_symbols=0)
      {
+      io_state.discovery_attempted=false;
+      io_state.discovery_skipped=false;
+      io_state.discovery_success=false;
+      io_state.discovery_no_change=false;
+      io_state.discovery_elapsed_ms=0;
+      io_state.discovery_status_reason="none";
+
       int current_minute=(int)(TimeCurrent()/60);
       io_state.minute_id=current_minute;
 
@@ -2554,6 +2614,7 @@ public:
          ArrayResize(io_state.symbols,max_symbols);
 
       BuildIdentityPhase(io_state);
+      CanonicalizeDeterministicOrder(io_state);
       BuildRuntimePhase(io_state);
       BuildClassificationPhase(io_state);
       BuildTradeabilityPhase(io_state);
@@ -2672,15 +2733,6 @@ public:
   };
 
 
-
-int ISSX_MarketEngine::m_last_discovery_minute=-1;
-int ISSX_MarketEngine::m_last_skip_log_minute=-1;
-bool ISSX_MarketEngine::m_last_discovery_attempted=false;
-bool ISSX_MarketEngine::m_last_discovery_skipped=false;
-bool ISSX_MarketEngine::m_last_discovery_no_change=false;
-int ISSX_MarketEngine::m_last_discovery_symbols=0;
-long ISSX_MarketEngine::m_last_discovery_elapsed_ms=0;
-string ISSX_MarketEngine::m_last_discovery_error="";
 
 string ISSX_MarketDiagTag()
   {

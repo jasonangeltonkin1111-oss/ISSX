@@ -3,7 +3,7 @@
 
 #define ISSX_MENU_ROWS 5
 
-// ISSX MENU ENGINE v1.706
+// ISSX MENU ENGINE v1.708
 
 class ISSX_MenuEngine
   {

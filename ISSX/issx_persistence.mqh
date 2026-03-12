@@ -5,7 +5,7 @@
 #include <ISSX/issx_registry.mqh>
 
 // ============================================================================
-// ISSX PERSISTENCE v1.706
+// ISSX PERSISTENCE v1.708
 // Blueprint-aligned persistence / handoff / fallback / warehouse / lock helpers.
 // Authoritative truth remains: accepted internal current + coherent manifest chain.
 // ============================================================================
