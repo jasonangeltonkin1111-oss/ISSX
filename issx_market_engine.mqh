@@ -1,4 +1,4 @@
-#ifndef __ISSX_MARKET_ENGINE_MQH__
+﻿#ifndef __ISSX_MARKET_ENGINE_MQH__
 #define __ISSX_MARKET_ENGINE_MQH__
 
 #include <ISSX/issx_core.mqh>
@@ -1186,6 +1186,27 @@ private:
          return SafeUpper(symbol);
 
       return s;
+     }
+
+   static bool IsSymbolIntakeStable(const string symbol)
+     {
+      const string trimmed=SafeUpper(symbol);
+      if(ISSX_Util::IsEmpty(trimmed))
+         return false;
+
+      const string normalized=NormalizeSymbol(trimmed);
+      if(ISSX_Util::IsEmpty(normalized))
+         return false;
+
+      int alpha_num_count=0;
+      for(int i=0;i<StringLen(trimmed);i++)
+        {
+         const ushort ch=(ushort)StringGetCharacter(trimmed,i);
+         if((ch>='A' && ch<='Z') || (ch>='0' && ch<='9'))
+            alpha_num_count++;
+        }
+
+      return (alpha_num_count>=3);
      }
 
    static bool SafeSymbolBool(const string symbol,const ENUM_SYMBOL_INFO_INTEGER prop)
@@ -2553,6 +2574,9 @@ public:
         {
          string symbol=SymbolName(i,false);
          if(symbol=="")
+            continue;
+
+         if(!IsSymbolIntakeStable(symbol))
             continue;
 
          int n=ArraySize(discovered_symbols);
