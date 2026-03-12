@@ -534,6 +534,7 @@ bool ISSX_RunUiProjectionSafe()
 
    if(!InpProjectStageStatusRoot && !InpProjectUniverseSnapshot && !InpProjectDebugSnapshots)
      {
+      ISSX_LogFeatureLifecycle("feature_run","ui_projection","skipped | reason=all_projection_switches_off",g_last_run_ui_projection,false);
       g_debug.Write("INFO","ui","projection_skipped","all ui projections disabled");
       return true;
      }
@@ -541,6 +542,7 @@ bool ISSX_RunUiProjectionSafe()
    // Avoid high-risk aggregate calls when modules are intentionally disabled during isolation.
    if(InpIsolationMode)
      {
+      ISSX_LogFeatureLifecycle("feature_run","ui_projection","skipped | reason=isolation_mode",g_last_run_ui_projection,false);
       g_debug.Write("INFO","ui","projection_isolation_mode","skipping BuildAggregate heavy projection");
       return true;
      }
@@ -562,6 +564,7 @@ bool ISSX_RunUiProjectionSafe()
       ISSX_UI_Test::ProjectStageSnapshot(g_firm_id,issx_stage_ea5,ISSX_UI_Test::BuildStageSnapshotEA5(g_ea5));
      }
 
+   ISSX_LogFeatureLifecycle("feature_run","ui_projection","success",g_last_run_ui_projection,false);
    Comment(ISSX_UI_Test::BuildHudText(agg));
    ISSX_SetCheckpoint("ui_projection_ok");
    return true;
@@ -955,6 +958,7 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
      {
       if(g_menu.HandleClick(sparam,g_ea_enabled,!InpIsolationMode))
         {
+         ISSX_LogFeatureLifecycle("feature_run","chart_ui_updates","success",g_last_run_chart_ui_updates,false);
          g_menu.Build(g_ea_enabled);
          g_debug.Write("INFO","ui","menu_toggle",
                        "ea1="+(g_ea_enabled[0]?"on":"off")+
@@ -964,6 +968,9 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
                        " ea5="+(g_ea_enabled[4]?"on":"off")+" isolation="+(InpIsolationMode?"true":"false"));
         }
       else
+        {
+         ISSX_LogFeatureLifecycle("feature_run","chart_ui_updates","failed | reason="+g_menu.LastError(),g_last_run_chart_ui_updates,false);
          g_debug.Write("WARN","ui","menu_click_ignored",g_menu.LastError());
+        }
      }
   }
