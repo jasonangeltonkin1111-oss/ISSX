@@ -2,11 +2,11 @@
 #define __ISSX_TELEMETRY_MQH__
 
 // ============================================================================
-// ISSX TELEMETRY ENGINE v1.722
+// ISSX TELEMETRY ENGINE v1.723
 // Infrastructure-only in-memory telemetry for structured diagnostics.
 // ============================================================================
 
-#define ISSX_TELEMETRY_VERSION         "1.722"
+#define ISSX_TELEMETRY_VERSION         "1.723"
 #define ISSX_TELEMETRY_MAX_EVENTS      256
 #define ISSX_TELEMETRY_STAGE_COUNT     9
 
@@ -92,6 +92,7 @@ private:
    long                        m_total_events;
    long                        m_dropped_events;
    long                        m_cycle_count;
+   string                      m_last_checkpoint;
 
    string StageName(const ISSX_TelemetryStageId stage_id) const
      {
@@ -189,6 +190,26 @@ private:
       m_total_events++;
     }
 
+   string ErrorTypeFromCode(const int code,const string message) const
+     {
+      if(code==0)
+         return "error_unknown";
+      const int abs_code=MathAbs(code);
+      if(abs_code==4014 || abs_code==4016 || abs_code==4756)
+         return "error_trade";
+      if(abs_code>=4000 && abs_code<5000)
+         return "error_runtime";
+      if(abs_code>=5000 && abs_code<6000)
+         return "error_io";
+      string lc=message;
+      StringToLower(lc);
+      if(StringFind(lc,"memory")>=0 || StringFind(lc,"alloc")>=0)
+         return "error_memory";
+      if(StringFind(lc,"network")>=0 || StringFind(lc,"timeout")>=0)
+         return "error_network";
+      return "error_general";
+     }
+
 public:
    void Init()
      {
@@ -205,6 +226,7 @@ public:
       m_total_events=0;
       m_dropped_events=0;
       m_cycle_count=0;
+      m_last_checkpoint="";
       m_initialized=true;
 
       Push(issx_telemetry_stage_system,"telemetry_init","telemetry_init",0.0,"",-1);
@@ -217,6 +239,9 @@ public:
 
    void Checkpoint(const string name)
      {
+      if(name==m_last_checkpoint)
+         return;
+      m_last_checkpoint=name;
       Push(issx_telemetry_stage_system,"checkpoint",name,0.0,"",-1);
      }
 
@@ -225,6 +250,8 @@ public:
       if(!m_initialized)
          return;
       const int idx=StageIndex(stage_id);
+      if(m_stage[idx].stage_begin_us>0 && m_stage[idx].last_stage_run=="RUNNING")
+         return;
       m_stage[idx].last_stage_run="RUNNING";
       m_stage[idx].stage_begin_us=(ulong)GetMicrosecondCount();
       Push(stage_id,"stage_start","telemetry_stage_transition",0.0,"",-1);
@@ -268,9 +295,7 @@ public:
       const int idx=StageIndex(stage_id);
       m_stage[idx].last_stage_run="ERROR";
       m_stage[idx].last_stage_reason=message;
-      Push(stage_id,"error_detected",message,(double)code,"",-1);
-      Push(stage_id,"error_code",IntegerToString(code),(double)code,"",-1);
-      Push(stage_id,"telemetry_error_capture",message,(double)code,"",-1);
+      Push(stage_id,ErrorTypeFromCode(code,message),message,(double)code,"",-1);
      }
 
    void Metric(const string name,const double value)
@@ -291,7 +316,6 @@ public:
       m_stage[idx].symbols_cycle=(long)processed;
       m_stage[idx].batch_size=total;
       Push(stage_id,"batch_progress","batch_progress",(double)processed,"",(long)total);
-      Push(stage_id,"hydration_progress","hydration_progress",(double)processed,"",(long)total);
      }
 
    void CursorPosition(const ISSX_TelemetryStageId stage_id,const int cursor,const int batch_size)
@@ -307,8 +331,6 @@ public:
       const int idx=StageIndex(stage_id);
       m_stage[idx].payload_bytes=bytes;
       Push(stage_id,"json_payload_bytes","json_payload_bytes",(double)bytes,"",-1);
-      Push(stage_id,"stage_payload_ready","stage_payload_ready",(double)bytes,"",-1);
-      Push(stage_id,"debug_payload_ready","debug_payload_ready",(double)bytes,"",-1);
      }
 
    void MemoryEstimate(const ISSX_TelemetryStageId stage_id,const long bytes)
@@ -360,7 +382,8 @@ public:
       const int idx=StageIndex(issx_telemetry_stage_ea2_history);
       m_stage[idx].copyrates_calls++;
       m_stage[idx].copyrates_bars+=MathMax(0,bars);
-      Push(issx_telemetry_stage_ea2_history,"copyrates_pressure","copyrates_pressure",(double)bars,"",-1);
+      if((m_stage[idx].copyrates_calls & 15)==1)
+         Push(issx_telemetry_stage_ea2_history,"copyrates_pressure","copyrates_pressure",(double)m_stage[idx].copyrates_bars,"",-1);
      }
 
    void RecordPayloadBytes(const string type,const int bytes)
@@ -393,8 +416,8 @@ public:
 
    void ArrayResizeEvent(const ISSX_TelemetryStageId stage_id,const int before_size,const int after_size)
      {
-      Push(stage_id,"array_resize",IntegerToString(before_size)+"->"+IntegerToString(after_size),(double)after_size,"",-1);
-   }
+      Push(stage_id,"array_resize","array_resize",(double)after_size,"",(long)before_size);
+     }
 
    void Flush()
      {
