@@ -1,5 +1,5 @@
 ﻿#property strict
-#property version   "1.722"
+#property version   "1.723"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
@@ -102,6 +102,8 @@ string              g_last_status_comment       = "";
 bool                g_logged_timer_heavy_skip   = false;
 bool                g_logged_tick_heavy_skip    = false;
 bool                g_menu_initialized          = false;
+ulong               g_timer_skip_runtime_not_ready_count = 0;
+ulong               g_timer_skip_kernel_busy_count       = 0;
 string              g_last_feature_runtime_scheduler = "";
 string              g_last_feature_timer_heavy       = "";
 string              g_last_feature_init_runtime_scheduler = "";
@@ -1430,19 +1432,29 @@ int OnInit()
    ISSX_LogFeatureStatus("feature_init","runtime_scheduler",runtime_init_state,g_last_feature_init_runtime_scheduler,false);
 
    g_bootstrapped     = false;
-   g_runtime_ready    = true;
+   g_runtime_ready    = false;
    g_first_cycle_done = false;
    g_kernel_busy      = false;
+   g_timer_pulse_count=0;
+   g_timer_skip_runtime_not_ready_count=0;
+   g_timer_skip_kernel_busy_count=0;
 
+   int timer_sec=ISSX_EVENT_TIMER_SEC;
+   if(timer_sec<1)
+     {
+      g_debug.Write("WARN","timer","invalid_interval","configured="+IntegerToString(ISSX_EVENT_TIMER_SEC)+" fallback=1");
+      timer_sec=1;
+     }
 
-   if(!EventSetTimer(ISSX_EVENT_TIMER_SEC))
+   if(!EventSetTimer(timer_sec))
      {
       g_debug.Write("ERROR","timer","event_set_failed","err="+IntegerToString(GetLastError()));
       g_debug.Write("ERROR","lifecycle","oninit_end","result=INIT_FAILED (critical timer failure)");
       return INIT_FAILED;
      }
 
-   g_debug.Write("INFO","timer","event_set_ok","sec="+IntegerToString(ISSX_EVENT_TIMER_SEC));
+   g_runtime_ready=true;
+   g_debug.Write("INFO","timer","event_set_ok","sec="+IntegerToString(timer_sec));
    g_ui.Init(g_debug);
    g_debug.Write("INFO","lifecycle","oninit_end","result=INIT_SUCCEEDED");
    return INIT_SUCCEEDED;
@@ -1469,15 +1481,17 @@ void OnTimer()
   {
    if(!g_runtime_ready)
      {
-      Print("ISSX: TIMER skipped runtime not ready");
-      g_debug.Write("WARN","timer","skip","runtime_not_ready");
+      g_timer_skip_runtime_not_ready_count++;
+      if((g_timer_skip_runtime_not_ready_count%30)==1)
+         g_debug.Write("WARN","timer","skip","runtime_not_ready count="+ISSX_Util::ULongToStringX(g_timer_skip_runtime_not_ready_count));
       return;
      }
 
    if(g_kernel_busy)
      {
-      Print("ISSX: TIMER skipped kernel busy");
-      g_debug.Write("WARN","timer","skip","kernel_busy");
+      g_timer_skip_kernel_busy_count++;
+      if((g_timer_skip_kernel_busy_count%30)==1)
+         g_debug.Write("WARN","timer","skip","kernel_busy count="+ISSX_Util::ULongToStringX(g_timer_skip_kernel_busy_count));
       return;
      }
 
