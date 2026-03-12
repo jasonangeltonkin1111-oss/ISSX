@@ -718,6 +718,14 @@ struct ISSX_EA2_State
    string                      dependency_block_reason;
    string                      debug_weak_link_code;
    int                         symbol_count;
+   int                         stream_source_total;
+   int                         stream_cursor;
+   int                         stream_window_start;
+   int                         stream_window_end;
+   int                         stream_window_size;
+   int                         stream_processed_total;
+   int                         stream_cycles;
+   bool                        stream_cycle_advanced;
    ISSX_EA2_SymbolState        symbols[];
    ISSX_EA2_ForensicDiag       forensic;
 
@@ -744,6 +752,14 @@ struct ISSX_EA2_State
       dependency_block_reason="na";
       debug_weak_link_code="none";
       symbol_count=0;
+      stream_source_total=0;
+      stream_cursor=0;
+      stream_window_start=0;
+      stream_window_end=0;
+      stream_window_size=0;
+      stream_processed_total=0;
+      stream_cycles=0;
+      stream_cycle_advanced=false;
       ArrayResize(symbols,0);
       forensic.Reset();
      }
@@ -2689,6 +2705,11 @@ public:
                           const string firm_id="")
      {
       const int source_count=ArraySize(symbols);
+      int stream_source_total=MathMax(0,source_count);
+      int stream_cycles=st.stream_cycles+1;
+      int stream_cursor=st.stream_cursor;
+      bool stream_cycle_advanced=false;
+
       if(source_count<=0)
         {
          AddForensicEvent(st,"history_error_conditions","stage_slice_empty_source");
@@ -2711,6 +2732,12 @@ public:
          return false;
         }
 
+      if(stream_cursor<0 || stream_cursor>=source_count)
+         stream_cursor=0;
+      const int stream_window_size=n;
+      const int stream_window_start=stream_cursor;
+      const int stream_window_end=MathMin(source_count,stream_window_start+n);
+
       string slice_symbols[];
       if(ArrayResize(slice_symbols,n)!=n)
         {
@@ -2723,7 +2750,12 @@ public:
         }
 
       for(int i=0;i<n;i++)
-         slice_symbols[i]=symbols[i];
+        {
+         int src_idx=stream_window_start+i;
+         if(src_idx>=source_count)
+            src_idx=source_count-1;
+         slice_symbols[i]=symbols[src_idx];
+        }
 
       const bool ok=RebuildStateFromSymbolList(st,slice_symbols,deep_profile_default,firm_id);
       if(!ok)
@@ -2732,8 +2764,35 @@ public:
          st.stage_publishability_state="blocked";
          st.dependency_block_reason=ISSX_ErrorToString(ISSX_ERR_HISTORY_NOT_READY);
          st.debug_weak_link_code="ea2_slice_empty";
+         return false;
         }
-      return ok;
+
+      int stream_processed_total=MathMin(source_count,stream_window_end);
+      if(stream_window_end>=source_count)
+        {
+         stream_cursor=0;
+         stream_processed_total=source_count;
+         stream_cycle_advanced=true;
+        }
+      else
+        {
+         stream_cursor=stream_window_end;
+        }
+
+      st.stream_source_total=stream_source_total;
+      st.stream_cursor=stream_cursor;
+      st.stream_window_start=stream_window_start;
+      st.stream_window_end=stream_window_end;
+      st.stream_window_size=stream_window_size;
+      st.stream_processed_total=stream_processed_total;
+      st.stream_cycles=stream_cycles;
+      st.stream_cycle_advanced=stream_cycle_advanced;
+
+      AddForensicEvent(st,"history_batch_progress",
+                       "cursor_start="+IntegerToString(st.stream_window_start)+
+                       " cursor_end="+IntegerToString(st.stream_window_end)+
+                       " source_total="+IntegerToString(st.stream_source_total));
+      return true;
      }
 
    static string StagePublish(const ISSX_EA2_State &st)
@@ -2760,6 +2819,14 @@ public:
       j.KeyValue("dependency_block_reason",local_state.dependency_block_reason);
       j.KeyValue("debug_weak_link_code",local_state.debug_weak_link_code);
       j.KeyValue("symbol_count",IntegerToString(local_state.symbol_count),false);
+      j.KeyValue("stream_source_total",IntegerToString(local_state.stream_source_total),false);
+      j.KeyValue("stream_cursor",IntegerToString(local_state.stream_cursor),false);
+      j.KeyValue("stream_window_start",IntegerToString(local_state.stream_window_start),false);
+      j.KeyValue("stream_window_end",IntegerToString(local_state.stream_window_end),false);
+      j.KeyValue("stream_window_size",IntegerToString(local_state.stream_window_size),false);
+      j.KeyValue("stream_processed_total",IntegerToString(local_state.stream_processed_total),false);
+      j.KeyValue("stream_cycles",IntegerToString(local_state.stream_cycles),false);
+      j.KeyValue("stream_cycle_advanced",ISSX_Util::BoolToString(local_state.stream_cycle_advanced),false);
       j.KeyValue("changed_symbol_count",IntegerToString(local_state.delta.changed_symbol_count),false);
       j.KeyValue("changed_timeframe_count",IntegerToString(local_state.delta.changed_timeframe_count),false);
       j.KeyValue("history_store_path",StageHistoryStorePath());
@@ -2786,6 +2853,14 @@ public:
       j.KeyValue("history_copyrates_fail",IntegerToString(local_state.forensic.copyrates_failures),false);
       j.KeyValue("history_batch_symbols_target",IntegerToString(local_state.forensic.batch_symbols_target),false);
       j.KeyValue("history_batch_symbols_done",IntegerToString(local_state.forensic.batch_symbols_done),false);
+      j.KeyValue("stream_source_total",IntegerToString(local_state.stream_source_total),false);
+      j.KeyValue("stream_cursor",IntegerToString(local_state.stream_cursor),false);
+      j.KeyValue("stream_window_start",IntegerToString(local_state.stream_window_start),false);
+      j.KeyValue("stream_window_end",IntegerToString(local_state.stream_window_end),false);
+      j.KeyValue("stream_window_size",IntegerToString(local_state.stream_window_size),false);
+      j.KeyValue("stream_processed_total",IntegerToString(local_state.stream_processed_total),false);
+      j.KeyValue("stream_cycles",IntegerToString(local_state.stream_cycles),false);
+      j.KeyValue("stream_cycle_advanced",ISSX_Util::BoolToString(local_state.stream_cycle_advanced),false);
       j.KeyValue("history_persistence_write_attempt",IntegerToString(local_state.forensic.persistence_write_attempts),false);
       j.KeyValue("history_persistence_write_success",IntegerToString(local_state.forensic.persistence_write_successes),false);
       j.KeyValue("history_persistence_write_fail",IntegerToString(local_state.forensic.persistence_write_failures),false);

@@ -8,7 +8,7 @@
 #include <ISSX/issx_data_handler.mqh>
 
 // ============================================================================
-// ISSX MARKET ENGINE v1.719
+// ISSX MARKET ENGINE v1.720
 // EA1 shared engine for MarketStateCore.
 //
 // HARDENING NOTES
@@ -25,7 +25,7 @@
 //   owner runtime/persistence layer
 // ============================================================================
 
-#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.719"
+#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.720"
 
 enum ISSX_EA1_RuntimeState
   {
@@ -821,6 +821,12 @@ struct ISSX_EA1_State
    int                      hydration_cursor;
    int                      hydration_processed;
    int                      hydration_total;
+   int                      hydration_remaining;
+   int                      hydration_window_size;
+   int                      hydration_window_start;
+   int                      hydration_window_end;
+   int                      hydration_windows_completed;
+   int                      hydration_full_passes;
    int                      hydration_batch_size;
    bool                     hydration_complete;
    string                   hydration_last_symbol_start;
@@ -878,6 +884,12 @@ struct ISSX_EA1_State
       hydration_cursor=0;
       hydration_processed=0;
       hydration_total=0;
+      hydration_remaining=0;
+      hydration_window_size=0;
+      hydration_window_start=0;
+      hydration_window_end=0;
+      hydration_windows_completed=0;
+      hydration_full_passes=0;
       hydration_batch_size=25;
       hydration_complete=false;
       hydration_last_symbol_start="";
@@ -2273,6 +2285,12 @@ io_symbol.rankability_gate.contradiction_count=0;
       j.NameString("ea1_runtime_state",ISSX_EA1_RuntimeStateText(state.runtime_state));
       j.NameInt("hydration_processed",state.hydration_processed);
       j.NameInt("hydration_total",state.hydration_total);
+      j.NameInt("hydration_remaining",state.hydration_remaining);
+      j.NameInt("hydration_window_size",state.hydration_window_size);
+      j.NameInt("hydration_window_start",state.hydration_window_start);
+      j.NameInt("hydration_window_end",state.hydration_window_end);
+      j.NameInt("hydration_windows_completed",state.hydration_windows_completed);
+      j.NameInt("hydration_full_passes",state.hydration_full_passes);
       j.NameBool("hydration_complete",state.hydration_complete);
       j.NameBool("deterministic_sort_applied",state.deterministic_sort_applied);
       j.NameInt("deterministic_sorted_count",state.deterministic_sorted_count);
@@ -2432,6 +2450,12 @@ io_symbol.rankability_gate.contradiction_count=0;
       j.NameString("ea1_runtime_state",ISSX_EA1_RuntimeStateText(state.runtime_state));
       j.NameInt("hydration_processed",state.hydration_processed);
       j.NameInt("hydration_total",state.hydration_total);
+      j.NameInt("hydration_remaining",state.hydration_remaining);
+      j.NameInt("hydration_window_size",state.hydration_window_size);
+      j.NameInt("hydration_window_start",state.hydration_window_start);
+      j.NameInt("hydration_window_end",state.hydration_window_end);
+      j.NameInt("hydration_windows_completed",state.hydration_windows_completed);
+      j.NameInt("hydration_full_passes",state.hydration_full_passes);
       j.NameBool("hydration_complete",state.hydration_complete);
       j.NameBool("deterministic_sort_applied",state.deterministic_sort_applied);
       j.NameInt("deterministic_sorted_count",state.deterministic_sorted_count);
@@ -2755,20 +2779,36 @@ public:
      {
       ArrayResize(io_state.hydration_queue,0);
       const int n=ArraySize(io_state.symbols);
-      int cap=n;
-      if(max_symbols>0)
-         cap=MathMin(cap,max_symbols);
-      if(cap<0)
-         cap=0;
+      if(n<0)
+        {
+         io_state.hydration_total=0;
+         io_state.hydration_processed=0;
+         io_state.hydration_remaining=0;
+         io_state.hydration_cursor=0;
+         io_state.hydration_window_size=0;
+         io_state.hydration_window_start=0;
+         io_state.hydration_window_end=0;
+         io_state.hydration_complete=true;
+         io_state.runtime_state=EA1_STATE_READY;
+         return;
+        }
 
-      ArrayResize(io_state.hydration_queue,cap);
-      for(int i=0;i<cap;i++)
+      ArrayResize(io_state.hydration_queue,n);
+      for(int i=0;i<n;i++)
          io_state.hydration_queue[i]=io_state.symbols[i].raw_broker_observation.symbol_raw;
 
-      io_state.hydration_total=cap;
-      io_state.hydration_cursor=0;
+      io_state.hydration_total=n;
       io_state.hydration_processed=0;
-      io_state.hydration_complete=(cap<=0);
+      io_state.hydration_remaining=n;
+      io_state.hydration_cursor=0;
+      io_state.hydration_window_size=(max_symbols>0 ? MathMin(max_symbols,n) : n);
+      if(io_state.hydration_window_size<=0 && n>0)
+         io_state.hydration_window_size=n;
+      io_state.hydration_window_start=0;
+      io_state.hydration_window_end=(n>0 ? MathMin(n,io_state.hydration_window_size) : 0);
+      io_state.hydration_windows_completed=0;
+      io_state.hydration_full_passes=0;
+      io_state.hydration_complete=(n<=0);
       io_state.runtime_state=(io_state.hydration_complete?EA1_STATE_READY:EA1_STATE_HYDRATING);
      }
 
@@ -2786,6 +2826,11 @@ public:
 
       io_state.universe.broker_universe=n;
       io_state.counters.listed_count=n;
+      io_state.hydration_remaining=MathMax(0,n-io_state.hydration_processed);
+      if(io_state.hydration_window_size<=0)
+         io_state.hydration_window_size=n;
+      if(io_state.hydration_window_end<=io_state.hydration_window_start)
+         io_state.hydration_window_end=MathMin(n,io_state.hydration_window_start+io_state.hydration_window_size);
      }
 
    static void HydrateSymbolAt(ISSX_EA1_State &io_state,const int index)
@@ -2818,6 +2863,7 @@ public:
       if(total<=0)
         {
          io_state.hydration_complete=true;
+         io_state.hydration_remaining=0;
          io_state.runtime_state=EA1_STATE_READY;
          return 0;
         }
@@ -2826,8 +2872,22 @@ public:
          return 0;
 
       const int batch=MathMax(1,io_state.hydration_batch_size);
-      const int remaining=(total-io_state.hydration_cursor);
-      const int work=MathMin(batch,remaining);
+      const int window_size=MathMax(1,io_state.hydration_window_size);
+      int window_start=io_state.hydration_window_start;
+      if(window_start<0 || window_start>=total)
+         window_start=0;
+      int window_end=MathMin(total,window_start+window_size);
+      if(window_end<=window_start)
+         window_end=MathMin(total,window_start+1);
+
+      if(io_state.hydration_cursor<window_start || io_state.hydration_cursor>=window_end)
+         io_state.hydration_cursor=window_start;
+
+      const int remaining=(window_end-io_state.hydration_cursor);
+      const int work=MathMin(batch,MathMax(0,remaining));
+
+      io_state.hydration_window_start=window_start;
+      io_state.hydration_window_end=window_end;
 
       for(int i=0;i<work;i++)
         {
@@ -2840,13 +2900,29 @@ public:
         }
 
       io_state.hydration_cursor+=work;
-      io_state.hydration_processed=io_state.hydration_cursor;
-      if(io_state.hydration_processed>=total)
+      io_state.hydration_processed=MathMin(total,MathMax(io_state.hydration_processed,io_state.hydration_cursor));
+
+      if(io_state.hydration_cursor>=window_end)
         {
-         io_state.hydration_complete=true;
-         io_state.runtime_state=EA1_STATE_READY;
+         io_state.hydration_windows_completed++;
+         if(window_end>=total)
+           {
+            io_state.hydration_complete=true;
+            io_state.runtime_state=EA1_STATE_READY;
+            io_state.hydration_cursor=total;
+            io_state.hydration_processed=total;
+            io_state.hydration_full_passes++;
+           }
+         else
+           {
+            io_state.hydration_window_start=window_end;
+            io_state.hydration_window_end=MathMin(total,io_state.hydration_window_start+window_size);
+            io_state.hydration_cursor=io_state.hydration_window_start;
+            io_state.runtime_state=EA1_STATE_HYDRATING;
+           }
         }
 
+      io_state.hydration_remaining=MathMax(0,total-io_state.hydration_processed);
       HydrationRebuildUniverseMetrics(io_state);
       return work;
      }
@@ -3111,6 +3187,12 @@ public:
       j.NameString("ea1_runtime_state",ISSX_EA1_RuntimeStateText(state.runtime_state));
       j.NameInt("hydration_processed",state.hydration_processed);
       j.NameInt("hydration_total",state.hydration_total);
+      j.NameInt("hydration_remaining",state.hydration_remaining);
+      j.NameInt("hydration_window_size",state.hydration_window_size);
+      j.NameInt("hydration_window_start",state.hydration_window_start);
+      j.NameInt("hydration_window_end",state.hydration_window_end);
+      j.NameInt("hydration_windows_completed",state.hydration_windows_completed);
+      j.NameInt("hydration_full_passes",state.hydration_full_passes);
       j.NameBool("hydration_complete",state.hydration_complete);
       j.NameBool("deterministic_sort_applied",state.deterministic_sort_applied);
       j.NameInt("deterministic_sorted_count",state.deterministic_sorted_count);
