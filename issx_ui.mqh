@@ -9,8 +9,10 @@
 #include <ISSX/issx_correlation_engine.mqh>
 #include <ISSX/issx_contracts.mqh>
 #include <ISSX/issx_debug_engine.mqh>
+#include <ISSX/issx_ui_test.mqh>
 
-#define ISSX_UI_MODULE_VERSION "1.718"
+#define ISSX_UI_MODULE_VERSION "1.719"
+#define ISSX_UI_DEBUG_MODULE_VERSION ISSX_UI_MODULE_VERSION
 #define ISSX_HUD_PREFIX "ISSX_HUD_"
 #define ISSX_HUD_MAIN_OBJECT "ISSX_HUD_MAIN"
 

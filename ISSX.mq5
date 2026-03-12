@@ -17,7 +17,6 @@
 #include <ISSX/issx_correlation_engine.mqh>
 #include <ISSX/issx_contracts.mqh>
 #include <ISSX/issx_ui.mqh>
-#include <ISSX/issx_ui_test.mqh>
 #include <ISSX/issx_debug_engine.mqh>
 #include <ISSX/issx_telemetry.mqh>
 
