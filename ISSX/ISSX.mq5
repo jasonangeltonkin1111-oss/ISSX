@@ -1,5 +1,5 @@
 #property strict
-#property version   "9.999"
+#property version   "1.7.2"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
