@@ -5,7 +5,7 @@
 // Shared foundation for the consolidated single-EA / five-stage ISSX kernel.
 //
 // HARDENING NOTES
-// - upgraded owner surface to blueprint v1.714 governance
+// - upgraded owner surface to blueprint v1.715 governance
 // - preserved shared semantic ownership in core only
 // - expanded field-key ownership for manifest / scheduler / debug / EA5 surfaces
 // - added compatibility-alias lifecycle and external-contract stability enums

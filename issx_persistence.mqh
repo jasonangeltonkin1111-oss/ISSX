@@ -3,9 +3,10 @@
 
 #include <ISSX/issx_core.mqh>
 #include <ISSX/issx_registry.mqh>
+#include <ISSX/issx_data_handler.mqh>
 
 // ============================================================================
-// ISSX PERSISTENCE v1.714
+// ISSX PERSISTENCE v1.715
 // Blueprint-aligned persistence / handoff / fallback / warehouse / lock helpers.
 // Authoritative truth remains: accepted internal current + coherent manifest chain.
 // ============================================================================
@@ -269,50 +270,9 @@ public:
       if(!EnsureParentFolder(relative_path))
          return false;
 
-      const string tmp_path=relative_path+".tmp";
-
-      ResetLastError();
-      const int h=FileOpen(tmp_path,
-                           FILE_WRITE|FILE_TXT|FILE_COMMON|FILE_ANSI,
-                           NoDelimiter(),
-                           Utf8Codepage());
-      if(h==INVALID_HANDLE)
-         return false;
-
-      const int wanted=StringLen(text);
-      const uint written=FileWriteString(h,text,wanted);
-
-      ResetLastError();
-      FileFlush(h);
-      const int flush_error=GetLastError();
-      FileClose(h);
-
-      if(((int)written!=wanted) || flush_error!=0)
-        {
-         FileDelete(tmp_path,FILE_COMMON);
-         return false;
-        }
-
-      string verify="";
-      if(!ReadText(tmp_path,verify) || verify!=text)
-        {
-         FileDelete(tmp_path,FILE_COMMON);
-         return false;
-        }
-
-      FileDelete(relative_path,FILE_COMMON);
-      if(!FileMove(tmp_path,0,relative_path,FILE_COMMON))
-        {
-         // fallback copy + delete when FileMove is unavailable/blocked.
-         if(!FileCopy(tmp_path,0,relative_path,FILE_COMMON))
-           {
-            FileDelete(tmp_path,FILE_COMMON);
-            return false;
-           }
-         FileDelete(tmp_path,FILE_COMMON);
-        }
-
-      return true;
+      ISSX_DataHandler::ForensicState fs;
+      fs.Reset();
+      return ISSX_DataHandler::WritePayloadAtomic(relative_path,text,fs,true);
      }
 
    static bool WriteText(const string relative_path,const string text)
@@ -365,6 +325,13 @@ public:
 
    static bool CopyText(const string src,const string dst)
      {
+      if(!EnsureParentFolder(dst))
+         return false;
+      ISSX_DataHandler::ForensicState fs;
+      fs.Reset();
+      if(ISSX_DataHandler::CopyProjection(src,dst,fs))
+         return true;
+
       string s="";
       if(!ReadText(src,s))
          return false;
