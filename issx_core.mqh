@@ -1,11 +1,11 @@
 #ifndef __ISSX_CORE_MQH__
 #define __ISSX_CORE_MQH__
 // ============================================================================
-// ISSX CORE v1.714
+// ISSX CORE v1.715
 // Shared foundation for the consolidated single-EA / five-stage ISSX kernel.
 //
 // HARDENING NOTES
-// - upgraded owner surface to blueprint v1.714 governance
+// - upgraded owner surface to blueprint v1.715 governance
 // - preserved shared semantic ownership in core only
 // - expanded field-key ownership for manifest / scheduler / debug / EA5 surfaces
 // - added compatibility-alias lifecycle and external-contract stability enums
@@ -21,15 +21,15 @@
 
 #define ISSX_ENGINE_NAME                              "ISSX"
 #define ISSX_ENGINE_FAMILY                            "ISSX_PIPELINE"
-#define ISSX_ENGINE_VERSION                           "1.714"
-#define ISSX_SCHEMA_VERSION                           "1.714"
+#define ISSX_ENGINE_VERSION                           "1.715"
+#define ISSX_SCHEMA_VERSION                           "1.715"
 #define ISSX_SCHEMA_EPOCH                             10702
-#define ISSX_STORAGE_VERSION                          1720
-#define ISSX_STAGE_API_VERSION                        1720
-#define ISSX_SERIALIZER_VERSION                       1720
-#define ISSX_POLICY_FINGERPRINT_VERSION               1720
+#define ISSX_STORAGE_VERSION                          1721
+#define ISSX_STAGE_API_VERSION                        1721
+#define ISSX_SERIALIZER_VERSION                       1721
+#define ISSX_POLICY_FINGERPRINT_VERSION               1721
 #define ISSX_FINGERPRINT_ALGO_VERSION                 4
-#define ISSX_LEGEND_VERSION                           "1.714"
+#define ISSX_LEGEND_VERSION                           "1.715"
 #define ISSX_OWNER_MODULE_NAME_CORE                   "issx_core.mqh"
 #define ISSX_OWNER_MODULE_HASH_MEANING_VERSION        1
 

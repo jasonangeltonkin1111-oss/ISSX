@@ -1,0 +1,361 @@
+#ifndef __ISSX_TELEMETRY_MQH__
+#define __ISSX_TELEMETRY_MQH__
+
+// ============================================================================
+// ISSX TELEMETRY ENGINE v1.715
+// Infrastructure-only in-memory telemetry for structured diagnostics.
+// ============================================================================
+
+#define ISSX_TELEMETRY_VERSION         "1.715"
+#define ISSX_TELEMETRY_MAX_EVENTS      256
+#define ISSX_TELEMETRY_STAGE_COUNT     9
+
+enum ISSX_TelemetryStageId
+  {
+   issx_telemetry_stage_ea1_market=0,
+   issx_telemetry_stage_ea2_history,
+   issx_telemetry_stage_ea3_selection,
+   issx_telemetry_stage_ea4_correlation,
+   issx_telemetry_stage_ea5_contracts,
+   issx_telemetry_stage_system,
+   issx_telemetry_stage_kernel,
+   issx_telemetry_stage_runtime,
+   issx_telemetry_stage_ui
+  };
+
+struct ISSX_TelemetryEvent
+  {
+   datetime timestamp;
+   string   stage;
+   string   event_type;
+   string   message;
+   double   value;
+   string   symbol;
+   long     cursor;
+
+   void Reset()
+     {
+      timestamp=0;
+      stage="";
+      event_type="";
+      message="";
+      value=0.0;
+      symbol="";
+      cursor=-1;
+     }
+  };
+
+struct ISSX_TelemetryStageSnapshot
+  {
+   string stage_name;
+   string last_stage_run;
+   string last_stage_reason;
+   long   last_stage_elapsed_ms;
+   long   symbols_processed;
+   long   symbols_total;
+   long   batch_cursor;
+   long   batch_size;
+   long   payload_bytes;
+   long   estimated_memory;
+
+   void Reset(const string name)
+     {
+      stage_name=name;
+      last_stage_run="IDLE";
+      last_stage_reason="none";
+      last_stage_elapsed_ms=0;
+      symbols_processed=0;
+      symbols_total=0;
+      batch_cursor=0;
+      batch_size=0;
+      payload_bytes=0;
+      estimated_memory=0;
+     }
+  };
+
+class ISSX_TelemetryEngine
+  {
+private:
+   ISSX_TelemetryEvent         m_events[];
+   ISSX_TelemetryStageSnapshot m_stage[];
+   bool                        m_initialized;
+   int                         m_count;
+   int                         m_start;
+   long                        m_total_events;
+   long                        m_dropped_events;
+
+   string StageName(const ISSX_TelemetryStageId stage_id) const
+     {
+      switch(stage_id)
+        {
+         case issx_telemetry_stage_ea1_market:     return "EA1_MARKET";
+         case issx_telemetry_stage_ea2_history:    return "EA2_HISTORY";
+         case issx_telemetry_stage_ea3_selection:  return "EA3_SELECTION";
+         case issx_telemetry_stage_ea4_correlation:return "EA4_CORRELATION";
+         case issx_telemetry_stage_ea5_contracts:  return "EA5_CONTRACTS";
+         case issx_telemetry_stage_system:         return "SYSTEM";
+         case issx_telemetry_stage_kernel:         return "KERNEL";
+         case issx_telemetry_stage_runtime:        return "RUNTIME";
+         case issx_telemetry_stage_ui:             return "UI";
+        }
+      return "SYSTEM";
+     }
+
+   int StageIndex(const ISSX_TelemetryStageId stage_id) const
+     {
+      int idx=(int)stage_id;
+      if(idx<0 || idx>=ISSX_TELEMETRY_STAGE_COUNT)
+         return (int)issx_telemetry_stage_system;
+      return idx;
+     }
+
+   void Push(const ISSX_TelemetryStageId stage_id,
+             const string event_type,
+             const string message,
+             const double value,
+             const string symbol,
+             const long cursor)
+     {
+      if(!m_initialized)
+         return;
+
+      int write_index=0;
+      if(m_count<ISSX_TELEMETRY_MAX_EVENTS)
+        {
+         write_index=(m_start+m_count)%ISSX_TELEMETRY_MAX_EVENTS;
+         m_count++;
+        }
+      else
+        {
+         write_index=m_start;
+         m_start=(m_start+1)%ISSX_TELEMETRY_MAX_EVENTS;
+         m_dropped_events++;
+
+         ISSX_TelemetryEvent drop_evt;
+         drop_evt.Reset();
+         drop_evt.timestamp=TimeCurrent();
+         drop_evt.stage="SYSTEM";
+         drop_evt.event_type="telemetry_event_drop";
+         drop_evt.message="telemetry_buffer_full";
+         drop_evt.value=(double)m_dropped_events;
+         drop_evt.cursor=-1;
+         m_events[write_index]=drop_evt;
+         m_total_events++;
+         return;
+        }
+
+      ISSX_TelemetryEvent evt;
+      evt.Reset();
+      evt.timestamp=TimeCurrent();
+      evt.stage=StageName(stage_id);
+      evt.event_type=event_type;
+      evt.message=message;
+      evt.value=value;
+      evt.symbol=symbol;
+      evt.cursor=cursor;
+      m_events[write_index]=evt;
+      m_total_events++;
+    }
+
+public:
+   void Init()
+     {
+      ArrayResize(m_events,ISSX_TELEMETRY_MAX_EVENTS);
+      for(int i=0;i<ArraySize(m_events);i++)
+         m_events[i].Reset();
+
+      ArrayResize(m_stage,ISSX_TELEMETRY_STAGE_COUNT);
+      for(int s=0;s<ISSX_TELEMETRY_STAGE_COUNT;s++)
+         m_stage[s].Reset(StageName((ISSX_TelemetryStageId)s));
+
+      m_count=0;
+      m_start=0;
+      m_total_events=0;
+      m_dropped_events=0;
+      m_initialized=true;
+
+      Push(issx_telemetry_stage_system,"telemetry_init","telemetry_init",0.0,"",-1);
+     }
+
+   void Event(const string category,const string message)
+     {
+      Push(issx_telemetry_stage_system,category,message,0.0,"",-1);
+     }
+
+   void Checkpoint(const string name)
+     {
+      Push(issx_telemetry_stage_system,"checkpoint",name,0.0,"",-1);
+     }
+
+   void StageStart(const ISSX_TelemetryStageId stage_id)
+     {
+      if(!m_initialized)
+         return;
+      const int idx=StageIndex(stage_id);
+      m_stage[idx].last_stage_run="RUNNING";
+      Push(stage_id,"stage_start","telemetry_stage_transition",0.0,"",-1);
+     }
+
+   void StageEnd(const ISSX_TelemetryStageId stage_id,const string status,const long elapsed_ms)
+     {
+      if(!m_initialized)
+         return;
+      const int idx=StageIndex(stage_id);
+      m_stage[idx].last_stage_run=status;
+      m_stage[idx].last_stage_elapsed_ms=elapsed_ms;
+
+      string event_type="stage_complete";
+      string lc=status;
+      StringToLower(lc);
+      if(lc=="skipped")
+         event_type="stage_skipped";
+      else if(lc=="degraded" || lc=="partial")
+         event_type="stage_degraded";
+      else if(lc=="error" || lc=="failed")
+         event_type="stage_error";
+      else if(lc=="blocked")
+         event_type="stage_blocked";
+
+      Push(stage_id,event_type,"telemetry_stage_transition",(double)elapsed_ms,"",-1);
+     }
+
+   void StageReason(const ISSX_TelemetryStageId stage_id,const string reason)
+     {
+      if(!m_initialized)
+         return;
+      const int idx=StageIndex(stage_id);
+      m_stage[idx].last_stage_reason=reason;
+      Push(stage_id,"error_context",reason,0.0,"",-1);
+     }
+
+   void Error(const ISSX_TelemetryStageId stage_id,const int code,const string message)
+     {
+      const int idx=StageIndex(stage_id);
+      m_stage[idx].last_stage_run="ERROR";
+      m_stage[idx].last_stage_reason=message;
+      Push(stage_id,"error_detected",message,(double)code,"",-1);
+      Push(stage_id,"error_code",IntegerToString(code),(double)code,"",-1);
+      Push(stage_id,"telemetry_error_capture",message,(double)code,"",-1);
+     }
+
+   void Metric(const string name,const double value)
+     {
+      Push(issx_telemetry_stage_system,name,"telemetry_metric_update",value,"",-1);
+     }
+
+   void SymbolProgress(const ISSX_TelemetryStageId stage_id,const string symbol)
+     {
+      Push(stage_id,"symbol_progress","symbol_progress",0.0,symbol,-1);
+     }
+
+   void BatchProgress(const ISSX_TelemetryStageId stage_id,const int processed,const int total)
+     {
+      const int idx=StageIndex(stage_id);
+      m_stage[idx].symbols_processed=processed;
+      m_stage[idx].symbols_total=total;
+      m_stage[idx].batch_size=total;
+      Push(stage_id,"batch_progress","batch_progress",(double)processed,"",(long)total);
+      Push(stage_id,"hydration_progress","hydration_progress",(double)processed,"",(long)total);
+     }
+
+   void CursorPosition(const ISSX_TelemetryStageId stage_id,const int cursor,const int batch_size)
+     {
+      const int idx=StageIndex(stage_id);
+      m_stage[idx].batch_cursor=cursor;
+      m_stage[idx].batch_size=batch_size;
+      Push(stage_id,"cursor_position","cursor_position",(double)cursor,"",(long)batch_size);
+     }
+
+   void Payload(const ISSX_TelemetryStageId stage_id,const int bytes)
+     {
+      const int idx=StageIndex(stage_id);
+      m_stage[idx].payload_bytes=bytes;
+      Push(stage_id,"json_payload_bytes","json_payload_bytes",(double)bytes,"",-1);
+      Push(stage_id,"stage_payload_ready","stage_payload_ready",(double)bytes,"",-1);
+      Push(stage_id,"debug_payload_ready","debug_payload_ready",(double)bytes,"",-1);
+     }
+
+   void MemoryEstimate(const ISSX_TelemetryStageId stage_id,const long bytes)
+     {
+      const int idx=StageIndex(stage_id);
+      m_stage[idx].estimated_memory=bytes;
+      Push(stage_id,"memory_estimate","memory_estimate",(double)bytes,"",-1);
+      if(bytes>(64L*1024L*1024L))
+         Push(stage_id,"allocation_warning","allocation_warning",(double)bytes,"",-1);
+     }
+
+   void ArrayResizeEvent(const ISSX_TelemetryStageId stage_id,const int before_size,const int after_size)
+     {
+      Push(stage_id,"array_resize",IntegerToString(before_size)+"->"+IntegerToString(after_size),(double)after_size,"",-1);
+   }
+
+   void Flush()
+     {
+      Push(issx_telemetry_stage_system,"flush","telemetry_flush",(double)m_count,"",-1);
+     }
+
+   string LastStageRun(const ISSX_TelemetryStageId stage_id) const
+     {
+      return m_stage[StageIndex(stage_id)].last_stage_run;
+     }
+
+   string LastStageReason(const ISSX_TelemetryStageId stage_id) const
+     {
+      return m_stage[StageIndex(stage_id)].last_stage_reason;
+     }
+
+   long LastStageElapsedMs(const ISSX_TelemetryStageId stage_id) const
+     {
+      return m_stage[StageIndex(stage_id)].last_stage_elapsed_ms;
+     }
+
+   long SymbolsProcessed(const ISSX_TelemetryStageId stage_id) const
+     {
+      return m_stage[StageIndex(stage_id)].symbols_processed;
+     }
+
+   long SymbolsTotal(const ISSX_TelemetryStageId stage_id) const
+     {
+      return m_stage[StageIndex(stage_id)].symbols_total;
+     }
+
+   long BatchCursor(const ISSX_TelemetryStageId stage_id) const
+     {
+      return m_stage[StageIndex(stage_id)].batch_cursor;
+     }
+
+   long BatchSize(const ISSX_TelemetryStageId stage_id) const
+     {
+      return m_stage[StageIndex(stage_id)].batch_size;
+     }
+
+   long PayloadBytes(const ISSX_TelemetryStageId stage_id) const
+     {
+      return m_stage[StageIndex(stage_id)].payload_bytes;
+     }
+
+   long EstimatedMemory(const ISSX_TelemetryStageId stage_id) const
+     {
+      return m_stage[StageIndex(stage_id)].estimated_memory;
+     }
+
+   long EventCount() const
+     {
+      return m_count;
+     }
+
+   long DroppedEvents() const
+     {
+      return m_dropped_events;
+     }
+
+   string RecentEventSummary() const
+     {
+      if(m_count<=0)
+         return "none";
+      const int idx=(m_start+m_count-1)%ISSX_TELEMETRY_MAX_EVENTS;
+      return m_events[idx].stage+"|"+m_events[idx].event_type+"|"+m_events[idx].message;
+     }
+  };
+
+#endif // __ISSX_TELEMETRY_MQH__
