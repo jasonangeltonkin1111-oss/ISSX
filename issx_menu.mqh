@@ -5,7 +5,7 @@
 
 #define ISSX_MENU_STAGE_COUNT 5
 
-// ISSX MENU ENGINE v1.722
+// ISSX MENU ENGINE v1.723
 
 class ISSX_MenuEngine
   {
@@ -16,6 +16,26 @@ private:
    string Obj(const string key) const
      {
       return m_prefix+"_"+key;
+     }
+
+   bool IsKnownObjectKey(const string key) const
+     {
+      if(key=="TITLE")
+         return true;
+
+      for(int i=1;i<=ISSX_MENU_STAGE_COUNT;i++)
+        {
+         const string idx=IntegerToString(i);
+         if(key=="STAGE_BTN_"+idx || key=="STAGE_TITLE_"+idx)
+            return true;
+         for(int j=1;j<=5;j++)
+           {
+            if(key=="STAGE_LINE_"+idx+"_"+IntegerToString(j))
+               return true;
+           }
+        }
+
+      return false;
      }
 
    bool EnsureLabel(const string name,
@@ -215,7 +235,14 @@ public:
       const int owned_prefix_len=StringLen(owned_prefix);
       if(StringLen(object_name)<=owned_prefix_len)
          return false;
-      return (StringSubstr(object_name,0,owned_prefix_len)==owned_prefix);
+      if(StringSubstr(object_name,0,owned_prefix_len)!=owned_prefix)
+         return false;
+
+      const string owned_key=StringSubstr(object_name,owned_prefix_len);
+      if(!IsKnownObjectKey(owned_key))
+         return false;
+
+      return (ObjectFind(0,object_name)>=0);
      }
 
    bool HandleClick(const string object_name,bool &enabled[],const bool allow_toggle=true)
