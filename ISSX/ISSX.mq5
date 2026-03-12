@@ -622,26 +622,26 @@ bool ISSX_RunKernelCycle()
 
    ISSX_SetCheckpoint("ea1_stage_slice_enter");
    g_debug.Write("INFO","ea1","stage_slice","enter");
+   const int prior_discovery_minute=g_ea1.discovery_minute_id;
+   const int prior_symbol_count=ArraySize(g_ea1.symbols);
+   const ulong discovery_t0=GetTickCount();
    if(!ISSX_MarketEngine::StageSlice(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,InpEA1MaxSymbols))
      {
-      string discovery_err=ISSX_MarketEngine::LastDiscoveryError();
-      if(discovery_err=="")
-         discovery_err="stage_slice_returned_false";
-      g_debug.Write("WARN","ea1_market","discovery_failed","reason="+discovery_err);
+      g_debug.Write("WARN","ea1_market","discovery_failed","reason=stage_slice_returned_false");
       g_debug.Write("ERROR","ea1","stage_slice_failed","returned false");
       return false;
      }
 
-   if(ISSX_MarketEngine::LastDiscoveryAttempted())
+   if(g_ea1.discovery_minute_id!=prior_discovery_minute)
      {
-      string discovery_msg="symbols="+IntegerToString(ISSX_MarketEngine::LastDiscoverySymbols())+
-                           " elapsed_ms="+IntegerToString((int)ISSX_MarketEngine::LastDiscoveryElapsedMs());
-      if(ISSX_MarketEngine::LastDiscoveryNoChange())
+      string discovery_msg="symbols="+IntegerToString(ArraySize(g_ea1.symbols))+
+                           " elapsed_ms="+IntegerToString((int)(GetTickCount()-discovery_t0));
+      if(ArraySize(g_ea1.symbols)==prior_symbol_count)
          discovery_msg+=" no_change=true";
       g_debug.Write("INFO","ea1_market","discovery_attempt","minute_id="+IntegerToString(g_ea1.minute_id));
       g_debug.Write("INFO","ea1_market","discovery_success",discovery_msg);
      }
-   else if(ISSX_MarketEngine::LastDiscoverySkippedCadence())
+   else
       g_debug.Write("INFO","ea1_market","discovery_skipped","reason=cadence_same_minute minute_id="+IntegerToString(g_ea1.minute_id));
 
    g_debug.Write("INFO","ea1","stage_slice_ok","symbols="+IntegerToString(ArraySize(g_ea1.symbols)));

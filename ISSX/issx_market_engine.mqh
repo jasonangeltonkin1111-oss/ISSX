@@ -985,6 +985,15 @@ public:
 // SECTION 05: MARKET ENGINE
 // ============================================================================
 
+int g_ea1_last_discovery_minute=-1;
+int g_ea1_last_skip_log_minute=-1;
+bool g_ea1_last_discovery_attempted=false;
+bool g_ea1_last_discovery_skipped=false;
+bool g_ea1_last_discovery_no_change=false;
+int g_ea1_last_discovery_symbols=0;
+long g_ea1_last_discovery_elapsed_ms=0;
+string g_ea1_last_discovery_error="";
+
 class ISSX_MarketEngine
   {
 private:
@@ -2475,12 +2484,12 @@ public:
      }
 
 public:
-   static bool LastDiscoveryAttempted() { return m_last_discovery_attempted; }
-   static bool LastDiscoverySkippedCadence() { return m_last_discovery_skipped; }
-   static bool LastDiscoveryNoChange() { return m_last_discovery_no_change; }
-   static int  LastDiscoverySymbols() { return m_last_discovery_symbols; }
-   static long LastDiscoveryElapsedMs() { return m_last_discovery_elapsed_ms; }
-   static string LastDiscoveryError() { return m_last_discovery_error; }
+   static bool LastDiscoveryAttempted() { return g_ea1_last_discovery_attempted; }
+   static bool LastDiscoverySkippedCadence() { return g_ea1_last_discovery_skipped; }
+   static bool LastDiscoveryNoChange() { return g_ea1_last_discovery_no_change; }
+   static int  LastDiscoverySymbols() { return g_ea1_last_discovery_symbols; }
+   static long LastDiscoveryElapsedMs() { return g_ea1_last_discovery_elapsed_ms; }
+   static string LastDiscoveryError() { return g_ea1_last_discovery_error; }
 
    static bool StageBoot(ISSX_EA1_State &io_state)
      {
@@ -2494,14 +2503,14 @@ public:
       io_state.resumed_from_persistence=false;
       io_state.stage_publishability_state="not_ready";
 
-      m_last_discovery_minute=-1;
-      m_last_skip_log_minute=-1;
-      m_last_discovery_attempted=false;
-      m_last_discovery_skipped=false;
-      m_last_discovery_no_change=false;
-      m_last_discovery_symbols=ArraySize(io_state.symbols);
-      m_last_discovery_elapsed_ms=0;
-      m_last_discovery_error="";
+      g_ea1_last_discovery_minute=-1;
+      g_ea1_last_skip_log_minute=-1;
+      g_ea1_last_discovery_attempted=false;
+      g_ea1_last_discovery_skipped=false;
+      g_ea1_last_discovery_no_change=false;
+      g_ea1_last_discovery_symbols=ArraySize(io_state.symbols);
+      g_ea1_last_discovery_elapsed_ms=0;
+      g_ea1_last_discovery_error="";
       return true;
      }
 
@@ -2524,34 +2533,38 @@ public:
                           const string writer_nonce,
                           const int max_symbols=0)
      {
-      io_state.minute_id=(int)(TimeCurrent()/60);
-      io_state.discovery_attempted=false;
-      io_state.discovery_skipped=false;
-      io_state.discovery_success=false;
-      io_state.discovery_no_change=false;
-      io_state.discovery_elapsed_ms=0;
-      io_state.discovery_status_reason="none";
+      int current_minute=(int)(TimeCurrent()/60);
+      io_state.minute_id=current_minute;
 
-      const bool discovery_due=(m_last_discovery_minute<0 || io_state.minute_id!=m_last_discovery_minute);
-      if(discovery_due)
+      g_ea1_last_discovery_attempted=false;
+      g_ea1_last_discovery_skipped=false;
+      g_ea1_last_discovery_no_change=false;
+      g_ea1_last_discovery_elapsed_ms=0;
+      g_ea1_last_discovery_error="";
+
+      if(g_ea1_last_discovery_minute==current_minute)
         {
-         io_state.discovery_attempted=true;
-         const string prior_fingerprint=io_state.universe.broker_universe_fingerprint;
-         const uint discovery_start_ms=GetTickCount();
-         const bool discovered=DiscoverUniverse(io_state,false,0);
-         io_state.discovery_elapsed_ms=(int)(GetTickCount()-discovery_start_ms);
-         io_state.discovery_success=discovered;
-         io_state.discovery_no_change=(discovered && prior_fingerprint!="" && prior_fingerprint==io_state.universe.broker_universe_fingerprint);
-         io_state.discovery_status_reason=(discovered ? (io_state.discovery_no_change ? "no_change" : "ok") : "discover_universe_empty");
-         io_state.discovery_skip_streak=0;
-         io_state.discovery_minute_id=io_state.minute_id;
-         m_last_discovery_minute=io_state.minute_id;
+         if(g_ea1_last_skip_log_minute!=current_minute)
+           {
+            g_ea1_last_discovery_skipped=true;
+            g_ea1_last_skip_log_minute=current_minute;
+           }
         }
       else
         {
-         io_state.discovery_skipped=true;
-         io_state.discovery_status_reason="cadence_same_minute";
-         io_state.discovery_skip_streak++;
+         g_ea1_last_discovery_attempted=true;
+         int symbols_before=ArraySize(io_state.symbols);
+         ulong t0=GetTickCount();
+         RefreshDiscoveryOnly(io_state);
+         ulong elapsed_tick=(GetTickCount()-t0);
+         g_ea1_last_discovery_elapsed_ms=(long)elapsed_tick;
+         g_ea1_last_discovery_symbols=ArraySize(io_state.symbols);
+         g_ea1_last_discovery_no_change=(symbols_before==g_ea1_last_discovery_symbols);
+         g_ea1_last_discovery_minute=current_minute;
+         io_state.discovery_minute_id=current_minute;
+         g_ea1_last_skip_log_minute=-1;
+         if(g_ea1_last_discovery_symbols<=0)
+            g_ea1_last_discovery_error="no_symbols_discovered";
         }
 
       if(max_symbols>0 && ArraySize(io_state.symbols)>max_symbols)
