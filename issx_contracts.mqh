@@ -10,10 +10,10 @@
 #include <ISSX/issx_selection_engine.mqh>
 #include <ISSX/issx_correlation_engine.mqh>
 
-#define ISSX_CONTRACTS_MODULE_VERSION            "1.712"
-#define ISSX_CONTRACTS_STAGE_API_VERSION         "1.712"
-#define ISSX_CONTRACTS_SERIALIZER_VERSION        "1.712"
-#define ISSX_CONTRACTS_EXTERNAL_CONTRACT_VERSION "ea5_v1.712"
+#define ISSX_CONTRACTS_MODULE_VERSION            "1.714"
+#define ISSX_CONTRACTS_STAGE_API_VERSION         "1.714"
+#define ISSX_CONTRACTS_SERIALIZER_VERSION        "1.714"
+#define ISSX_CONTRACTS_EXTERNAL_CONTRACT_VERSION "ea5_v1.714"
 #define ISSX_CONTRACTS_OWNER_MODULE_NAME         "issx_contracts.mqh"
 #define ISSX_CONTRACTS_FINGERPRINT_ALGO_VERSION  "utf8_canonical_v1"
 #define ISSX_CONTRACTS_SOURCE_SNAPSHOT_ACCEPTED  "accepted_snapshot"
@@ -23,6 +23,7 @@
 #define ISSX_EA5_DEFAULT_HARD_MAX_BYTES          262144
 #define ISSX_EA5_DEFAULT_PER_SYMBOL_BYTES        4096
 #define ISSX_EA5_DEFAULT_MAX_BARS_TOTAL          32
+#define ISSX_EA5_MAX_CONTRACTS_HARD_CAP          64
 
 enum ISSX_EA5_AnswerMode
   {
@@ -554,6 +555,23 @@ struct ISSX_EA5_State
    bool degraded_flag;
    bool projection_partial_success_flag;
    int symbol_count;
+   int debug_discovery_attempt_count;
+   int debug_candidate_selected_count;
+   int debug_symbols_started_count;
+   int debug_symbols_completed_count;
+   int debug_contract_build_count;
+   int debug_skipped_missing_ea1_count;
+   int debug_skipped_missing_ea2_count;
+   int debug_skipped_capacity_count;
+   int debug_optional_intelligence_count;
+   int debug_batch_cap;
+   int debug_estimated_export_bytes;
+   bool debug_batch_truncated;
+   string debug_batch_progress;
+   string debug_ready_state;
+   string debug_partial_state;
+   string debug_error_conditions;
+   string debug_persistence_interactions;
    ISSX_EA5_SymbolContract symbols[];
    void Reset()
      {
@@ -562,7 +580,12 @@ struct ISSX_EA5_State
       stage_api_version=ISSX_CONTRACTS_STAGE_API_VERSION; serializer_version=ISSX_CONTRACTS_SERIALIZER_VERSION; owner_module_name=ISSX_CONTRACTS_OWNER_MODULE_NAME; owner_module_hash="";
       fingerprint_algorithm_version=ISSX_CONTRACTS_FINGERPRINT_ALGO_VERSION; source_snapshot_kind=ISSX_CONTRACTS_SOURCE_SNAPSHOT_ACCEPTED; external_contract_version=ISSX_CONTRACTS_EXTERNAL_CONTRACT_VERSION;
       why_export_is_thin=""; why_publish_is_stale=""; why_frontier_is_small=""; why_intelligence_abstained=""; largest_backlog_owner="na"; oldest_unserved_queue_family="na";
-      legend_present=false; legend_hash=""; degraded_flag=false; projection_partial_success_flag=false; symbol_count=0; ArrayResize(symbols,0);
+      legend_present=false; legend_hash=""; degraded_flag=false; projection_partial_success_flag=false; symbol_count=0;
+      debug_discovery_attempt_count=0; debug_candidate_selected_count=0; debug_symbols_started_count=0; debug_symbols_completed_count=0; debug_contract_build_count=0;
+      debug_skipped_missing_ea1_count=0; debug_skipped_missing_ea2_count=0; debug_skipped_capacity_count=0; debug_optional_intelligence_count=0;
+      debug_batch_cap=0; debug_estimated_export_bytes=0; debug_batch_truncated=false; debug_batch_progress="0/0";
+      debug_ready_state="not_ready"; debug_partial_state="none"; debug_error_conditions="none"; debug_persistence_interactions="none";
+      ArrayResize(symbols,0);
      }
   };
 
@@ -1265,11 +1288,51 @@ public:
       string major_flags="";
       string contradiction_class_counts="identity:0|session:0|spec:0|history_continuity:0|selection_ownership:0|intelligence_validity:0";
       string highest_blocking_class="none";
+      int selected_candidate_count=0;
+      int symbol_started_count=0;
+      int symbol_completed_count=0;
+      int contract_build_count=0;
+      int skipped_missing_ea1_count=0;
+      int skipped_missing_ea2_count=0;
+      int skipped_capacity_count=0;
+      int optional_intelligence_count=0;
+      bool batch_truncated=false;
+      int safe_per_symbol_bytes=MathMax(512,state.payload_budget.per_symbol_target_bytes);
+      int max_by_budget=MathMax(1,state.payload_budget.hard_max_bytes/safe_per_symbol_bytes);
+      int batch_cap=MathMax(1,MathMin(ISSX_EA5_MAX_CONTRACTS_HARD_CAP,max_by_budget));
+
+      state.debug_discovery_attempt_count=1;
+      state.debug_candidate_selected_count=0;
+      state.debug_symbols_started_count=0;
+      state.debug_symbols_completed_count=0;
+      state.debug_contract_build_count=0;
+      state.debug_skipped_missing_ea1_count=0;
+      state.debug_skipped_missing_ea2_count=0;
+      state.debug_skipped_capacity_count=0;
+      state.debug_optional_intelligence_count=0;
+      state.debug_batch_cap=batch_cap;
+      state.debug_estimated_export_bytes=0;
+      state.debug_batch_truncated=false;
+      state.debug_batch_progress="0/0";
+      state.debug_ready_state="not_ready";
+      state.debug_partial_state="none";
+      state.debug_error_conditions="none";
+      state.debug_persistence_interactions=(ea1.resumed_from_persistence ? "ea1_resumed_from_persistence" : (ea2.recovery_publish_flag || ea3.recovery_publish_flag ? "upstream_recovery_publish" : "none"));
 
       for(int i=0;i<ArraySize(ea3.symbols);i++)
         {
          ISSX_EA3_SymbolSelection s=ea3.symbols[i];
          if(!s.selected_top5) continue;
+         selected_candidate_count++;
+
+         if(contract_build_count>=batch_cap)
+           {
+            skipped_capacity_count++;
+            batch_truncated=true;
+            continue;
+           }
+
+         symbol_started_count++;
 
          int m_idx=-1;
          for(int j=0;j<ArraySize(ea1.symbols);j++)
@@ -1278,7 +1341,8 @@ public:
            }
 
          int h_idx=FindEa2BySymbol(ea2,s.symbol_norm,s.symbol_raw);
-         if(m_idx<0 || h_idx<0) continue;
+         if(m_idx<0){ skipped_missing_ea1_count++; continue; }
+         if(h_idx<0){ skipped_missing_ea2_count++; continue; }
 
          ISSX_EA1_SymbolState m=ea1.symbols[m_idx];
          ISSX_EA2_SymbolState h=ea2.symbols[h_idx];
@@ -1286,7 +1350,12 @@ public:
          int opt_idx=FindOptionalIntelligence(optional_intelligence,s.symbol_norm);
          ISSX_EA5_OptionalIntelligence opt; opt.Reset();
          bool has_opt=(opt_idx>=0);
-         if(has_opt){ opt=optional_intelligence[opt_idx]; if(opt.present && !opt.intelligence_abstained) any_intel=true; }
+         if(has_opt)
+           {
+            opt=optional_intelligence[opt_idx];
+            optional_intelligence_count++;
+            if(opt.present && !opt.intelligence_abstained) any_intel=true;
+           }
 
          ISSX_EA5_SymbolContract sc; sc.Reset();
          sc.symbol_raw=m.raw_broker_observation.symbol_raw;
@@ -1448,7 +1517,18 @@ public:
            }
 
          int n=ArraySize(state.symbols);
-         if(ArrayResize(state.symbols,n+1)==(n+1)){ state.symbols[n]=sc; publishable++; }
+         if(ArrayResize(state.symbols,n+1)==(n+1))
+           {
+            state.symbols[n]=sc;
+            publishable++;
+            contract_build_count++;
+            symbol_completed_count++;
+           }
+         else
+           {
+            if(state.debug_error_conditions=="none") state.debug_error_conditions="array_resize_failed";
+            else state.debug_error_conditions+="|array_resize_failed";
+           }
         }
 
       state.symbol_count=ArraySize(state.symbols);
@@ -1511,6 +1591,30 @@ public:
       state.why_intelligence_abstained=(any_intel ? "none" : "ea4_absent_or_abstained");
       state.largest_backlog_owner=(!ea2.stage_minimum_ready_flag ? "ea2" : !ea3.stage_minimum_ready_flag ? "ea3" : "none");
       state.oldest_unserved_queue_family=(!ea2.stage_minimum_ready_flag ? "history_deep_queue" : !ea3.stage_minimum_ready_flag ? "selection_frontier_queue" : "none");
+
+      state.debug_candidate_selected_count=selected_candidate_count;
+      state.debug_symbols_started_count=symbol_started_count;
+      state.debug_symbols_completed_count=symbol_completed_count;
+      state.debug_contract_build_count=contract_build_count;
+      state.debug_skipped_missing_ea1_count=skipped_missing_ea1_count;
+      state.debug_skipped_missing_ea2_count=skipped_missing_ea2_count;
+      state.debug_skipped_capacity_count=skipped_capacity_count;
+      state.debug_optional_intelligence_count=optional_intelligence_count;
+      state.debug_batch_truncated=batch_truncated;
+      state.debug_batch_progress=IntegerToString(contract_build_count)+"/"+IntegerToString(selected_candidate_count);
+      state.debug_estimated_export_bytes=(contract_build_count*safe_per_symbol_bytes);
+      state.debug_ready_state=(state.manifest.stage_minimum_ready_flag && state.market_readiness_summary.system_publishability_state!=issx_publishability_not_ready ? "ready" : "not_ready");
+      state.debug_partial_state=((state.source_summary.upstream_partial_progress_flag || state.debug_batch_truncated || state.degraded_flag) ? "partial" : "none");
+      if(state.debug_batch_truncated)
+        {
+         if(state.debug_error_conditions=="none") state.debug_error_conditions="batch_cap_reached";
+         else state.debug_error_conditions+="|batch_cap_reached";
+        }
+      if(state.debug_estimated_export_bytes>state.payload_budget.hard_max_bytes)
+        {
+         if(state.debug_error_conditions=="none") state.debug_error_conditions="estimated_export_over_hard_max";
+         else state.debug_error_conditions+="|estimated_export_over_hard_max";
+        }
      }
 
    static bool StageSlice(ISSX_EA5_State &state,const ISSX_EA1_State &ea1,const ISSX_EA2_State &ea2,const ISSX_EA3_State &ea3,const ISSX_EA5_OptionalIntelligence &optional_intelligence[])
@@ -1682,6 +1786,20 @@ public:
       out+=",\"fallback_read_ratio_1h\":"+DoubleToString(state.source_summary.fallback_read_ratio_1h,6);
       out+=",\"fresh_accept_ratio_1h\":"+DoubleToString(state.source_summary.fresh_accept_ratio_1h,6);
       out+=",\"same_tick_handoff_ratio_1h\":"+DoubleToString(state.source_summary.same_tick_handoff_ratio_1h,6);
+      out+=",\"contracts_discovery_attempt\":{\"attempt_count\":"+IntegerToString(state.debug_discovery_attempt_count)+",\"candidates_selected\":"+IntegerToString(state.debug_candidate_selected_count)+"}";
+      out+=",\"contracts_symbol_start\":{\"count\":"+IntegerToString(state.debug_symbols_started_count)+",\"batch_cap\":"+IntegerToString(state.debug_batch_cap)+"}";
+      out+=",\"contracts_symbol_complete\":{\"count\":"+IntegerToString(state.debug_symbols_completed_count)+",\"skipped_missing_ea1\":"+IntegerToString(state.debug_skipped_missing_ea1_count)+",\"skipped_missing_ea2\":"+IntegerToString(state.debug_skipped_missing_ea2_count)+"}";
+      out+=",\"contracts_contract_build_start\":{\"selected_candidates\":"+IntegerToString(state.debug_candidate_selected_count)+"}";
+      out+=",\"contracts_contract_build_complete\":{\"built\":"+IntegerToString(state.debug_contract_build_count)+",\"optional_intelligence_attached\":"+IntegerToString(state.debug_optional_intelligence_count)+"}";
+      out+=",\"contracts_batch_start\":{\"cap\":"+IntegerToString(state.debug_batch_cap)+"}";
+      out+=",\"contracts_batch_progress\":\""+ISSX_Util::EscapeJson(state.debug_batch_progress)+"\"";
+      out+=",\"contracts_batch_complete\":{\"truncated\":"+ISSX_Util::BoolToString(state.debug_batch_truncated)+",\"skipped_capacity\":"+IntegerToString(state.debug_skipped_capacity_count)+"}";
+      out+=",\"contracts_export_start\":{\"estimated_export_bytes\":"+IntegerToString(state.debug_estimated_export_bytes)+"}";
+      out+=",\"contracts_export_complete\":{\"hard_max_bytes\":"+IntegerToString(state.payload_budget.hard_max_bytes)+",\"target_bytes\":"+IntegerToString(state.payload_budget.target_bytes)+"}";
+      out+=",\"contracts_ready_state\":\""+ISSX_Util::EscapeJson(state.debug_ready_state)+"\"";
+      out+=",\"contracts_partial_state\":\""+ISSX_Util::EscapeJson(state.debug_partial_state)+"\"";
+      out+=",\"contracts_error_conditions\":\""+ISSX_Util::EscapeJson(state.debug_error_conditions)+"\"";
+      out+=",\"contracts_persistence_interactions\":\""+ISSX_Util::EscapeJson(state.debug_persistence_interactions)+"\"";
       out+=",\"top_symbols\":[";
       bool first=true;
       int limit=MathMin(ArraySize(state.symbols),10);
