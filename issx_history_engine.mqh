@@ -647,6 +647,54 @@ struct ISSX_EA2_CoverageState
      }
   };
 
+struct ISSX_EA2_ForensicDiag
+  {
+   int    discovery_attempts;
+   int    discovery_successes;
+   int    symbol_started;
+   int    symbol_completed;
+   int    copyrates_attempts;
+   int    copyrates_successes;
+   int    copyrates_failures;
+   int    batch_symbols_target;
+   int    batch_symbols_done;
+   int    persistence_write_attempts;
+   int    persistence_write_successes;
+   int    persistence_write_failures;
+   int    persistence_index_attempts;
+   int    persistence_index_successes;
+   int    persistence_index_failures;
+   int    max_rates_request;
+   int    max_rates_returned;
+   int    max_completed_retained;
+   string last_error_code;
+   string event_log_csv;
+
+   void Reset()
+     {
+      discovery_attempts=0;
+      discovery_successes=0;
+      symbol_started=0;
+      symbol_completed=0;
+      copyrates_attempts=0;
+      copyrates_successes=0;
+      copyrates_failures=0;
+      batch_symbols_target=0;
+      batch_symbols_done=0;
+      persistence_write_attempts=0;
+      persistence_write_successes=0;
+      persistence_write_failures=0;
+      persistence_index_attempts=0;
+      persistence_index_successes=0;
+      persistence_index_failures=0;
+      max_rates_request=0;
+      max_rates_returned=0;
+      max_completed_retained=0;
+      last_error_code="none";
+      event_log_csv="";
+     }
+  };
+
 struct ISSX_EA2_State
   {
    ISSX_StageHeader            header;
@@ -671,6 +719,7 @@ struct ISSX_EA2_State
    string                      debug_weak_link_code;
    int                         symbol_count;
    ISSX_EA2_SymbolState        symbols[];
+   ISSX_EA2_ForensicDiag       forensic;
 
    void Reset()
      {
@@ -696,6 +745,7 @@ struct ISSX_EA2_State
       debug_weak_link_code="none";
       symbol_count=0;
       ArrayResize(symbols,0);
+      forensic.Reset();
      }
   };
 
@@ -973,6 +1023,22 @@ private:
       dst += token;
      }
 
+   static void AddForensicEvent(ISSX_EA2_State &st,const string event_name,const string detail="")
+     {
+      string packet=event_name;
+      if(!ISSX_Util::IsEmpty(detail))
+         packet += "("+detail+")";
+
+      const int max_chars=2200;
+      if(StringLen(st.forensic.event_log_csv)>=max_chars)
+        {
+         st.forensic.event_log_csv=StringSubstr(st.forensic.event_log_csv,StringLen(st.forensic.event_log_csv)-max_chars/2);
+         if(!ISSX_Util::IsEmpty(st.forensic.event_log_csv))
+            st.forensic.event_log_csv="...,"+st.forensic.event_log_csv;
+        }
+      AppendCsvToken(st.forensic.event_log_csv,packet);
+     }
+
    static ulong HashMix(const ulong h,const ulong v)
      {
       return ((h ^ v) * 1099511628211ULL);
@@ -1058,19 +1124,27 @@ private:
                                       const ENUM_TIMEFRAMES tf,
                                       const int requested_completed_count,
                                       MqlRates &completed_rates[],
-                                      bool &live_bar_present)
+                                      bool &live_bar_present,
+                                      int &raw_copied,
+                                      int &last_error_code,
+                                      int &requested_raw)
      {
       live_bar_present=false;
       ArrayResize(completed_rates,0);
       ArraySetAsSeries(completed_rates,true);
 
       const int want=MathMax(2,requested_completed_count+1);
+      raw_copied=0;
+      last_error_code=0;
+      requested_raw=want;
 
       MqlRates raw_rates[];
       ArraySetAsSeries(raw_rates,true);
 
       ResetLastError();
       const int copied=CopyRates(symbol,tf,0,want,raw_rates);
+      raw_copied=copied;
+      last_error_code=GetLastError();
       if(copied<=1)
          return false;
 
@@ -1351,7 +1425,8 @@ private:
       return j.ToString();
      }
 
-   static bool WriteWarehouseShard(const string firm_id,
+   static bool WriteWarehouseShard(ISSX_EA2_State &st,
+                                   const string firm_id,
                                    const ISSX_EA2_SymbolState &symbol_state,
                                    const int tf_index)
      {
@@ -1364,27 +1439,61 @@ private:
 
       MqlRates completed_rates[];
       bool live_bar_present=false;
+      int raw_copied=0;
+      int last_error_code=0;
+      int requested_raw=0;
       const int retention=WarehouseRetentionCapByIndex(tf_index);
+      st.forensic.persistence_write_attempts++;
+      AddForensicEvent(st,"history_persistence_write_attempt",
+                       symbol_state.symbol_norm+":"+TfNameByIndex(tf_index)+" retention="+IntegerToString(retention));
 
-      if(!CopyCompletedRatesSafe(symbol_state.symbol_raw,TfValueByIndex(tf_index),retention,completed_rates,live_bar_present))
+      if(!CopyCompletedRatesSafe(symbol_state.symbol_raw,TfValueByIndex(tf_index),retention,completed_rates,live_bar_present,raw_copied,last_error_code,requested_raw))
+        {
+         st.forensic.persistence_write_failures++;
+         st.forensic.last_error_code="persist_copyrates_fail_"+IntegerToString(last_error_code);
+         AddForensicEvent(st,"history_error_conditions",
+                          "persist_copyrates_fail symbol="+symbol_state.symbol_norm+" tf="+TfNameByIndex(tf_index)+" err="+IntegerToString(last_error_code));
          return false;
+        }
+
+      st.forensic.max_rates_request=MathMax(st.forensic.max_rates_request,requested_raw);
+      st.forensic.max_rates_returned=MathMax(st.forensic.max_rates_returned,raw_copied);
+      st.forensic.max_completed_retained=MathMax(st.forensic.max_completed_retained,ArraySize(completed_rates));
 
       const string shard_payload=BuildHistoryShardPayload(symbol_state.symbol_raw,
                                                           symbol_state.tf[tf_index],
                                                           completed_rates,
                                                           live_bar_present);
 
-      return ISSX_HistoryWarehouse::WriteShard(firm_id,
-                                               TfNameByIndex(tf_index),
-                                               symbol_state.symbol_norm,
-                                               shard_payload);
+      const bool ok=ISSX_HistoryWarehouse::WriteShard(firm_id,
+                                                      TfNameByIndex(tf_index),
+                                                      symbol_state.symbol_norm,
+                                                      shard_payload);
+      if(ok)
+        {
+         st.forensic.persistence_write_successes++;
+         AddForensicEvent(st,"history_persistence_write_result",
+                          "ok symbol="+symbol_state.symbol_norm+" tf="+TfNameByIndex(tf_index)+" retained="+IntegerToString(ArraySize(completed_rates)));
+        }
+      else
+        {
+         st.forensic.persistence_write_failures++;
+         st.forensic.last_error_code="persist_write_fail";
+         AddForensicEvent(st,"history_error_conditions",
+                          "persist_write_fail symbol="+symbol_state.symbol_norm+" tf="+TfNameByIndex(tf_index));
+        }
+      return ok;
      }
 
    static bool TouchWarehouseIndexes(const string firm_id,
-                                     const ISSX_EA2_State &st)
+                                     ISSX_EA2_State &st)
      {
       if(ISSX_Util::IsEmpty(firm_id))
          return false;
+
+      st.forensic.persistence_index_attempts++;
+      AddForensicEvent(st,"history_persistence_index_attempt",
+                       "symbols="+IntegerToString(st.symbol_count));
 
       ISSX_JsonWriter symbol_registry;
       symbol_registry.Reset();
@@ -1439,12 +1548,24 @@ private:
       manifest_json.NameString("rankable_universe_fingerprint",st.universe.rankable_universe_fingerprint);
       manifest_json.EndObject();
 
-      return ISSX_HistoryWarehouse::TouchRegistry(firm_id,
-                                                  symbol_registry.ToString(),
-                                                  timeframe_index.ToString(),
-                                                  hydration_cursor.ToString(),
-                                                  dirty_set.ToString(),
-                                                  manifest_json.ToString());
+      const bool ok=ISSX_HistoryWarehouse::TouchRegistry(firm_id,
+                                                         symbol_registry.ToString(),
+                                                         timeframe_index.ToString(),
+                                                         hydration_cursor.ToString(),
+                                                         dirty_set.ToString(),
+                                                         manifest_json.ToString());
+      if(ok)
+        {
+         st.forensic.persistence_index_successes++;
+         AddForensicEvent(st,"history_persistence_index_result","ok");
+        }
+      else
+        {
+         st.forensic.persistence_index_failures++;
+         st.forensic.last_error_code="persist_index_fail";
+         AddForensicEvent(st,"history_error_conditions","persist_index_fail");
+        }
+      return ok;
      }
 
    static void ApplyTrustMap(ISSX_EA2_SymbolState &s)
@@ -1871,7 +1992,8 @@ public:
       s.provenance.history_index_path=StageHistoryIndexPath();
      }
 
-   static bool HydrateSymbolTimeframe(ISSX_EA2_SymbolState &s,
+   static bool HydrateSymbolTimeframe(ISSX_EA2_State &st,
+                                      ISSX_EA2_SymbolState &s,
                                       const int tf_index,
                                       const double point,
                                       const bool deep_profile)
@@ -1881,9 +2003,15 @@ public:
 
       MqlRates rates[];
       bool live_bar_present=false;
+      int raw_copied=0;
+      int last_error_code=0;
+      int requested_raw=0;
 
       const int request_completed=RequestedCompletedBarsByProfile(tf_index,deep_profile);
       const datetime sync_time=TimeCurrent();
+      st.forensic.copyrates_attempts++;
+      AddForensicEvent(st,"history_copyrates_attempt",
+                       s.symbol_norm+":"+TfNameByIndex(tf_index)+" completed_req="+IntegerToString(request_completed));
 
       s.tf[tf_index].readiness_state=issx_ea2_history_requested_sync;
       s.tf[tf_index].warehouse_retained_bar_count=0;
@@ -1895,8 +2023,14 @@ public:
       s.tf[tf_index].tf_name=TfNameByIndex(tf_index);
       s.tf[tf_index].timeframe=TfValueByIndex(tf_index);
 
-      if(!CopyCompletedRatesSafe(s.symbol_raw,TfValueByIndex(tf_index),request_completed,rates,live_bar_present))
+      if(!CopyCompletedRatesSafe(s.symbol_raw,TfValueByIndex(tf_index),request_completed,rates,live_bar_present,raw_copied,last_error_code,requested_raw))
         {
+         st.forensic.copyrates_failures++;
+         st.forensic.last_error_code="copyrates_fail_"+IntegerToString(last_error_code);
+         AddForensicEvent(st,"history_copyrates_result",
+                          "fail symbol="+s.symbol_norm+" tf="+TfNameByIndex(tf_index)+" copied="+IntegerToString(raw_copied)+" err="+IntegerToString(last_error_code));
+         AddForensicEvent(st,"history_error_conditions",
+                          "copyrates_fail symbol="+s.symbol_norm+" tf="+TfNameByIndex(tf_index)+" err="+IntegerToString(last_error_code));
          s.tf[tf_index].Reset();
          s.tf[tf_index].tf_name=TfNameByIndex(tf_index);
          s.tf[tf_index].timeframe=TfValueByIndex(tf_index);
@@ -1914,6 +2048,13 @@ public:
          s.changed_since_last_publish=true;
          return false;
         }
+
+      st.forensic.copyrates_successes++;
+      st.forensic.max_rates_request=MathMax(st.forensic.max_rates_request,requested_raw);
+      st.forensic.max_rates_returned=MathMax(st.forensic.max_rates_returned,raw_copied);
+      st.forensic.max_completed_retained=MathMax(st.forensic.max_completed_retained,ArraySize(rates));
+      AddForensicEvent(st,"history_copyrates_result",
+                       "ok symbol="+s.symbol_norm+" tf="+TfNameByIndex(tf_index)+" copied="+IntegerToString(raw_copied)+" completed="+IntegerToString(ArraySize(rates)));
 
       s.tf[tf_index].Reset();
       s.tf[tf_index].tf_name=TfNameByIndex(tf_index);
@@ -2036,8 +2177,9 @@ public:
       bool live_m5=false;
       bool live_m15=false;
 
-      const bool ok5=CopyCompletedRatesSafe(s.symbol_raw,PERIOD_M5,64,m5,live_m5);
-      const bool ok15=CopyCompletedRatesSafe(s.symbol_raw,PERIOD_M15,64,m15,live_m15);
+      int raw5=0,raw15=0,err5=0,err15=0,want5=0,want15=0;
+      const bool ok5=CopyCompletedRatesSafe(s.symbol_raw,PERIOD_M5,64,m5,live_m5,raw5,err5,want5);
+      const bool ok15=CopyCompletedRatesSafe(s.symbol_raw,PERIOD_M15,64,m15,live_m15,raw15,err15,want15);
 
       s.hot_metrics.Reset();
 
@@ -2378,6 +2520,29 @@ public:
       j.NameInt("contradiction_blocking_count",local_state.counters.contradiction_blocking_count);
       j.EndObject();
 
+      j.BeginObjectNamed("forensic");
+      j.NameInt("history_discovery_attempt",local_state.forensic.discovery_attempts);
+      j.NameInt("history_discovery_success",local_state.forensic.discovery_successes);
+      j.NameInt("history_symbol_start",local_state.forensic.symbol_started);
+      j.NameInt("history_symbol_complete",local_state.forensic.symbol_completed);
+      j.NameInt("history_copyrates_attempt",local_state.forensic.copyrates_attempts);
+      j.NameInt("history_copyrates_success",local_state.forensic.copyrates_successes);
+      j.NameInt("history_copyrates_fail",local_state.forensic.copyrates_failures);
+      j.NameInt("history_batch_symbols_target",local_state.forensic.batch_symbols_target);
+      j.NameInt("history_batch_symbols_done",local_state.forensic.batch_symbols_done);
+      j.NameInt("history_persistence_write_attempt",local_state.forensic.persistence_write_attempts);
+      j.NameInt("history_persistence_write_success",local_state.forensic.persistence_write_successes);
+      j.NameInt("history_persistence_write_fail",local_state.forensic.persistence_write_failures);
+      j.NameInt("history_persistence_index_attempt",local_state.forensic.persistence_index_attempts);
+      j.NameInt("history_persistence_index_success",local_state.forensic.persistence_index_successes);
+      j.NameInt("history_persistence_index_fail",local_state.forensic.persistence_index_failures);
+      j.NameInt("history_max_rates_request",local_state.forensic.max_rates_request);
+      j.NameInt("history_max_rates_returned",local_state.forensic.max_rates_returned);
+      j.NameInt("history_max_completed_retained",local_state.forensic.max_completed_retained);
+      j.NameString("history_last_error_code",local_state.forensic.last_error_code);
+      j.NameString("history_event_log",local_state.forensic.event_log_csv);
+      j.EndObject();
+
       j.BeginArrayNamed("symbols");
       for(int i=0;i<ArraySize(local_state.symbols);i++)
         {
@@ -2398,8 +2563,19 @@ public:
      {
       st.Reset();
       const int n=ArraySize(symbols);
+      st.forensic.discovery_attempts++;
+      st.forensic.batch_symbols_target=n;
+      AddForensicEvent(st,"history_discovery_attempt",
+                       "symbols="+IntegerToString(n)+" deep_default="+(deep_profile_default?"true":"false"));
       if(n<=0)
+        {
+         st.forensic.last_error_code="history_discovery_empty";
+         AddForensicEvent(st,"history_error_conditions","discovery_empty_symbol_list");
          return false;
+        }
+
+      st.forensic.discovery_successes++;
+      AddForensicEvent(st,"history_discovery_success","symbols="+IntegerToString(n));
 
       ArrayResize(st.symbols,n);
 
@@ -2409,6 +2585,8 @@ public:
       for(int i=0;i<n;i++)
         {
          PrepareEmptySymbol(st.symbols[i],symbols[i]);
+         st.forensic.symbol_started++;
+         AddForensicEvent(st,"history_symbol_start",st.symbols[i].symbol_norm+" idx="+IntegerToString(i));
 
          double point=0.0;
          double bid=0.0;
@@ -2425,7 +2603,7 @@ public:
          for(int t=0;t<issx_ea2_tf_count;t++)
            {
             const bool tf_deep=(deep_profile_default || t==issx_ea2_tf_h1);
-            const bool hydrated=HydrateSymbolTimeframe(st.symbols[i],t,point,tf_deep);
+            const bool hydrated=HydrateSymbolTimeframe(st,st.symbols[i],t,point,tf_deep);
 
             if(tf_deep)
                st.delta.queue_driven_deep_count++;
@@ -2433,13 +2611,23 @@ public:
                st.delta.cache_reuse_count++;
 
             if(!ISSX_Util::IsEmpty(firm_id) && hydrated)
-               WriteWarehouseShard(firm_id,st.symbols[i],t);
+               WriteWarehouseShard(st,firm_id,st.symbols[i],t);
 
-            AppendCsvToken(changed_timeframe_ids,st.symbols[i].symbol_norm + ":" + TfNameByIndex(t));
+           AppendCsvToken(changed_timeframe_ids,st.symbols[i].symbol_norm + ":" + TfNameByIndex(t));
+
+            AddForensicEvent(st,"history_batch_progress",
+                             "symbol="+st.symbols[i].symbol_norm+" tf="+TfNameByIndex(t)+" hydrated="+(hydrated?"true":"false")+
+                             " done="+IntegerToString(st.forensic.symbol_completed)+"/"+IntegerToString(st.forensic.batch_symbols_target));
            }
 
          FinalizeSymbol(st.symbols[i],point,spread_points,deep_profile_default);
          AppendCsvToken(changed_symbol_ids,st.symbols[i].symbol_norm);
+         st.forensic.symbol_completed++;
+         st.forensic.batch_symbols_done=st.forensic.symbol_completed;
+         AddForensicEvent(st,"history_symbol_complete",
+                          st.symbols[i].symbol_norm+" changed_tf="+IntegerToString(st.symbols[i].changed_timeframe_count)+" ranking="+
+                          (st.symbols[i].history_ready_for_ranking?"true":"false")+" intelligence="+
+                          (st.symbols[i].history_ready_for_intelligence?"true":"false"));
         }
 
       st.delta.changed_symbol_count=n;
@@ -2455,6 +2643,11 @@ public:
 
       UpdateStageHealth(st);
       st.recovery_publish_flag=st.degraded_flag;
+      AddForensicEvent(st,(st.stage_minimum_ready_flag?"history_ready_state":"history_partial_state"),
+                       "publishability="+st.stage_publishability_state+" reason="+st.dependency_block_reason);
+      AddForensicEvent(st,"history_batch_complete",
+                       "symbols_done="+IntegerToString(st.forensic.batch_symbols_done)+" copyrates_ok="+
+                       IntegerToString(st.forensic.copyrates_successes)+" copyrates_fail="+IntegerToString(st.forensic.copyrates_failures));
 
       if(!ISSX_Util::IsEmpty(firm_id))
          TouchWarehouseIndexes(firm_id,st);
@@ -2470,6 +2663,7 @@ public:
       if(ArraySize(symbols)<=0)
         {
          st.Reset();
+         AddForensicEvent(st,"history_error_conditions","stage_boot_empty_symbols");
          st.stage_minimum_ready_flag=false;
          st.stage_publishability_state="blocked";
          st.dependency_block_reason="ea1_symbols_unavailable";
@@ -2497,6 +2691,7 @@ public:
       const int source_count=ArraySize(symbols);
       if(source_count<=0)
         {
+         AddForensicEvent(st,"history_error_conditions","stage_slice_empty_source");
          st.stage_minimum_ready_flag=false;
          st.stage_publishability_state="blocked";
          st.dependency_block_reason="history_not_ready";
@@ -2508,6 +2703,7 @@ public:
       const int n=MathMin(source_count,slice_limit);
       if(n<=0)
         {
+         AddForensicEvent(st,"history_error_conditions","stage_slice_zero_limit");
          st.stage_minimum_ready_flag=false;
          st.stage_publishability_state="blocked";
          st.dependency_block_reason="history_not_ready";
@@ -2518,6 +2714,7 @@ public:
       string slice_symbols[];
       if(ArrayResize(slice_symbols,n)!=n)
         {
+         AddForensicEvent(st,"history_error_conditions","stage_slice_resize_failed");
          st.stage_minimum_ready_flag=false;
          st.stage_publishability_state="blocked";
          st.dependency_block_reason="slice_resize_failed";
@@ -2580,6 +2777,26 @@ public:
       j.KeyValue("contradiction_count",IntegerToString(local_state.counters.contradiction_count),false);
       j.KeyValue("contradiction_blocking_count",IntegerToString(local_state.counters.contradiction_blocking_count),false);
       j.KeyValue("rewrite_watch_count",IntegerToString(local_state.counters.rewrite_watch_count),false);
+      j.KeyValue("history_discovery_attempt",IntegerToString(local_state.forensic.discovery_attempts),false);
+      j.KeyValue("history_discovery_success",IntegerToString(local_state.forensic.discovery_successes),false);
+      j.KeyValue("history_symbol_start",IntegerToString(local_state.forensic.symbol_started),false);
+      j.KeyValue("history_symbol_complete",IntegerToString(local_state.forensic.symbol_completed),false);
+      j.KeyValue("history_copyrates_attempt",IntegerToString(local_state.forensic.copyrates_attempts),false);
+      j.KeyValue("history_copyrates_success",IntegerToString(local_state.forensic.copyrates_successes),false);
+      j.KeyValue("history_copyrates_fail",IntegerToString(local_state.forensic.copyrates_failures),false);
+      j.KeyValue("history_batch_symbols_target",IntegerToString(local_state.forensic.batch_symbols_target),false);
+      j.KeyValue("history_batch_symbols_done",IntegerToString(local_state.forensic.batch_symbols_done),false);
+      j.KeyValue("history_persistence_write_attempt",IntegerToString(local_state.forensic.persistence_write_attempts),false);
+      j.KeyValue("history_persistence_write_success",IntegerToString(local_state.forensic.persistence_write_successes),false);
+      j.KeyValue("history_persistence_write_fail",IntegerToString(local_state.forensic.persistence_write_failures),false);
+      j.KeyValue("history_persistence_index_attempt",IntegerToString(local_state.forensic.persistence_index_attempts),false);
+      j.KeyValue("history_persistence_index_success",IntegerToString(local_state.forensic.persistence_index_successes),false);
+      j.KeyValue("history_persistence_index_fail",IntegerToString(local_state.forensic.persistence_index_failures),false);
+      j.KeyValue("history_max_rates_request",IntegerToString(local_state.forensic.max_rates_request),false);
+      j.KeyValue("history_max_rates_returned",IntegerToString(local_state.forensic.max_rates_returned),false);
+      j.KeyValue("history_max_completed_retained",IntegerToString(local_state.forensic.max_completed_retained),false);
+      j.KeyValue("history_last_error_code",local_state.forensic.last_error_code);
+      j.KeyValue("history_event_log",local_state.forensic.event_log_csv);
       j.EndObject();
       return j.ToString();
      }
