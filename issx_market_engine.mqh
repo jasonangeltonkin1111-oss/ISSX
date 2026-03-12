@@ -1020,7 +1020,7 @@ public:
          out_cls.classification_source="native_overridden_by_heuristic";
          out_cls.classification_confidence=MathMax(out_cls.classification_confidence,0.90);
          out_cls.classification_reliability_score=MathMax(out_cls.classification_reliability_score,0.88);
-         out_cls.taxonomy_action_taken=issx_taxonomy_recovered_with_heuristics;
+         out_cls.taxonomy_action_taken=issx_taxonomy_accepted;
         }
 
       out_cls.equity_sector=(out_cls.final_sector=="Technology"?"technology":"na");
