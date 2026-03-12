@@ -174,7 +174,7 @@ Based on the active root architecture:
 - issx_selection_engine.mqh is EA3
 - issx_correlation_engine.mqh is EA4
 - issx_contracts.mqh is EA5
-- issx_ui_test.mqh is aggregate UI/debug/HUD projection
+- issx_ui.mqh is aggregate UI/debug/HUD projection
 - issx_debug_engine.mqh is the file debug sink
 - issx_menu.mqh is chart-button menu UI
 
@@ -214,7 +214,7 @@ Every successful task must synchronize all versioned ISSX source files:
 - ISSX/issx_selection_engine.mqh
 - ISSX/issx_correlation_engine.mqh
 - ISSX/issx_contracts.mqh
-- ISSX/issx_ui_test.mqh
+- ISSX/issx_ui.mqh
 - ISSX/issx_debug_engine.mqh
 - ISSX/issx_menu.mqh
 
@@ -636,7 +636,7 @@ Success criteria:
 
 TASK F3.75 — HUD PROJECTION LAYER
 Primary surface:
-- ISSX/issx_ui_test.mqh
+- ISSX/issx_ui.mqh
 - tightly coupled wrapper touch required
 - tightly coupled state exposure touch only if required
 

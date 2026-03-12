@@ -1,4 +1,4 @@
-﻿#ifndef __ISSX_TELEMETRY_MQH__
+#ifndef __ISSX_TELEMETRY_MQH__
 #define __ISSX_TELEMETRY_MQH__
 
 // ============================================================================
@@ -6,7 +6,7 @@
 // Infrastructure-only in-memory telemetry for structured diagnostics.
 // ============================================================================
 
-#define ISSX_TELEMETRY_VERSION         "1.723"
+#define ISSX_TELEMETRY_VERSION         "1.724"
 #define ISSX_TELEMETRY_MAX_EVENTS      256
 #define ISSX_TELEMETRY_STAGE_COUNT     9
 

@@ -1,4 +1,4 @@
-﻿#ifndef __ISSX_MARKET_ENGINE_MQH__
+#ifndef __ISSX_MARKET_ENGINE_MQH__
 #define __ISSX_MARKET_ENGINE_MQH__
 
 #include <ISSX/issx_core.mqh>
@@ -25,7 +25,7 @@
 //   owner runtime/persistence layer
 // ============================================================================
 
-#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.722"
+#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.723"
 
 enum ISSX_EA1_RuntimeState
   {
