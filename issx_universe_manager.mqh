@@ -34,7 +34,8 @@ public:
       if(start>0 || end<n-1)
          out=(end>=start ? StringSubstr(out,start,end-start+1) : "");
 
-      return StringToUpper(out);
+      StringToUpper(out);
+      return out;
      }
 
    static bool IsSameCanonicalSymbol(const string a,const string b)
