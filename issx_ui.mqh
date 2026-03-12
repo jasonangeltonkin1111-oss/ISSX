@@ -1,4 +1,4 @@
-#ifndef __ISSX_UI_MQH__
+﻿#ifndef __ISSX_UI_MQH__
 #define __ISSX_UI_MQH__
 
 #include <ISSX/issx_core.mqh>
@@ -11,7 +11,7 @@
 #include <ISSX/issx_debug_engine.mqh>
 #include <ISSX/issx_persistence.mqh>
 
-#define ISSX_UI_MODULE_VERSION "1.728"
+#define ISSX_UI_MODULE_VERSION "1.730"
 #define ISSX_UI_DEBUG_MODULE_VERSION ISSX_UI_MODULE_VERSION
 #define ISSX_UI_TEST_MODULE_VERSION ISSX_UI_MODULE_VERSION
 #define ISSX_HUD_PREFIX "ISSX_HUD_"

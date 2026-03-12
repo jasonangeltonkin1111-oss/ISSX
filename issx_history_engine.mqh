@@ -7,7 +7,7 @@
 #include <ISSX/issx_persistence.mqh>
 
 // ============================================================================
-// ISSX HISTORY ENGINE v1.722
+// ISSX HISTORY ENGINE v1.730
 // EA2 shared engine for HistoryStateCore.
 //
 // OWNERSHIP IN THIS MODULE

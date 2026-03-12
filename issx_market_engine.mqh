@@ -25,7 +25,7 @@
 //   owner runtime/persistence layer
 // ============================================================================
 
-#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.729"
+#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.730"
 #define ISSX_EA1_PUBLISH_STAGE_JSON_MAX_BYTES     262144
 #define ISSX_EA1_PUBLISH_DEBUG_JSON_MAX_BYTES     524288
 #define ISSX_EA1_PUBLISH_UNIVERSE_JSON_MAX_BYTES  6291456

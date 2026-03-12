@@ -1,11 +1,11 @@
-#ifndef __ISSX_MENU_MQH__
+﻿#ifndef __ISSX_MENU_MQH__
 #define __ISSX_MENU_MQH__
 
 #include <ISSX/issx_core.mqh>
 
 #define ISSX_MENU_STAGE_COUNT 5
 
-// ISSX MENU ENGINE v1.723
+// ISSX MENU ENGINE v1.730
 
 class ISSX_MenuEngine
   {

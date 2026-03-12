@@ -1,4 +1,4 @@
-#ifndef __ISSX_CONTRACTS_MQH__
+﻿#ifndef __ISSX_CONTRACTS_MQH__
 #define __ISSX_CONTRACTS_MQH__
 
 #include <ISSX/issx_core.mqh>
@@ -10,7 +10,7 @@
 #include <ISSX/issx_selection_engine.mqh>
 #include <ISSX/issx_correlation_engine.mqh>
 
-#define ISSX_CONTRACTS_MODULE_VERSION            "1.724"
+#define ISSX_CONTRACTS_MODULE_VERSION            "1.730"
 #define ISSX_CONTRACTS_STAGE_API_VERSION         "1.718"
 #define ISSX_CONTRACTS_SERIALIZER_VERSION        "1.718"
 #define ISSX_CONTRACTS_EXTERNAL_CONTRACT_VERSION "ea5_v1.723"

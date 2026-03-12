@@ -1,5 +1,5 @@
 #property strict
-#property version   "1.729"
+#property version   "1.730"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
@@ -49,12 +49,12 @@ input bool   InpEnableEA4               = false;
 input bool   InpEnableEA5               = false;
 input bool   InpIsolationMode            = true;  // force EA1-only during forensic pass
 
-input bool   InpMinimalDebugMode        = true;  // default: wrapper shell + heartbeat only
-input bool   InpGateRuntimeScheduler    = false; // enables runtime init + kernel pulse
+input bool   InpMinimalDebugMode        = false; // default: full EA1 foundation active
+input bool   InpGateRuntimeScheduler    = true;  // enables runtime init + kernel pulse
 input bool   InpGateTimerHeavyWork      = true;  // foundation default: enables ISSX_RunKernelCycle from timer
 input bool   InpGateMenuEngine          = false;
 input bool   InpGateChartUiUpdates      = false;
-input bool   InpGateTickHeavyWork       = false; // enables any non-trivial tick path
+input bool   InpGateTickHeavyWork       = true;  // enables any non-trivial tick path
 input bool   InpGateUiProjection        = true;  // foundation default: enable HUD projection
 input bool   InpEnableRuntimeSchedulerLayer = false;
 input int    InpSchedulerCycleBudgetMs  = 25;
@@ -1508,9 +1508,7 @@ int OnInit()
    if(g_ea_enabled[0] && (!eff_timer_heavy || !eff_ui_projection))
      {
       const string block_reason="ea1_foundation_gate_off timer_heavy="+ISSX_OnOff(eff_timer_heavy)+" ui_projection="+ISSX_OnOff(eff_ui_projection);
-      g_debug.Write("ERROR","startup","profile_blocked",block_reason);
-      g_debug.Write("ERROR","lifecycle","oninit_end","result=INIT_FAILED reason="+block_reason);
-      return INIT_FAILED;
+      g_debug.Write("WARN","startup","profile_degraded",block_reason+" action=continue_without_self_kill");
      }
 
    // registry + runtime
