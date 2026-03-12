@@ -1,4 +1,4 @@
-﻿#ifndef __ISSX_SELECTION_ENGINE_MQH__
+#ifndef __ISSX_SELECTION_ENGINE_MQH__
 #define __ISSX_SELECTION_ENGINE_MQH__
 
 #include <ISSX/issx_core.mqh>
@@ -9,7 +9,7 @@
 #include <ISSX/issx_history_engine.mqh>
 
 // ============================================================================
-// ISSX SELECTION ENGINE v1.707
+// ISSX SELECTION ENGINE v1.709
 // EA3 shared engine for SelectionCore.
 //
 // BLUEPRINT ALIGNMENT NOTES
@@ -23,7 +23,7 @@
 // - degraded / unknown semantics remain explicit
 // ============================================================================
 
-#define ISSX_SELECTION_ENGINE_MODULE_VERSION "1.707"
+#define ISSX_SELECTION_ENGINE_MODULE_VERSION "1.709"
 #define ISSX_SELECTION_ENGINE_STAGE_API_VERSION "ea3_stage_api_v1"
 #define ISSX_SELECTION_ENGINE_SERIALIZER_VERSION "ea3_json_v1"
 
