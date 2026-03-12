@@ -33,6 +33,13 @@ class ISSX_MetricsBook
 private:
    ISSX_MetricStage m_rows[ISSX_STAGE_COUNT];
 
+   static long NormalizeNonNegativeLong(const long value)
+     {
+      if(value<0)
+         return 0;
+      return value;
+     }
+
    int Idx(const ISSX_StageId stage_id) const
      {
       return ISSX_Stage::ToStageIndex(stage_id);
@@ -49,7 +56,7 @@ public:
      {
       const int i=Idx(stage_id);
       if(i>=0)
-         m_rows[i].stage_latency_ms=NormalizeNonNegative(ms);
+         m_rows[i].stage_latency_ms=NormalizeNonNegativeLong(ms);
      }
 
    void RecordThroughput(const ISSX_StageId stage_id,const long items_per_slice)
@@ -70,7 +77,7 @@ public:
      {
       const int i=Idx(stage_id);
       if(i>=0)
-         m_rows[i].export_size_bytes=NormalizeNonNegative(bytes);
+         m_rows[i].export_size_bytes=NormalizeNonNegativeLong(bytes);
      }
 
    // Backward-compatible aliases.

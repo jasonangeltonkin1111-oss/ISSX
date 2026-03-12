@@ -6,7 +6,7 @@
 #include <ISSX/issx_data_handler.mqh>
 
 // ============================================================================
-// ISSX PERSISTENCE v1.723
+// ISSX PERSISTENCE v1.724
 // Blueprint-aligned persistence / handoff / fallback / warehouse / lock helpers.
 // Authoritative truth remains: accepted internal current + coherent manifest chain.
 // ============================================================================
@@ -1392,7 +1392,18 @@ public:
       ok=ok && ISSX_FileIO::WriteText(ISSX_PersistencePath::HeaderCandidate(firm_id,stage_id),header_json);
       ok=ok && ISSX_FileIO::WriteText(ISSX_PersistencePath::PayloadCandidate(firm_id,stage_id),payload_text);
       ok=ok && ISSX_FileIO::WriteText(ISSX_PersistencePath::ManifestCandidate(firm_id,stage_id),manifest_json);
-      return ok;
+      if(!ok)
+         return false;
+
+      ISSX_StageHeader verify_header;
+      ISSX_Manifest verify_manifest;
+      string verify_payload="";
+      verify_header.Reset();
+      verify_manifest.Reset();
+      if(!LoadCandidate(firm_id,stage_id,verify_header,verify_manifest,verify_payload))
+         return false;
+
+      return ISSX_Coherence::CandidateTrioCoherent(verify_header,verify_manifest,verify_payload);
      }
 
    static bool LoadCandidate(const string firm_id,

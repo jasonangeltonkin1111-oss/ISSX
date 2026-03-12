@@ -4,11 +4,11 @@
 #include <ISSX/issx_core.mqh>
 
 // ============================================================================
-// ISSX DATA HANDLER v1.717
+// ISSX DATA HANDLER v1.718
 // Shared JSON/payload/file-commit safety layer for ISSX stages.
 // ============================================================================
 
-#define ISSX_DATA_HANDLER_MODULE_VERSION "1.717"
+#define ISSX_DATA_HANDLER_MODULE_VERSION "1.718"
 #define ISSX_DATA_HANDLER_MAX_PAYLOAD_BYTES 7864320
 #define ISSX_DATA_HANDLER_WRITE_RETRY_MAX   3
 
@@ -38,11 +38,22 @@ namespace ISSX_DataHandler
       const int h=FileOpen(relative_path,FILE_READ|FILE_TXT|FILE_COMMON|FILE_ANSI,"\n",CP_UTF8);
       if(h==INVALID_HANDLE)
          return false;
+
       const ulong sz=FileSize(h);
+      string readback="";
+      ResetLastError();
+      readback=FileReadString(h,(int)MathMin((ulong)2147483647,sz));
+      const int read_error=GetLastError();
       FileClose(h);
+
+      if(read_error!=0)
+         return false;
+
+      const int readback_utf8_bytes=EstimateUtf8Bytes(readback);
       if(expected_utf8_bytes<=0)
-         return true;
-      return (sz>0);
+         return (readback_utf8_bytes<=0 && sz==0);
+
+      return (readback_utf8_bytes==expected_utf8_bytes && sz>0);
      }
 
    struct ForensicState
