@@ -7,7 +7,7 @@
 #include <ISSX/issx_persistence.mqh>
 
 // ============================================================================
-// ISSX HISTORY ENGINE v1.714
+// ISSX HISTORY ENGINE v1.718
 // EA2 shared engine for HistoryStateCore.
 //
 // OWNERSHIP IN THIS MODULE
@@ -1450,7 +1450,7 @@ private:
       if(!CopyCompletedRatesSafe(symbol_state.symbol_raw,TfValueByIndex(tf_index),retention,completed_rates,live_bar_present,raw_copied,last_error_code,requested_raw))
         {
          st.forensic.persistence_write_failures++;
-         st.forensic.last_error_code="persist_copyrates_fail_"+IntegerToString(last_error_code);
+         st.forensic.last_error_code=ISSX_ErrorToString(ISSX_ERR_COPYRATES)+"_"+IntegerToString(last_error_code);
          AddForensicEvent(st,"history_error_conditions",
                           "persist_copyrates_fail symbol="+symbol_state.symbol_norm+" tf="+TfNameByIndex(tf_index)+" err="+IntegerToString(last_error_code));
          return false;
@@ -1478,7 +1478,7 @@ private:
       else
         {
          st.forensic.persistence_write_failures++;
-         st.forensic.last_error_code="persist_write_fail";
+         st.forensic.last_error_code=ISSX_ErrorToString(ISSX_ERR_FILE_WRITE);
          AddForensicEvent(st,"history_error_conditions",
                           "persist_write_fail symbol="+symbol_state.symbol_norm+" tf="+TfNameByIndex(tf_index));
         }
@@ -1562,7 +1562,7 @@ private:
       else
         {
          st.forensic.persistence_index_failures++;
-         st.forensic.last_error_code="persist_index_fail";
+         st.forensic.last_error_code=ISSX_ErrorToString(ISSX_ERR_FILE_WRITE);
          AddForensicEvent(st,"history_error_conditions","persist_index_fail");
         }
       return ok;
@@ -2026,7 +2026,7 @@ public:
       if(!CopyCompletedRatesSafe(s.symbol_raw,TfValueByIndex(tf_index),request_completed,rates,live_bar_present,raw_copied,last_error_code,requested_raw))
         {
          st.forensic.copyrates_failures++;
-         st.forensic.last_error_code="copyrates_fail_"+IntegerToString(last_error_code);
+         st.forensic.last_error_code=ISSX_ErrorToString(ISSX_ERR_COPYRATES)+"_"+IntegerToString(last_error_code);
          AddForensicEvent(st,"history_copyrates_result",
                           "fail symbol="+s.symbol_norm+" tf="+TfNameByIndex(tf_index)+" copied="+IntegerToString(raw_copied)+" err="+IntegerToString(last_error_code));
          AddForensicEvent(st,"history_error_conditions",
@@ -2569,7 +2569,7 @@ public:
                        "symbols="+IntegerToString(n)+" deep_default="+(deep_profile_default?"true":"false"));
       if(n<=0)
         {
-         st.forensic.last_error_code="history_discovery_empty";
+         st.forensic.last_error_code=ISSX_ErrorToString(ISSX_ERR_SYMBOL_DISCOVERY);
          AddForensicEvent(st,"history_error_conditions","discovery_empty_symbol_list");
          return false;
         }
@@ -2694,7 +2694,7 @@ public:
          AddForensicEvent(st,"history_error_conditions","stage_slice_empty_source");
          st.stage_minimum_ready_flag=false;
          st.stage_publishability_state="blocked";
-         st.dependency_block_reason="history_not_ready";
+         st.dependency_block_reason=ISSX_ErrorToString(ISSX_ERR_HISTORY_NOT_READY);
          st.debug_weak_link_code="ea2_slice_empty";
          return false;
         }
@@ -2706,7 +2706,7 @@ public:
          AddForensicEvent(st,"history_error_conditions","stage_slice_zero_limit");
          st.stage_minimum_ready_flag=false;
          st.stage_publishability_state="blocked";
-         st.dependency_block_reason="history_not_ready";
+         st.dependency_block_reason=ISSX_ErrorToString(ISSX_ERR_HISTORY_NOT_READY);
          st.debug_weak_link_code="ea2_slice_empty";
          return false;
         }
@@ -2717,7 +2717,7 @@ public:
          AddForensicEvent(st,"history_error_conditions","stage_slice_resize_failed");
          st.stage_minimum_ready_flag=false;
          st.stage_publishability_state="blocked";
-         st.dependency_block_reason="slice_resize_failed";
+         st.dependency_block_reason=ISSX_ErrorToString(ISSX_ERR_MEMORY_ALLOC);
          st.debug_weak_link_code="ea2_slice_resize_failed";
          return false;
         }
@@ -2730,7 +2730,7 @@ public:
         {
          st.stage_minimum_ready_flag=false;
          st.stage_publishability_state="blocked";
-         st.dependency_block_reason="history_not_ready";
+         st.dependency_block_reason=ISSX_ErrorToString(ISSX_ERR_HISTORY_NOT_READY);
          st.debug_weak_link_code="ea2_slice_empty";
         }
       return ok;

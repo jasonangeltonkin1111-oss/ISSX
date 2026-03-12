@@ -1,11 +1,11 @@
-﻿#ifndef __ISSX_CORE_MQH__
+#ifndef __ISSX_CORE_MQH__
 #define __ISSX_CORE_MQH__
 // ============================================================================
-// ISSX CORE v1.715
+// ISSX CORE v1.718
 // Shared foundation for the consolidated single-EA / five-stage ISSX kernel.
 //
 // HARDENING NOTES
-// - upgraded owner surface to blueprint v1.715 governance
+// - upgraded owner surface to blueprint v1.718 governance
 // - preserved shared semantic ownership in core only
 // - expanded field-key ownership for manifest / scheduler / debug / EA5 surfaces
 // - added compatibility-alias lifecycle and external-contract stability enums
@@ -21,15 +21,15 @@
 
 #define ISSX_ENGINE_NAME                              "ISSX"
 #define ISSX_ENGINE_FAMILY                            "ISSX_PIPELINE"
-#define ISSX_ENGINE_VERSION                           "1.717"
-#define ISSX_SCHEMA_VERSION                           "1.717"
+#define ISSX_ENGINE_VERSION                           "1.718"
+#define ISSX_SCHEMA_VERSION                           "1.718"
 #define ISSX_SCHEMA_EPOCH                             10702
 #define ISSX_STORAGE_VERSION                          1721
 #define ISSX_STAGE_API_VERSION                        1721
 #define ISSX_SERIALIZER_VERSION                       1721
 #define ISSX_POLICY_FINGERPRINT_VERSION               1721
 #define ISSX_FINGERPRINT_ALGO_VERSION                 4
-#define ISSX_LEGEND_VERSION                           "1.717"
+#define ISSX_LEGEND_VERSION                           "1.718"
 #define ISSX_OWNER_MODULE_NAME_CORE                   "issx_core.mqh"
 #define ISSX_OWNER_MODULE_HASH_MEANING_VERSION        1
 
@@ -177,6 +177,56 @@
 #define ISSX_ACCEPTANCE_ERR_THRESHOLD                 1025
 #define ISSX_ACCEPTANCE_ERR_INCLUDE_DRIFT             1026
 #define ISSX_ACCEPTANCE_ERR_ALIAS_DRIFT               1027
+
+// Canonical runtime/pipeline error classification for deterministic diagnostics.
+enum ISSX_ErrorCode
+  {
+   ISSX_ERR_NONE = 0,
+
+   // DISCOVERY
+   ISSX_ERR_SYMBOL_DISCOVERY,
+   ISSX_ERR_INVALID_SYMBOL,
+
+   // HISTORY
+   ISSX_ERR_COPYRATES,
+   ISSX_ERR_HISTORY_NOT_READY,
+
+   // MEMORY
+   ISSX_ERR_MEMORY_ALLOC,
+
+   // PERSISTENCE
+   ISSX_ERR_JSON_BUILD,
+   ISSX_ERR_FILE_WRITE,
+
+   // RUNTIME
+   ISSX_ERR_STAGE_DISABLED,
+   ISSX_ERR_STAGE_SKIPPED,
+   ISSX_ERR_RUNTIME_LIMIT,
+   ISSX_ERR_TIMEOUT,
+
+   ISSX_ERR_UNKNOWN
+  };
+
+string ISSX_ErrorToString(const ISSX_ErrorCode code)
+  {
+   switch(code)
+     {
+      case ISSX_ERR_NONE:              return "none";
+      case ISSX_ERR_SYMBOL_DISCOVERY:  return "symbol_discovery";
+      case ISSX_ERR_INVALID_SYMBOL:    return "invalid_symbol";
+      case ISSX_ERR_COPYRATES:         return "copyrates";
+      case ISSX_ERR_HISTORY_NOT_READY: return "history_not_ready";
+      case ISSX_ERR_MEMORY_ALLOC:      return "memory_alloc";
+      case ISSX_ERR_JSON_BUILD:        return "json_build";
+      case ISSX_ERR_FILE_WRITE:        return "file_write";
+      case ISSX_ERR_STAGE_DISABLED:    return "stage_disabled";
+      case ISSX_ERR_STAGE_SKIPPED:     return "stage_skipped";
+      case ISSX_ERR_RUNTIME_LIMIT:     return "runtime_limit";
+      case ISSX_ERR_TIMEOUT:           return "timeout";
+      case ISSX_ERR_UNKNOWN:           return "unknown";
+     }
+   return "unknown";
+  }
 
 #define ISSX_THRESHOLD_MIN_FRESHNESS                  "minimum_freshness"
 #define ISSX_THRESHOLD_CONTRADICTION_LIMIT            "contradiction_threshold"

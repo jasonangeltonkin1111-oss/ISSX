@@ -8,7 +8,7 @@
 #include <ISSX/issx_data_handler.mqh>
 
 // ============================================================================
-// ISSX MARKET ENGINE v1.715
+// ISSX MARKET ENGINE v1.718
 // EA1 shared engine for MarketStateCore.
 //
 // HARDENING NOTES
@@ -25,7 +25,7 @@
 //   owner runtime/persistence layer
 // ============================================================================
 
-#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.715"
+#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.718"
 
 enum ISSX_EA1_RuntimeState
   {
@@ -2997,7 +2997,7 @@ public:
       const ulong t0=GetTickCount();
       io_state.scheduler.phase_id=ISSX_EA1_MapToRuntimePhase(issx_ea1_phase_publish);
       io_state.publish_last_checkpoint="publish_enter";
-      io_state.publish_last_error="none";
+      io_state.publish_last_error=ISSX_ErrorToString(ISSX_ERR_NONE);
       io_state.publish_symbols_serialized=0;
       io_state.publish_stage_json_bytes=0;
       io_state.publish_debug_json_bytes=0;
@@ -3011,7 +3011,7 @@ public:
       if(!io_state.hydration_complete || io_state.runtime_state!=EA1_STATE_READY)
         {
          io_state.publish_last_checkpoint="publish_gate_blocked";
-         io_state.publish_last_error="hydration_or_runtime_not_ready";
+         io_state.publish_last_error=ISSX_ErrorToString(ISSX_ERR_RUNTIME_LIMIT);
          return false;
         }
 
@@ -3048,19 +3048,19 @@ public:
       if(out_stage_json=="")
         {
          io_state.publish_last_checkpoint="json_fail";
-         io_state.publish_last_error="stage_json_empty";
+         io_state.publish_last_error=ISSX_ErrorToString(ISSX_ERR_JSON_BUILD);
          return false;
         }
       if(out_broker_dump_json=="")
         {
          io_state.publish_last_checkpoint="json_fail";
-         io_state.publish_last_error="universe_json_empty";
+         io_state.publish_last_error=ISSX_ErrorToString(ISSX_ERR_JSON_BUILD);
          return false;
         }
       if(out_debug_snapshot_json=="")
         {
          io_state.publish_last_checkpoint="json_fail";
-         io_state.publish_last_error="debug_json_empty";
+         io_state.publish_last_error=ISSX_ErrorToString(ISSX_ERR_JSON_BUILD);
          return false;
         }
 

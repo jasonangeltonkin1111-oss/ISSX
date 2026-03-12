@@ -1,5 +1,5 @@
-﻿#property strict
-#property version   "1.717"
+#property strict
+#property version   "1.718"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
@@ -1529,7 +1529,7 @@ void OnTimer()
       g_debug.Write("INFO","timer","elapsed_us","value="+ISSX_Util::ULongToStringX(elapsed_us));
 
 
-   g_ui.Render(g_debug,"1.717",g_boot_id,g_timer_pulse_count,
+   g_ui.Render(g_debug,"1.718",g_boot_id,g_timer_pulse_count,
                Config.GetBool("minimal_debug_mode"),
                Config.GetBool("isolation_mode"),
                (Config.GetBool("runtime_scheduler_enabled")?"on":"off"),

@@ -6,7 +6,7 @@
 #include <ISSX/issx_data_handler.mqh>
 
 // ============================================================================
-// ISSX PERSISTENCE v1.715
+// ISSX PERSISTENCE v1.718
 // Blueprint-aligned persistence / handoff / fallback / warehouse / lock helpers.
 // Authoritative truth remains: accepted internal current + coherent manifest chain.
 // ============================================================================
@@ -1457,14 +1457,14 @@ public:
          ok=ok && ISSX_FileIO::WriteText(mc,ISSX_PersistenceCodec::ManifestToJson(manifest));
 
       outcome.internal_commit_success=ok;
-      outcome.last_projection_reason=(ok ? "ok" : "promote_candidate_failed");
+      outcome.last_projection_reason=(ok ? "ok" : ISSX_ErrorToString(ISSX_ERR_FILE_WRITE));
 
       if(ok)
          ok=ok && ISSX_HandoffStore::WriteAccepted(firm_id,stage_id,verify_header,manifest,verify_payload);
 
       outcome.internal_commit_success=ok;
       if(!ok)
-         outcome.last_projection_reason="handoff_write_failed";
+         outcome.last_projection_reason=ISSX_ErrorToString(ISSX_ERR_FILE_WRITE);
 
       return ok;
      }
