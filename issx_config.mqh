@@ -3,9 +3,10 @@
 
 #include <ISSX/issx_core.mqh>
 
-#define ISSX_CONFIG_MODULE_VERSION "1.717"
+#define ISSX_CONFIG_MODULE_VERSION "1.718"
 
 // Wrapper inputs (declared in ISSX.mq5)
+#ifndef ISSX_CONFIG_INPUTS_PROVIDED
 extern string InpFirmId;
 extern bool   InpIncludeCustomSymbols;
 extern int    InpEA1MaxSymbols;
@@ -33,6 +34,7 @@ extern bool   InpGateMenuEngine;
 extern bool   InpGateChartUiUpdates;
 extern bool   InpGateTickHeavyWork;
 extern bool   InpGateUiProjection;
+#endif
 
 struct ISSX_ConfigSnapshot
   {
@@ -282,7 +284,7 @@ public:
 
       ValidatePositiveInt("ea1_hydration_batch",GetInt("ea1_hydration_batch"));
       ValidateNonNegativeInt("ea1_max_symbols",GetInt("ea1_max_symbols"));
-      ValidatePositiveInt("runtime_timer_seconds",ISSX_TIMER_SECONDS);
+      ValidatePositiveInt("runtime_timer_seconds",ISSX_EVENT_TIMER_SEC);
       ValidatePositiveInt("lock_stale_after_sec",GetInt("lock_stale_after_sec"));
       ValidatePositiveInt("ea2_max_symbols_per_slice",GetInt("ea2_max_symbols_per_slice"));
 

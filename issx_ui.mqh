@@ -10,7 +10,7 @@
 #include <ISSX/issx_contracts.mqh>
 #include <ISSX/issx_debug_engine.mqh>
 
-#define ISSX_UI_MODULE_VERSION "1.717"
+#define ISSX_UI_MODULE_VERSION "1.718"
 #define ISSX_HUD_PREFIX "ISSX_HUD_"
 #define ISSX_HUD_MAIN_OBJECT "ISSX_HUD_MAIN"
 
@@ -120,7 +120,7 @@ public:
                const long kernel_elapsed_ms,
                const string broker,
                const string server,
-               const bool ea_enabled[],
+               const bool &ea_enabled[],
                const ISSX_EA1_State &ea1,
                const ISSX_EA2_State &ea2,
                const ISSX_EA3_State &ea3,
@@ -158,21 +158,21 @@ public:
       text+=" fx:create="+IntegerToString(m_fx.objects_created)+" update="+IntegerToString(m_fx.objects_updated)+" skip="+IntegerToString(m_fx.objects_skipped)+"\n";
 
       text+="EA1 MARKET\n";
-      text+=" enabled="+(ea_enabled[0]?"on":"off")+" effective="+ea1.stage_publishability_state+" run="+ea1_run+" reason="+ea1_reason+" elapsed="+IntegerToString((int)ea1_elapsed_ms)+"ms\n";
+      text+=" enabled="+(ea_enabled[0]?"on":"off")+" effective="+ISSX_PublishabilityStateToString(ea1.stage_publishability_state)+" run="+ea1_run+" reason="+ea1_reason+" elapsed="+IntegerToString((int)ea1_elapsed_ms)+"ms\n";
       text+=" discovery="+(ea1.discovery_attempted?"attempted":"idle")+" accepted="+IntegerToString(ea1.counters.accepted_strong_count+ea1.counters.accepted_degraded_count)+" rejected="+IntegerToString(ea1.counters.rejected_count)+" degraded="+IntegerToString(ea1.counters.degraded_count)+"\n";
       text+=" hydration="+IntegerToString(ea1.hydration_processed)+"/"+IntegerToString(ea1.hydration_total)+" batch="+IntegerToString(ea1.hydration_batch_size)+" publish="+ea1_publish_state+" gate="+ea1.dependency_block_reason+"\n";
       text+=" publish_ckpt="+ea1.publish_last_checkpoint+" publish_err="+ea1.publish_last_error+" bytes="+IntegerToString(ea1.publish_stage_json_bytes)+"\n";
 
       text+="EA2 HISTORY\n";
-      text+=" enabled="+(ea_enabled[1]?"on":"off")+" effective="+ISSX_Enum::PublishabilityStateToString(ea2.stage_publishability_state)+" run="+ea2_run+" reason="+ea2_reason+" elapsed="+IntegerToString((int)ea2_elapsed_ms)+"ms\n";
+      text+=" enabled="+(ea_enabled[1]?"on":"off")+" effective="+ISSX_PublishabilityStateToString(ea2.stage_publishability_state)+" run="+ea2_run+" reason="+ea2_reason+" elapsed="+IntegerToString((int)ea2_elapsed_ms)+"ms\n";
       text+=" readiness="+(ea2.stage_minimum_ready_flag?"ready":"not_ready")+" copyrates="+IntegerToString(ea2.forensic.copyrates_successes)+"/"+IntegerToString(ea2.forensic.copyrates_attempts)+" retries="+IntegerToString(ea2.forensic.copyrates_failures)+" partial="+(ea2.projection_partial_success_flag?"partial":"none")+"\n";
 
       text+="EA3 SELECTION\n";
-      text+=" enabled="+(ea_enabled[2]?"on":"off")+" effective="+ISSX_Enum::PublishabilityStateToString(ea3.stage_publishability_state)+" run="+ea3_run+" reason="+ea3_reason+" elapsed="+IntegerToString((int)ea3_elapsed_ms)+"ms\n";
+      text+=" enabled="+(ea_enabled[2]?"on":"off")+" effective="+ISSX_PublishabilityStateToString(ea3.stage_publishability_state)+" run="+ea3_run+" reason="+ea3_reason+" elapsed="+IntegerToString((int)ea3_elapsed_ms)+"ms\n";
       text+=" candidates="+IntegerToString(ea3.universe.active_universe)+" frontier="+IntegerToString(ea3.universe.frontier_universe)+" bounded="+IntegerToString(ea3.universe.publishable_universe)+" readiness="+(ea3.stage_minimum_ready_flag?"ready":"not_ready")+"\n";
 
       text+="EA4 CORRELATION\n";
-      text+=" enabled="+(ea_enabled[3]?"on":"off")+" effective="+ISSX_Enum::PublishabilityStateToString(ea4.stage_publishability_state)+" run="+ea4_run+" reason="+ea4_reason+" elapsed="+IntegerToString((int)ea4_elapsed_ms)+"ms\n";
+      text+=" enabled="+(ea_enabled[3]?"on":"off")+" effective="+ISSX_PublishabilityStateToString(ea4.stage_publishability_state)+" run="+ea4_run+" reason="+ea4_reason+" elapsed="+IntegerToString((int)ea4_elapsed_ms)+"ms\n";
       text+=" workload="+IntegerToString(ea4.universe.frontier_universe_count)+" batch="+IntegerToString(ea4.forensic.pair_cursor)+"/"+IntegerToString(ea4.forensic.pair_batch_end_cursor)+" matrix="+ea4.forensic.error_conditions+" partial="+(ea4.forensic.partial_ready_flag?"partial":"none")+"\n";
 
       text+="EA5 CONTRACTS\n";

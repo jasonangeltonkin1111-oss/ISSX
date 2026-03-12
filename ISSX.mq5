@@ -1,9 +1,10 @@
 ﻿#property strict
-#property version   "1.718"
+#property version   "1.719"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
 #include <ISSX/issx_memory_guard.mqh>
+#define ISSX_CONFIG_INPUTS_PROVIDED
 #include <ISSX/issx_config.mqh>
 #include <ISSX/issx_registry.mqh>
 #include <ISSX/issx_runtime.mqh>
@@ -57,6 +58,7 @@ ISSX_MemoryGuard   g_memory_guard;
 ISSX_RegistryBundle   g_registry;
 ISSX_StageRuntime     g_runtime;
 ISSX_StageStateRegistry StageRegistry;
+ISSX_Scheduler        g_scheduler;
 
 ISSX_EA1_State      g_ea1;
 ISSX_EA2_State      g_ea2;
@@ -728,7 +730,7 @@ void ISSX_ProjectEA5(const string export_json,
    g_ea5.header.policy_fingerprint=g_registry.SchemaFingerprintHex();
 
    ISSX_PersistStageJson(issx_stage_ea5,g_ea5.header,g_ea5.manifest,export_json);
-   ISSX_Persistence::WriteTextAtomic(ISSX_PersistencePath::RootExport(g_firm_id),export_json);
+   ISSX_FileIO::WriteTextAtomic(ISSX_PersistencePath::RootExport(g_firm_id),export_json);
 
    if(Config.GetBool("project_debug_snapshots"))
       ISSX_UI_Test::ProjectStageSnapshot(g_firm_id,issx_stage_ea5,debug_json);
@@ -1551,7 +1553,7 @@ void OnTimer()
       g_debug.Write("INFO","timer","elapsed_us","value="+ISSX_Util::ULongToStringX(elapsed_us));
 
 
-   g_ui.Render(g_debug,"1.718",g_boot_id,g_timer_pulse_count,
+   g_ui.Render(g_debug,"1.719",g_boot_id,g_timer_pulse_count,
                Config.GetBool("minimal_debug_mode"),
                Config.GetBool("isolation_mode"),
                (Config.GetBool("runtime_scheduler_enabled")?"on":"off"),
