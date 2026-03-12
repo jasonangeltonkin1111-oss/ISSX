@@ -116,7 +116,9 @@ public:
 
       FileSeek(m_file_handle,0,SEEK_END);
       FileWriteString(m_file_handle,line+"\r\n");
-      FileFlush(m_file_handle);
+      m_write_count++;
+      if((m_write_count%5)==0)
+         FileFlush(m_file_handle);
      }
 
    void Close(const int deinit_reason)
@@ -124,6 +126,7 @@ public:
       Write("INFO","session","end","deinit_reason="+IntegerToString(deinit_reason));
       if(m_file_handle!=INVALID_HANDLE)
         {
+         FileFlush(m_file_handle);
          FileClose(m_file_handle);
          m_file_handle=INVALID_HANDLE;
         }

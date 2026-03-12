@@ -773,7 +773,8 @@ void OnTimer()
 
    bool ok=ISSX_RunKernelCycle();
 
-   g_debug.Write("INFO","timer","kernel_result",(ok?"ok":"degraded"));
+   if((timer_count%15)==1 || !ok)
+      g_debug.Write("INFO","timer","kernel_result",(ok?"ok":"degraded"));
 
    g_first_cycle_done=true;
    g_kernel_busy=false;
