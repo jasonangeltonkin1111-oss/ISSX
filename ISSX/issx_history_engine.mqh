@@ -1,4 +1,4 @@
-#ifndef __ISSX_HISTORY_ENGINE_MQH__
+﻿#ifndef __ISSX_HISTORY_ENGINE_MQH__
 #define __ISSX_HISTORY_ENGINE_MQH__
 
 #include <ISSX/issx_core.mqh>
@@ -7,7 +7,7 @@
 #include <ISSX/issx_persistence.mqh>
 
 // ============================================================================
-// ISSX HISTORY ENGINE v1.7.2
+// ISSX HISTORY ENGINE v1.7.3
 // EA2 shared engine for HistoryStateCore.
 //
 // OWNERSHIP IN THIS MODULE
