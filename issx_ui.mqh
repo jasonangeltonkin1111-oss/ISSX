@@ -11,8 +11,9 @@
 #include <ISSX/issx_debug_engine.mqh>
 #include <ISSX/issx_persistence.mqh>
 
-#define ISSX_UI_MODULE_VERSION "1.727"
+#define ISSX_UI_MODULE_VERSION "1.728"
 #define ISSX_UI_DEBUG_MODULE_VERSION ISSX_UI_MODULE_VERSION
+#define ISSX_UI_TEST_MODULE_VERSION ISSX_UI_MODULE_VERSION
 #define ISSX_HUD_PREFIX "ISSX_HUD_"
 #define ISSX_HUD_MAIN_OBJECT "MAIN"
 
@@ -40,6 +41,21 @@ private:
    bool              m_initialized;
 
    string ObjName(const string suffix) { return string(ISSX_HUD_PREFIX)+suffix; }
+
+   void ConfigureMainObject(const string name)
+     {
+      ObjectSetInteger(0,name,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+      ObjectSetInteger(0,name,OBJPROP_XDISTANCE,12);
+      ObjectSetInteger(0,name,OBJPROP_YDISTANCE,18);
+      ObjectSetInteger(0,name,OBJPROP_FONTSIZE,10);
+      ObjectSetString(0,name,OBJPROP_FONT,"Consolas");
+      ObjectSetInteger(0,name,OBJPROP_COLOR,clrWhite);
+      ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+      ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
+      ObjectSetInteger(0,name,OBJPROP_BACK,false);
+      ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
+      ObjectSetInteger(0,name,OBJPROP_ZORDER,1000);
+     }
 
    void Log(ISSX_DebugEngine &dbg,const string event_code,const string detail)
      {
@@ -69,9 +85,11 @@ private:
       if(ObjectFind(0,name)>=0)
         {
          m_fx.objects_skipped++;
+         ConfigureMainObject(name);
          Log(dbg,"hud_object_skip_existing","name="+name);
          return;
         }
+      ResetLastError();
       if(!ObjectCreate(0,name,OBJ_LABEL,0,0,0))
         {
          Log(dbg,"hud_render_error","create_failed name="+name+" err="+IntegerToString((int)GetLastError()));
@@ -79,17 +97,7 @@ private:
         }
       m_fx.objects_created++;
       Log(dbg,"hud_object_create","name="+name);
-      ObjectSetInteger(0,name,OBJPROP_CORNER,CORNER_LEFT_UPPER);
-      ObjectSetInteger(0,name,OBJPROP_XDISTANCE,12);
-      ObjectSetInteger(0,name,OBJPROP_YDISTANCE,18);
-      ObjectSetInteger(0,name,OBJPROP_FONTSIZE,10);
-      ObjectSetString(0,name,OBJPROP_FONT,"Consolas");
-      ObjectSetInteger(0,name,OBJPROP_COLOR,clrWhite);
-      ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
-      ObjectSetInteger(0,name,OBJPROP_SELECTED,false);
-      ObjectSetInteger(0,name,OBJPROP_BACK,false);
-      ObjectSetInteger(0,name,OBJPROP_HIDDEN,false);
-      ObjectSetInteger(0,name,OBJPROP_ZORDER,1000);
+      ConfigureMainObject(name);
      }
 
 public:
@@ -213,11 +221,13 @@ public:
         }
       else
         {
+         ResetLastError();
          if(ObjectSetString(0,obj,OBJPROP_TEXT,text))
            {
             m_fx.objects_updated++;
             Log(dbg,"hud_object_update","name="+obj);
             m_last_text=text;
+            ChartRedraw(0);
            }
          else
             Log(dbg,"hud_render_error","update_failed name="+obj+" err="+IntegerToString((int)GetLastError()));
@@ -245,10 +255,6 @@ public:
 //   masquerade as healthy, safe, or empty-good state
 // ============================================================================
 
-#ifndef ISSX_UI_MODULE_VERSION
-#define ISSX_UI_MODULE_VERSION                 "1.727"
-#endif
-#define ISSX_UI_TEST_MODULE_VERSION            ISSX_UI_MODULE_VERSION
 #define ISSX_TRACE_DEFAULT_COOLDOWN_MS         15000
 #define ISSX_TRACE_MAX_RECENT_KEYS             256
 #define ISSX_DEBUG_MAX_WARNINGS                32
