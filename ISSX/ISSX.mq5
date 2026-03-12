@@ -1,5 +1,5 @@
 #property strict
-#property version   "10.000"
+#property version   "1.7.2"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
@@ -80,11 +80,6 @@ string              g_last_status_comment       = "";
 bool                g_logged_timer_heavy_skip   = false;
 bool                g_logged_tick_heavy_skip    = false;
 bool                g_logged_chart_ui_skip      = false;
-string              g_last_feature_runtime_scheduler = "";
-string              g_last_feature_timer_heavy       = "";
-string              g_last_run_tick_heavy_work      = "";
-string              g_last_run_chart_ui_updates    = "";
-string              g_last_run_ui_projection       = "";
 
 string ISSX_LongIdPart(const long value)
   {
@@ -527,69 +522,12 @@ void ISSX_LogGateSnapshot()
                  " ui_projection="+(gate_ui_projection?"on":"off"));
   }
 
-void ISSX_LogFeatureLifecycle(const string cls,const string feature_name,const string detail,string &last_detail,const bool sampled)
-  {
-   if(detail!=last_detail)
-     {
-      g_debug.Write("INFO",cls,feature_name,detail);
-      if(last_detail!="")
-         g_debug.Write("INFO","feature_change",feature_name,last_detail+"->"+detail);
-      last_detail=detail;
-      return;
-     }
-
-   if(sampled)
-      g_debug.Write("INFO",cls,feature_name,detail);
-  }
-
-string ISSX_FeatureOffReason(const bool requested,const bool effective)
-  {
-   if(effective)
-      return "none";
-   if(InpMinimalDebugMode)
-      return "minimal_debug_mode";
-   if(!requested)
-      return "gate_off";
-   return "dependency_or_wrapper_policy";
-  }
-
-void ISSX_LogFeatureStateSnapshot()
-  {
-   const bool eff_runtime=ISSX_IsGateOn(InpGateRuntimeScheduler,false);
-   const bool eff_timer=ISSX_IsGateOn(InpGateTimerHeavyWork,false);
-   const bool eff_tick=ISSX_IsGateOn(InpGateTickHeavyWork,false);
-   const bool eff_menu=ISSX_IsGateOn(InpGateMenuEngine,false);
-   const bool eff_chart=ISSX_IsGateOn(InpGateChartUiUpdates,false);
-   const bool eff_ui_projection=ISSX_IsGateOn(InpGateUiProjection,false);
-
-   g_debug.Write("INFO","feature_state","minimal_debug_mode","requested="+(InpMinimalDebugMode?"on":"off")+" effective="+(InpMinimalDebugMode?"on":"off")+" reason=config");
-   g_debug.Write("INFO","feature_state","isolation_mode","requested="+(InpIsolationMode?"on":"off")+" effective="+(InpIsolationMode?"on":"off")+" reason=config");
-
-   g_debug.Write("INFO","feature_state","runtime_scheduler","requested="+(InpGateRuntimeScheduler?"on":"off")+" effective="+(eff_runtime?"on":"off")+" reason="+ISSX_FeatureOffReason(InpGateRuntimeScheduler,eff_runtime));
-   g_debug.Write("INFO","feature_state","timer_heavy_work","requested="+(InpGateTimerHeavyWork?"on":"off")+" effective="+(eff_timer?"on":"off")+" reason="+ISSX_FeatureOffReason(InpGateTimerHeavyWork,eff_timer));
-   g_debug.Write("INFO","feature_state","tick_heavy_work","requested="+(InpGateTickHeavyWork?"on":"off")+" effective="+(eff_tick?"on":"off")+" reason="+ISSX_FeatureOffReason(InpGateTickHeavyWork,eff_tick));
-   g_debug.Write("INFO","feature_state","menu_engine","requested="+(InpGateMenuEngine?"on":"off")+" effective="+(eff_menu?"on":"off")+" reason="+ISSX_FeatureOffReason(InpGateMenuEngine,eff_menu));
-   g_debug.Write("INFO","feature_state","chart_ui_updates","requested="+(InpGateChartUiUpdates?"on":"off")+" effective="+(eff_chart?"on":"off")+" reason="+ISSX_FeatureOffReason(InpGateChartUiUpdates,eff_chart));
-   g_debug.Write("INFO","feature_state","ui_projection","requested="+(InpGateUiProjection?"on":"off")+" effective="+(eff_ui_projection?"on":"off")+" reason="+ISSX_FeatureOffReason(InpGateUiProjection,eff_ui_projection));
-
-   g_debug.Write("INFO","feature_state","ea1_market","requested="+(InpEnableEA1?"on":"off")+" effective="+(g_ea_enabled[0]?"on":"off")+" reason="+((InpIsolationMode && !InpEnableEA1)?"forced_on_by_isolation":"wrapper_stage_policy"));
-   g_debug.Write("INFO","feature_state","ea2_history","requested="+(InpEnableEA2?"on":"off")+" effective="+(g_ea_enabled[1]?"on":"off")+" reason="+(InpIsolationMode?"forced_off_by_isolation":"wrapper_stage_policy"));
-   g_debug.Write("INFO","feature_state","ea3_selection","requested="+(InpEnableEA3?"on":"off")+" effective="+(g_ea_enabled[2]?"on":"off")+" reason="+(InpIsolationMode?"forced_off_by_isolation":"wrapper_stage_policy"));
-   g_debug.Write("INFO","feature_state","ea4_correlation","requested="+(InpEnableEA4?"on":"off")+" effective="+(g_ea_enabled[3]?"on":"off")+" reason="+(InpIsolationMode?"forced_off_by_isolation":"wrapper_stage_policy"));
-   g_debug.Write("INFO","feature_state","ea5_contracts","requested="+(InpEnableEA5?"on":"off")+" effective="+(g_ea_enabled[4]?"on":"off")+" reason="+(InpIsolationMode?"forced_off_by_isolation":"wrapper_stage_policy"));
-
-   g_debug.Write("INFO","feature_state","session_snapshot",
-                 "modules=ea1:"+(g_ea_enabled[0]?"on":"off")+",ea2:"+(g_ea_enabled[1]?"on":"off")+",ea3:"+(g_ea_enabled[2]?"on":"off")+",ea4:"+(g_ea_enabled[3]?"on":"off")+",ea5:"+(g_ea_enabled[4]?"on":"off")+
-                 " gates_effective=runtime:"+(eff_runtime?"on":"off")+",timer:"+(eff_timer?"on":"off")+",tick:"+(eff_tick?"on":"off")+",menu:"+(eff_menu?"on":"off")+",chart:"+(eff_chart?"on":"off")+",ui_projection:"+(eff_ui_projection?"on":"off"));
-  }
-
 bool ISSX_RunUiProjectionSafe()
   {
    ISSX_SetCheckpoint("ui_projection_enter");
 
    if(!ISSX_IsGateOn(InpGateUiProjection,false))
      {
-      ISSX_LogFeatureLifecycle("feature_run","ui_projection","skipped | reason=gate_off",g_last_run_ui_projection,false);
       g_debug.Write("INFO","ui","projection_skipped","disabled_by_gate");
       return true;
      }
@@ -822,20 +760,13 @@ int OnInit()
                  " ea4="+(g_ea_enabled[3]?"on":"off")+
                  " ea5="+(g_ea_enabled[4]?"on":"off")+" isolation="+(InpIsolationMode?"true":"false"));
    ISSX_LogGateSnapshot();
-   ISSX_LogFeatureStateSnapshot();
 
    // registry + runtime
    g_registry.SeedBlueprintV170();
    if(ISSX_IsGateOn(InpGateRuntimeScheduler,false))
-     {
       g_runtime.Init();
-      g_debug.Write("INFO","feature_init","runtime_scheduler","success");
-     }
    else
-     {
-      g_debug.Write("INFO","feature_init","runtime_scheduler","skipped | reason=gate_off");
       g_debug.Write("INFO","runtime","init_skipped","disabled_by_gate");
-     }
 
    g_bootstrapped     = false;
    g_runtime_ready    = true;
@@ -847,21 +778,12 @@ int OnInit()
      {
       g_menu.Init(g_menu_prefix);
       if(!g_menu.Build(g_ea_enabled))
-        {
-         g_debug.Write("INFO","feature_init","menu_engine","failed | reason="+g_menu.LastError());
          g_debug.Write("WARN","ui","menu_build_failed","non-critical UI failure, continuing | "+g_menu.LastError());
-        }
       else
-        {
-         g_debug.Write("INFO","feature_init","menu_engine","success");
          g_debug.Write("INFO","ui","menu_build_ok","prefix="+g_menu_prefix);
-        }
      }
    else
-     {
-      g_debug.Write("INFO","feature_init","menu_engine","skipped | reason=gate_off");
       g_debug.Write("INFO","ui","menu_init_skipped","disabled_by_gate");
-     }
 
    if(!EventSetTimer(ISSX_EVENT_TIMER_SEC))
      {
@@ -914,7 +836,7 @@ void OnTimer()
       g_first_timer_logged=true;
      }
    const ulong timer_start_us=(ulong)GetMicrosecondCount();
-   const bool sampled=((g_timer_pulse_count%15)==1);
+   const bool sampled=ISSX_ShouldSampleTimerDetail();
    const bool gate_runtime_scheduler=ISSX_IsGateOn(InpGateRuntimeScheduler,false);
    const bool gate_timer_heavy=ISSX_IsGateOn(InpGateTimerHeavyWork,false);
 
@@ -929,8 +851,8 @@ void OnTimer()
                     " runtime_scheduler="+(gate_runtime_scheduler?"on":"off")+
                     " heavy_timer_work="+(gate_timer_heavy?"on":"off"));
 
-   bool timer_cycle_ok=true;
-   long timer_kernel_elapsed_ms=0;
+   bool ok=true;
+   long kernel_elapsed_ms=0;
 
    string runtime_scheduler_status="skipped | gate=off";
    if(gate_runtime_scheduler && !gate_timer_heavy)
@@ -940,9 +862,9 @@ void OnTimer()
    if(gate_timer_heavy)
      {
       const ulong kernel_start_us=(ulong)GetMicrosecondCount();
-      timer_cycle_ok=ISSX_RunKernelCycle();
-      timer_kernel_elapsed_ms=(long)(((ulong)GetMicrosecondCount()-kernel_start_us)/1000);
-      timer_heavy_status=(timer_cycle_ok ? "success" : "failed | reason=kernel_cycle_false");
+      ok=ISSX_RunKernelCycle();
+      kernel_elapsed_ms=(long)(((ulong)GetMicrosecondCount()-kernel_start_us)/1000);
+      timer_heavy_status=(ok ? "success" : "failed | reason=kernel_cycle_false");
      }
    else
      {
@@ -955,22 +877,32 @@ void OnTimer()
          g_debug.Write("INFO","timer","minimal_heartbeat","pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count));
      }
 
-   if(gate_runtime_scheduler && gate_timer_heavy)
-      runtime_scheduler_status=(timer_cycle_ok ? "success" : "failed | reason=kernel_cycle_false");
-   ISSX_LogFeatureLifecycle("feature_run","runtime_scheduler",runtime_scheduler_status,g_last_feature_runtime_scheduler,sampled);
-   ISSX_LogFeatureLifecycle("feature_run","timer_heavy_work",timer_heavy_status,g_last_feature_timer_heavy,sampled);
+   bool ok=true;
+   long kernel_elapsed_ms=0;
+   if(ISSX_IsGateOn(InpGateTimerHeavyWork,false))
+     {
+      const long kernel_start_ms=(long)GetTickCount64();
+      ok=ISSX_RunKernelCycle();
+      kernel_elapsed_ms=(long)GetTickCount64()-kernel_start_ms;
+     }
+   else
+     {
+      if(!g_logged_timer_heavy_skip)
+        {
+         g_debug.Write("INFO","timer","kernel_skip","disabled_by_gate");
+         g_logged_timer_heavy_skip=true;
+        }
+      if((g_timer_pulse_count%30)==1)
+         g_debug.Write("INFO","timer","minimal_heartbeat","pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count));
+     }
 
-   if(sampled || !timer_cycle_ok)
-      g_debug.Write("INFO","timer","kernel_result",(timer_cycle_ok?"ok":"degraded")+" elapsed_ms="+IntegerToString((int)timer_kernel_elapsed_ms));
-
-   const ulong elapsed_us=(ulong)GetMicrosecondCount()-timer_start_us;
-   if(sampled || !timer_cycle_ok)
-      g_debug.Write("INFO","timer","elapsed_us","value="+ISSX_Util::ULongToStringX(elapsed_us));
+   if((g_timer_pulse_count%15)==1 || !ok)
+      g_debug.Write("INFO","timer","kernel_result",(ok?"ok":"degraded"));
 
    g_first_cycle_done=true;
    g_kernel_busy=false;
 
-   string status=(timer_cycle_ok ? "ISSX minimal-debug | firm="+g_firm_id : "ISSX degraded | firm="+g_firm_id);
+   string status=(ok ? "ISSX running | firm="+g_firm_id : "ISSX degraded | firm="+g_firm_id);
    if(status!=g_last_status_comment || (g_timer_pulse_count-g_last_comment_pulse)>=15)
      {
       Comment(status);
@@ -990,7 +922,6 @@ void OnTick()
      }
    if(!ISSX_IsGateOn(InpGateTickHeavyWork,false))
      {
-      ISSX_LogFeatureLifecycle("feature_run","tick_heavy_work","skipped | reason=gate_off",g_last_run_tick_heavy_work,((tick_count%100)==0));
       if(!g_logged_tick_heavy_skip)
         {
          g_debug.Write("INFO","tick","heavy_work_skipped","disabled_by_gate");
@@ -1001,7 +932,6 @@ void OnTick()
       return;
      }
 
-   ISSX_LogFeatureLifecycle("feature_run","tick_heavy_work","success",g_last_run_tick_heavy_work,((tick_count%50)==0));
    if((tick_count%50)==0)
       g_debug.Write("INFO","tick","heartbeat","count="+IntegerToString((int)tick_count)+" mode=heavy_enabled");
   }
@@ -1016,7 +946,6 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
    g_debug.Write("INFO","chart_event","event","id="+IntegerToString(id)+" obj="+sparam);
    if(!ISSX_IsGateOn(InpGateChartUiUpdates,false) || !ISSX_IsGateOn(InpGateMenuEngine,false))
      {
-      ISSX_LogFeatureLifecycle("feature_run","chart_ui_updates","skipped | reason=gate_off",g_last_run_chart_ui_updates,false);
       if(!g_logged_chart_ui_skip)
         {
          g_debug.Write("INFO","chart_event","ui_skip","disabled_by_gate");
