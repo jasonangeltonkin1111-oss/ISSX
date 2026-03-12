@@ -401,8 +401,10 @@ private:
 public:
    static string FirmRoot(const string firm_id)
      {
-      (void)firm_id;
-      return ISSX_DIR_ROOT_NAME;
+      string root=ISSX_DIR_ROOT_NAME;
+      if(StringLen(firm_id)>0)
+         root=ISSX_Util::JoinPath(root,firm_id);
+      return root;
      }
 
    static string RootFile(const string firm_id,const string filename)
