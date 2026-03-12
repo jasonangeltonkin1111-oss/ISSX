@@ -12,6 +12,9 @@ private:
    string m_file_name;
    string m_terminal_data_path;
    string m_terminal_common_data_path;
+   long   m_write_count;
+   string m_active_mode;
+   string m_active_path;
 
    string BuildTimestamp() const
      {
@@ -68,6 +71,9 @@ public:
       m_file_name="";
       m_terminal_data_path="";
       m_terminal_common_data_path="";
+      m_write_count=0;
+      m_active_mode="";
+      m_active_path="";
      }
 
    bool BeginSession(const string ea_name,const string symbol,const ENUM_TIMEFRAMES tf)
@@ -84,6 +90,7 @@ public:
 
       ResetLastError();
       m_file_handle=FileOpen(common_rel,FILE_WRITE|FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
+      m_active_mode="";
       if(m_file_handle==INVALID_HANDLE)
         {
          const int common_err=GetLastError();
@@ -99,7 +106,13 @@ public:
             PrintWithLevel("ERROR","Local fallback FileOpen failed err="+IntegerToString(local_err)+" rel="+common_rel);
             return false;
            }
+         m_active_mode="local";
         }
+      else
+         m_active_mode="common";
+
+      m_write_count=0;
+      m_active_path=common_rel;
 
       m_ready=true;
       PrintWithLevel("INFO","Debug session started rel="+common_rel+" terminal_data="+m_terminal_data_path+" terminal_common="+m_terminal_common_data_path);
