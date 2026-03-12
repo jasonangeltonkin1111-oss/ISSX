@@ -1,4 +1,4 @@
-﻿#ifndef __ISSX_MARKET_ENGINE_MQH__
+#ifndef __ISSX_MARKET_ENGINE_MQH__
 #define __ISSX_MARKET_ENGINE_MQH__
 
 #include <ISSX/issx_core.mqh>
@@ -2581,48 +2581,34 @@ public:
       int current_minute=(int)(TimeCurrent()/60);
       io_state.minute_id=current_minute;
 
+      io_state.discovery_attempted=false;
+      io_state.discovery_skipped=false;
+      io_state.discovery_success=false;
+      io_state.discovery_no_change=false;
+      io_state.discovery_elapsed_ms=0;
+      io_state.discovery_status_reason="none";
+
       const bool discovery_due=(io_state.sequence_no<=0 || io_state.discovery_minute_id!=current_minute);
       if(discovery_due)
         {
          io_state.discovery_attempted=true;
          const int symbols_before=ArraySize(io_state.symbols);
          const ulong t0=GetTickCount();
-         const bool discovery_ok=RefreshDiscoveryOnly(io_state);
+         const bool discovery_ok=DiscoverUniverse(io_state,false,max_symbols);
          io_state.discovery_elapsed_ms=(int)(GetTickCount()-t0);
-         io_state.discovery_minute_id=current_minute;
          io_state.discovery_success=discovery_ok;
          io_state.discovery_no_change=(ArraySize(io_state.symbols)==symbols_before);
+         io_state.discovery_minute_id=current_minute;
          io_state.discovery_skip_streak=0;
-
-         g_ea1_last_discovery_attempted=true;
-         g_ea1_last_discovery_skipped=false;
-         g_ea1_last_discovery_no_change=io_state.discovery_no_change;
-         g_ea1_last_discovery_symbols=ArraySize(io_state.symbols);
-         g_ea1_last_discovery_elapsed_ms=(long)io_state.discovery_elapsed_ms;
-
-         if(discovery_ok)
-           {
-            io_state.discovery_status_reason="success";
-            g_ea1_last_discovery_error="";
-           }
-         else
-           {
-            io_state.discovery_status_reason="empty_discovery";
-            g_ea1_last_discovery_error=io_state.discovery_status_reason;
-           }
+         io_state.discovery_status_reason=(discovery_ok ? "discovery_success" : "no_symbols_discovered");
         }
       else
         {
          io_state.discovery_skipped=true;
          io_state.discovery_skip_streak++;
          io_state.discovery_status_reason="cadence_same_minute";
-
-         g_ea1_last_discovery_attempted=false;
-         g_ea1_last_discovery_skipped=true;
-         g_ea1_last_discovery_no_change=false;
-         g_ea1_last_discovery_elapsed_ms=0;
-         g_ea1_last_skip_log_minute=current_minute;
-        }
+         io_state.discovery_elapsed_ms=0;
+      }
 
       if(max_symbols>0 && ArraySize(io_state.symbols)>max_symbols)
          ArrayResize(io_state.symbols,max_symbols);

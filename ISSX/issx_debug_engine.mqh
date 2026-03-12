@@ -1,4 +1,4 @@
-﻿#ifndef __ISSX_DEBUG_ENGINE_MQH__
+#ifndef __ISSX_DEBUG_ENGINE_MQH__
 #define __ISSX_DEBUG_ENGINE_MQH__
 
 #define ISSX_DEBUG_EXPORT_ROOT_REL "ISSX\\debug_reports"

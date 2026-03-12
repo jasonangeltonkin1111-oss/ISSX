@@ -1,4 +1,4 @@
-﻿#ifndef __ISSX_CORE_MQH__
+#ifndef __ISSX_CORE_MQH__
 #define __ISSX_CORE_MQH__
 // ============================================================================
 // ISSX CORE v1.708
