@@ -5,13 +5,15 @@
 
 #define ISSX_DEBUG_EXPORT_ROOT_REL "ISSX"
 
-// ISSX DEBUG ENGINE v1.724
+// ISSX DEBUG ENGINE v1.725
 
 #define ISSX_DEBUG_STAGE_COUNT 5
 #define ISSX_DEBUG_MAX_WRITES_PER_SESSION 4000
 #define ISSX_DEBUG_RESERVED_IMPORTANT_WRITES 200
 #define ISSX_DEBUG_SUPPRESSION_REPORT_EVERY 200
 #define ISSX_DEBUG_SAMPLE_BUCKETS 64
+#define ISSX_DEBUG_IO_FAIL_DISABLE_THRESHOLD 5
+#define ISSX_DEBUG_IO_FAIL_REPORT_EVERY 20
 
 enum ISSX_DebugErrorCategory
   {
@@ -46,10 +48,15 @@ private:
    string m_terminal_data_path;
    string m_terminal_common_data_path;
    long   m_write_count;
+   long   m_write_attempt_count;
    long   m_sample_count;
    long   m_suppressed_count;
    bool   m_suppression_active;
    bool   m_suppression_warned;
+   long   m_io_fail_count;
+   long   m_io_fail_streak;
+   bool   m_io_disabled;
+   bool   m_io_disable_warned;
    string m_active_mode;
    string m_active_path;
    long   m_stage_exec_count[ISSX_DEBUG_STAGE_COUNT];
@@ -146,9 +153,9 @@ private:
    bool CanWriteLine(const bool important)
      {
       const long normal_budget=(ISSX_DEBUG_MAX_WRITES_PER_SESSION-ISSX_DEBUG_RESERVED_IMPORTANT_WRITES);
-      if(m_write_count<normal_budget)
+      if(m_write_attempt_count<normal_budget)
          return true;
-      if(important && m_write_count<ISSX_DEBUG_MAX_WRITES_PER_SESSION)
+      if(important && m_write_attempt_count<ISSX_DEBUG_MAX_WRITES_PER_SESSION)
          return true;
 
       m_suppressed_count++;
@@ -157,7 +164,7 @@ private:
         {
          m_suppression_warned=true;
          PrintWithLevel("WARN","Debug write budget reached; suppression started mode="+m_active_mode+" path="+m_active_path+
-                        " write_count="+IntegerToString((int)m_write_count));
+                        " write_attempt_count="+IntegerToString((int)m_write_attempt_count));
         }
       else if((m_suppressed_count%ISSX_DEBUG_SUPPRESSION_REPORT_EVERY)==0)
         {
@@ -197,8 +204,9 @@ private:
            }
         }
       m_sample_keys[idx]=key;
-      m_sample_values[idx]=1;
-      return 1;
+      m_sample_values[idx]=0;
+      m_sample_values[idx]++;
+      return m_sample_values[idx];
      }
 
    bool EnsureFolderTree(const string relative_path,const bool use_common)
@@ -250,10 +258,15 @@ public:
       m_terminal_data_path="";
       m_terminal_common_data_path="";
       m_write_count=0;
+      m_write_attempt_count=0;
       m_sample_count=0;
       m_suppressed_count=0;
       m_suppression_active=false;
       m_suppression_warned=false;
+      m_io_fail_count=0;
+      m_io_fail_streak=0;
+      m_io_disabled=false;
+      m_io_disable_warned=false;
       m_active_mode="inactive";
       m_active_path="";
       ArrayInitialize(m_stage_exec_count,0);
@@ -324,6 +337,7 @@ public:
         }
 
       m_write_count=0;
+      m_write_attempt_count=0;
       m_sample_count=0;
       m_ready=true;
       PrintWithLevel("INFO","Debug session started mode="+m_active_mode+" path="+m_active_path+
@@ -343,8 +357,11 @@ public:
          PrintWithLevel(level,area+"::"+event_name+" | "+detail);
       if(!m_ready || m_file_handle==INVALID_HANDLE)
          return;
+      if(m_io_disabled)
+         return;
       if(!CanWriteLine(important))
          return;
+      m_write_attempt_count++;
 
       FileSeek(m_file_handle,0,SEEK_END);
       ResetLastError();
@@ -352,13 +369,32 @@ public:
       if(chars_written>0)
         {
          m_write_count++;
+         m_io_fail_streak=0;
          if((m_write_count%5)==0)
             FileFlush(m_file_handle);
         }
       else
         {
+         m_io_fail_count++;
+         m_io_fail_streak++;
          const int write_err=GetLastError();
-         PrintWithLevel("ERROR","Write failed err="+IntegerToString(write_err)+" mode="+m_active_mode+" path="+m_active_path);
+         if(m_io_fail_count==1 || (m_io_fail_count%ISSX_DEBUG_IO_FAIL_REPORT_EVERY)==0)
+            PrintWithLevel("ERROR","Write failed err="+IntegerToString(write_err)+" mode="+m_active_mode+" path="+m_active_path+
+                           " fail_count="+IntegerToString((int)m_io_fail_count));
+         if(m_io_fail_streak>=ISSX_DEBUG_IO_FAIL_DISABLE_THRESHOLD)
+           {
+            m_io_disabled=true;
+            if(!m_io_disable_warned)
+              {
+               m_io_disable_warned=true;
+               PrintWithLevel("WARN","Debug file output disabled after consecutive write failures mode="+m_active_mode+
+                              " path="+m_active_path+" fail_streak="+IntegerToString((int)m_io_fail_streak));
+              }
+            CloseHandleIfOpen();
+            m_ready=false;
+            m_active_mode="terminal_only";
+            m_active_path="";
+           }
         }
      }
 
@@ -370,12 +406,23 @@ public:
 
    void Close(const int deinit_reason)
      {
+      if(!m_ready && m_file_handle==INVALID_HANDLE)
+        {
+         CloseHandleIfOpen();
+         m_active_mode="closed";
+         m_active_path="";
+         return;
+        }
       const long writes_before_close=m_write_count;
+      const long write_attempts_before_close=m_write_attempt_count;
       const long suppressed_before_close=m_suppressed_count;
+      const long io_fail_before_close=m_io_fail_count;
       Write("INFO","session","end",
             "deinit_reason="+IntegerToString(deinit_reason)+
             " write_count="+IntegerToString((int)writes_before_close)+
+            " write_attempt_count="+IntegerToString((int)write_attempts_before_close)+
             " suppressed="+IntegerToString((int)suppressed_before_close)+
+            " io_fail_count="+IntegerToString((int)io_fail_before_close)+
             " mode="+m_active_mode+
             " path="+m_active_path);
 
