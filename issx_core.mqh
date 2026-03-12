@@ -1,11 +1,11 @@
 #ifndef __ISSX_CORE_MQH__
 #define __ISSX_CORE_MQH__
 // ============================================================================
-// ISSX CORE v1.709
+// ISSX CORE v1.710
 // Shared foundation for the consolidated single-EA / five-stage ISSX kernel.
 //
 // HARDENING NOTES
-// - upgraded owner surface to blueprint v1.709 governance
+// - upgraded owner surface to blueprint v1.710 governance
 // - preserved shared semantic ownership in core only
 // - expanded field-key ownership for manifest / scheduler / debug / EA5 surfaces
 // - added compatibility-alias lifecycle and external-contract stability enums
@@ -21,15 +21,15 @@
 
 #define ISSX_ENGINE_NAME                              "ISSX"
 #define ISSX_ENGINE_FAMILY                            "ISSX_PIPELINE"
-#define ISSX_ENGINE_VERSION                           "1.709"
-#define ISSX_SCHEMA_VERSION                           "1.709"
+#define ISSX_ENGINE_VERSION                           "1.710"
+#define ISSX_SCHEMA_VERSION                           "1.710"
 #define ISSX_SCHEMA_EPOCH                             10702
 #define ISSX_STORAGE_VERSION                          1720
 #define ISSX_STAGE_API_VERSION                        1720
 #define ISSX_SERIALIZER_VERSION                       1720
 #define ISSX_POLICY_FINGERPRINT_VERSION               1720
 #define ISSX_FINGERPRINT_ALGO_VERSION                 4
-#define ISSX_LEGEND_VERSION                           "1.709"
+#define ISSX_LEGEND_VERSION                           "1.710"
 #define ISSX_OWNER_MODULE_NAME_CORE                   "issx_core.mqh"
 #define ISSX_OWNER_MODULE_HASH_MEANING_VERSION        1
 
@@ -460,7 +460,7 @@ enum ISSX_PublishabilityState
    issx_publishability_strong          = 6
   };
 
-// Legacy compatibility bridge for pre-v1.709 shared labels.
+// Legacy compatibility bridge for pre-v1.710 shared labels.
 // Shared compatibility aliases remain core-owned only.
 #define issx_publishability_publishable       issx_publishability_usable
 #define issx_publishability_degraded          issx_publishability_usable_degraded
@@ -1111,7 +1111,7 @@ enum ISSX_ThresholdBehavior
 
 // -----------------------------------------------------------------------------
 // Legacy compatibility aliases required by downstream stage files still using
-// pre-v1.709 shared names.
+// pre-v1.710 shared names.
 // -----------------------------------------------------------------------------
 
 // Compatibility-class legacy aliases
@@ -3209,6 +3209,57 @@ public:
    static string WeakLinkCodeToString(const ISSX_DebugWeakLinkCode v)
      {
       return ISSX_DebugWeakLinkCodeToString(v);
+     }
+  };
+
+class ISSX_OperatorSurface
+  {
+public:
+   static string StageAlias(const ISSX_StageId stage_id)
+     {
+      switch(stage_id)
+        {
+         case issx_stage_ea1: return "Market";
+         case issx_stage_ea2: return "History";
+         case issx_stage_ea3: return "Selection";
+         case issx_stage_ea4: return "Correlation";
+         case issx_stage_ea5: return "Contracts";
+         default:             return "Unknown";
+        }
+     }
+
+   static string SanitizeServerName(const string raw_server)
+     {
+      string s=ISSX_Util::Trim(raw_server);
+      if(ISSX_Util::IsEmpty(s))
+         s="Unknown_Server";
+
+      StringReplace(s," ","_");
+      StringReplace(s,"-","_");
+      StringReplace(s,"/","_");
+      StringReplace(s,"\\","_");
+      StringReplace(s,":","_");
+      StringReplace(s,"*","_");
+      StringReplace(s,"?","_");
+      StringReplace(s,"\"","_");
+      StringReplace(s,"<","_");
+      StringReplace(s,">","_");
+      StringReplace(s,"|","_");
+
+      while(StringFind(s,"__")>=0)
+         StringReplace(s,"__","_");
+      if(StringLen(s)>0 && StringSubstr(s,0,1)=="_")
+         s=StringSubstr(s,1);
+      if(StringLen(s)>0 && StringSubstr(s,StringLen(s)-1,1)=="_")
+         s=StringSubstr(s,0,StringLen(s)-1);
+      if(ISSX_Util::IsEmpty(s))
+         s="Unknown_Server";
+      return s;
+     }
+
+   static string OperatorFileName(const ISSX_StageId stage_id,const string server_name,const string ext_with_dot)
+     {
+      return StageAlias(stage_id)+"_"+SanitizeServerName(server_name)+ext_with_dot;
      }
   };
 

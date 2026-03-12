@@ -7,7 +7,7 @@
 #include <ISSX/issx_persistence.mqh>
 
 // ============================================================================
-// ISSX MARKET ENGINE v1.709
+// ISSX MARKET ENGINE v1.710
 // EA1 shared engine for MarketStateCore.
 //
 // HARDENING NOTES
@@ -24,7 +24,7 @@
 //   owner runtime/persistence layer
 // ============================================================================
 
-#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.709"
+#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.710"
 
 // ============================================================================
 // SECTION 01: EA1 PHASE IDS
@@ -906,6 +906,17 @@ public:
          SetTheme(out_cls,"index","equity_index","indices","na",issx_leader_bucket_theme_bucket,0.92,"rule_index");
          return;
         }
+      if(ContainsLower(blob,"cash") || ContainsLower(blob,"us30cash") || ContainsLower(blob,"ger30cash") || ContainsLower(blob,"aus200cash"))
+        {
+         SetTheme(out_cls,"index","equity_index","indices","na",issx_leader_bucket_theme_bucket,0.90,"rule_index_cash");
+         return;
+        }
+
+      if(ContainsLower(blob,".oq") || ContainsLower(blob,"nasdaq") || ContainsLower(blob,"apple") || ContainsLower(blob,"google") || ContainsLower(blob,"meta"))
+        {
+         SetTheme(out_cls,"equity","single_stock","equities","technology",issx_leader_bucket_equity_sector,0.81,"rule_equity_oq");
+         return;
+        }
 
       if(ContainsLower(blob,"ger40") || ContainsLower(blob,"dax"))
         {
@@ -1018,6 +1029,10 @@ private:
      {
       string s=SafeUpper(symbol);
 
+      StringReplace(s,".","");
+      StringReplace(s,"_","");
+      StringReplace(s,"-","");
+
       int len=(int)StringLen(s);
       while(len>0)
         {
@@ -1029,7 +1044,7 @@ private:
          len=(int)StringLen(s);
         }
 
-      string suffixes[]={"MICRO","MINI","PRO","RAW","ECN","STD","CASH","SPOT","PLUS","NX","A","M","I","P"};
+      string suffixes[]={"MICRO","MINI","PRO","RAW","ECN","STD","CASH","SPOT","PLUS","RW","NX","OQ","X","C","A","M","I","P"};
       for(int i=0;i<ArraySize(suffixes);i++)
         {
          string sf=suffixes[i];
@@ -2094,10 +2109,17 @@ io_symbol.rankability_gate.contradiction_count=0;
      {
       ISSX_JsonWriter j;
       j.BeginObject();
-      j.NameString("stage_id","ea1");
+      j.NameString("stage_alias",ISSX_OperatorSurface::StageAlias(issx_stage_ea1));
+      j.NameString("internal_stage_id","ea1");
       j.NameString("owner_module_name","issx_market_engine.mqh");
       j.NameString("owner_module_hash",HashString(ISSX_MARKET_ENGINE_MODULE_VERSION));
+      j.NameString("version",ISSX_ENGINE_VERSION);
       j.NameString("firm_id",firm_id);
+      j.NameString("broker_company",AccountInfoString(ACCOUNT_COMPANY));
+      j.NameString("account_server",AccountInfoString(ACCOUNT_SERVER));
+      j.NameLong("account_login",(long)AccountInfoInteger(ACCOUNT_LOGIN));
+      j.NameString("attached_symbol",_Symbol);
+      j.NameString("attached_timeframe",EnumToString((ENUM_TIMEFRAMES)_Period));
       j.NameString("writer_boot_id",writer_boot_id);
       j.NameString("writer_nonce",writer_nonce);
       j.NameString("schema_version",ISSX_SCHEMA_VERSION);
@@ -2119,6 +2141,17 @@ io_symbol.rankability_gate.contradiction_count=0;
       j.NameBool("publishable",state.publishable);
       j.NameString("dependency_block_reason",state.dependency_block_reason);
       j.NameString("debug_weak_link_code",state.debug_weak_link_code);
+      j.NameInt("discovery_minute_id",state.discovery_minute_id);
+      j.NameBool("discovery_attempted",state.discovery_attempted);
+      j.NameBool("discovery_skipped",state.discovery_skipped);
+      j.NameBool("discovery_success",state.discovery_success);
+      j.NameBool("discovery_no_change",state.discovery_no_change);
+      j.NameInt("discovery_elapsed_ms",state.discovery_elapsed_ms);
+      j.NameInt("discovery_skip_streak",state.discovery_skip_streak);
+      j.NameString("discovery_status_reason",state.discovery_status_reason);
+      j.NameBool("deterministic_sort_applied",state.deterministic_sort_applied);
+      j.NameInt("deterministic_sorted_count",state.deterministic_sorted_count);
+      j.NameString("deterministic_sort_basis",state.deterministic_sort_basis);
 
       j.BeginNamedObject("universe");
       j.NameInt("broker_universe",state.universe.broker_universe);
@@ -2167,9 +2200,24 @@ io_symbol.rankability_gate.contradiction_count=0;
       j.NameInt("stale_usable_count",state.counters.stale_usable_count);
       j.EndObject();
 
+      int asset_unknown=0,asset_fx=0,asset_index=0,asset_crypto=0,asset_commodity=0,asset_equity=0;
+      int sector_na=0,sector_tech=0,sector_other=0;
+
       j.BeginNamedArray("symbols");
       for(int i=0;i<ArraySize(state.symbols);i++)
         {
+         string ac=state.symbols[i].classification_truth.asset_class;
+         if(ac=="fx") asset_fx++;
+         else if(ac=="index") asset_index++;
+         else if(ac=="crypto") asset_crypto++;
+         else if(ac=="commodity") asset_commodity++;
+         else if(ac=="equity") asset_equity++;
+         else asset_unknown++;
+
+         string sec=state.symbols[i].classification_truth.equity_sector;
+         if(sec=="na") sector_na++;
+         else if(sec=="technology") sector_tech++;
+         else sector_other++;
          j.BeginObject();
          j.NameInt("symbol_id",state.symbols[i].symbol_id);
          j.NameString("symbol_fingerprint",state.symbols[i].symbol_fingerprint);
@@ -2187,6 +2235,18 @@ io_symbol.rankability_gate.contradiction_count=0;
         }
       j.EndArray();
 
+      j.BeginNamedObject("classification_summary");
+      j.NameInt("asset_class_fx",asset_fx);
+      j.NameInt("asset_class_index",asset_index);
+      j.NameInt("asset_class_crypto",asset_crypto);
+      j.NameInt("asset_class_commodity",asset_commodity);
+      j.NameInt("asset_class_equity",asset_equity);
+      j.NameInt("asset_class_unknown",asset_unknown);
+      j.NameInt("equity_sector_technology",sector_tech);
+      j.NameInt("equity_sector_na",sector_na);
+      j.NameInt("equity_sector_other",sector_other);
+      j.EndObject();
+
       j.EndObject();
       return j.ToString();
      }
@@ -2195,7 +2255,8 @@ io_symbol.rankability_gate.contradiction_count=0;
      {
       ISSX_JsonWriter j;
       j.BeginObject();
-      j.NameString("stage_id","ea1");
+      j.NameString("stage_alias",ISSX_OperatorSurface::StageAlias(issx_stage_ea1));
+      j.NameString("internal_stage_id","ea1");
       j.NameInt("minute_id",state.minute_id);
       j.NameInt("sequence_no",state.sequence_no);
       j.NameBool("stage_minimum_ready_flag",state.stage_minimum_ready_flag);
@@ -2204,6 +2265,17 @@ io_symbol.rankability_gate.contradiction_count=0;
       j.NameBool("publishable",state.publishable);
       j.NameString("dependency_block_reason",state.dependency_block_reason);
       j.NameString("debug_weak_link_code",state.debug_weak_link_code);
+      j.NameInt("discovery_minute_id",state.discovery_minute_id);
+      j.NameBool("discovery_attempted",state.discovery_attempted);
+      j.NameBool("discovery_skipped",state.discovery_skipped);
+      j.NameBool("discovery_success",state.discovery_success);
+      j.NameBool("discovery_no_change",state.discovery_no_change);
+      j.NameInt("discovery_elapsed_ms",state.discovery_elapsed_ms);
+      j.NameInt("discovery_skip_streak",state.discovery_skip_streak);
+      j.NameString("discovery_status_reason",state.discovery_status_reason);
+      j.NameBool("deterministic_sort_applied",state.deterministic_sort_applied);
+      j.NameInt("deterministic_sorted_count",state.deterministic_sorted_count);
+      j.NameString("deterministic_sort_basis",state.deterministic_sort_basis);
       j.NameInt("broker_universe",state.universe.broker_universe);
       j.NameInt("eligible_universe",state.universe.eligible_universe);
       j.NameInt("active_universe",state.universe.active_universe);
@@ -2674,10 +2746,17 @@ public:
      {
       ISSX_JsonWriter j;
       j.BeginObject();
-      j.NameString("stage_id","ea1");
+      j.NameString("stage_alias",ISSX_OperatorSurface::StageAlias(issx_stage_ea1));
+      j.NameString("internal_stage_id","ea1");
       j.NameString("owner_module_name","issx_market_engine.mqh");
       j.NameString("owner_module_hash",HashString(ISSX_MARKET_ENGINE_MODULE_VERSION));
+      j.NameString("version",ISSX_ENGINE_VERSION);
       j.NameString("firm_id",firm_id);
+      j.NameString("broker_company",AccountInfoString(ACCOUNT_COMPANY));
+      j.NameString("account_server",AccountInfoString(ACCOUNT_SERVER));
+      j.NameLong("account_login",(long)AccountInfoInteger(ACCOUNT_LOGIN));
+      j.NameString("attached_symbol",_Symbol);
+      j.NameString("attached_timeframe",EnumToString((ENUM_TIMEFRAMES)_Period));
       j.NameString("writer_boot_id",writer_boot_id);
       j.NameString("writer_nonce",writer_nonce);
       j.NameString("schema_version",ISSX_SCHEMA_VERSION);
@@ -2691,6 +2770,17 @@ public:
       j.NameBool("publishable",state.publishable);
       j.NameString("dependency_block_reason",state.dependency_block_reason);
       j.NameString("debug_weak_link_code",state.debug_weak_link_code);
+      j.NameInt("discovery_minute_id",state.discovery_minute_id);
+      j.NameBool("discovery_attempted",state.discovery_attempted);
+      j.NameBool("discovery_skipped",state.discovery_skipped);
+      j.NameBool("discovery_success",state.discovery_success);
+      j.NameBool("discovery_no_change",state.discovery_no_change);
+      j.NameInt("discovery_elapsed_ms",state.discovery_elapsed_ms);
+      j.NameInt("discovery_skip_streak",state.discovery_skip_streak);
+      j.NameString("discovery_status_reason",state.discovery_status_reason);
+      j.NameBool("deterministic_sort_applied",state.deterministic_sort_applied);
+      j.NameInt("deterministic_sorted_count",state.deterministic_sorted_count);
+      j.NameString("deterministic_sort_basis",state.deterministic_sort_basis);
       j.NameInt("broker_universe",state.universe.broker_universe);
       j.NameInt("eligible_universe",state.universe.eligible_universe);
       j.NameInt("active_universe",state.universe.active_universe);

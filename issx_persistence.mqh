@@ -5,7 +5,7 @@
 #include <ISSX/issx_registry.mqh>
 
 // ============================================================================
-// ISSX PERSISTENCE v1.709
+// ISSX PERSISTENCE v1.710
 // Blueprint-aligned persistence / handoff / fallback / warehouse / lock helpers.
 // Authoritative truth remains: accepted internal current + coherent manifest chain.
 // ============================================================================
@@ -401,7 +401,8 @@ private:
 public:
    static string FirmRoot(const string firm_id)
      {
-      return ISSX_Util::JoinPath3(ISSX_DIR_FIRMS,firm_id,ISSX_DIR_ROOT_NAME);
+      (void)firm_id;
+      return ISSX_DIR_ROOT_NAME;
      }
 
    static string RootFile(const string firm_id,const string filename)

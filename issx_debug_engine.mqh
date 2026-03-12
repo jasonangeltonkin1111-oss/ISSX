@@ -3,7 +3,7 @@
 
 #define ISSX_DEBUG_EXPORT_ROOT_REL "ISSX\\debug_reports"
 
-// ISSX DEBUG ENGINE v1.709
+// ISSX DEBUG ENGINE v1.710
 
 class ISSX_DebugEngine
   {
@@ -83,14 +83,14 @@ public:
       m_active_path="";
      }
 
-   bool BeginSession(const string ea_name,const string symbol,const ENUM_TIMEFRAMES tf)
+   bool BeginSession(const string operator_log_file_name,const string symbol,const ENUM_TIMEFRAMES tf,const string server_name,const string broker_name,const long login_id)
      {
       Reset();
       m_terminal_data_path=TerminalInfoString(TERMINAL_DATA_PATH);
       m_terminal_common_data_path=TerminalInfoString(TERMINAL_COMMONDATA_PATH);
 
       m_session_id=BuildTimestamp()+"_"+IntegerToString((int)ChartID())+"_"+IntegerToString((int)GetTickCount());
-      m_file_name=ea_name+"_"+m_session_id+".log";
+      m_file_name=(ISSX_Util::IsEmpty(operator_log_file_name) ? "Market_Unknown_Server.log" : operator_log_file_name);
 
       const string common_rel=CommonRelativeName();
       const string local_rel=common_rel;
@@ -132,6 +132,8 @@ public:
                      " terminal_data="+m_terminal_data_path+" terminal_common="+m_terminal_common_data_path);
       Write("INFO","session","begin",
             "mode="+m_active_mode+" path="+m_active_path+" symbol="+symbol+" tf="+EnumToString(tf));
+      Write("INFO","session","header",
+            "stage_alias=Market server="+server_name+" broker="+broker_name+" login="+IntegerToString((int)login_id)+" file="+m_file_name);
       return true;
      }
 
