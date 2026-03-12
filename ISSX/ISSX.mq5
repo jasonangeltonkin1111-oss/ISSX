@@ -832,7 +832,47 @@ void OnTimer()
       g_debug.Write("INFO","timer","first_heartbeat","first timer heartbeat reached");
       g_first_timer_logged=true;
      }
-   g_debug.Write("INFO","timer","heartbeat","first_cycle="+(!g_first_cycle_done?"true":"false"));
+   const ulong timer_start_us=(ulong)GetMicrosecondCount();
+   const bool sampled=ISSX_ShouldSampleTimerDetail();
+   const bool gate_runtime_scheduler=ISSX_IsGateOn(InpGateRuntimeScheduler,false);
+   const bool gate_timer_heavy=ISSX_IsGateOn(InpGateTimerHeavyWork,false);
+
+   if(sampled || !g_first_cycle_done)
+      g_debug.Write("INFO","timer","enter","pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count));
+
+   if(sampled || !g_first_cycle_done)
+      g_debug.Write("INFO","timer","heartbeat",
+                    "pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count)+
+                    " first_cycle="+(!g_first_cycle_done?"true":"false")+
+                    " minimal_mode="+(InpMinimalDebugMode?"true":"false")+
+                    " runtime_scheduler="+(gate_runtime_scheduler?"on":"off")+
+                    " heavy_timer_work="+(gate_timer_heavy?"on":"off"));
+
+   bool ok=true;
+   long kernel_elapsed_ms=0;
+
+   string runtime_scheduler_status="skipped | gate=off";
+   if(gate_runtime_scheduler && !gate_timer_heavy)
+      runtime_scheduler_status="skipped | gate=timer_heavy_off";
+
+   string timer_heavy_status="skipped | gate=off";
+   if(gate_timer_heavy)
+     {
+      const ulong kernel_start_us=(ulong)GetMicrosecondCount();
+      ok=ISSX_RunKernelCycle();
+      kernel_elapsed_ms=(long)(((ulong)GetMicrosecondCount()-kernel_start_us)/1000);
+      timer_heavy_status=(ok ? "success" : "failed | reason=kernel_cycle_false");
+     }
+   else
+     {
+      if(!g_logged_timer_heavy_skip)
+        {
+         g_debug.Write("INFO","timer","kernel_skip","disabled_by_gate");
+         g_logged_timer_heavy_skip=true;
+        }
+      if((g_timer_pulse_count%30)==1)
+         g_debug.Write("INFO","timer","minimal_heartbeat","pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count));
+     }
 
    bool ok=true;
    long kernel_elapsed_ms=0;
