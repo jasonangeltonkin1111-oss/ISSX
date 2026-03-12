@@ -3,28 +3,68 @@
 
 #include <ISSX/issx_core.mqh>
 
-// ISSX UNIVERSE MANAGER v1.722
+// ISSX UNIVERSE MANAGER v1.723
 
 class ISSX_UniverseManager
   {
 public:
+   static string CanonicalSymbol(const string symbol)
+     {
+      string out=symbol;
+      const int n=StringLen(out);
+
+      int start=0;
+      while(start<n)
+        {
+         const ushort c=(ushort)StringGetCharacter(out,start);
+         if(c!=' ' && c!='\t' && c!='\r' && c!='\n')
+            break;
+         start++;
+        }
+
+      int end=n-1;
+      while(end>=start)
+        {
+         const ushort c=(ushort)StringGetCharacter(out,end);
+         if(c!=' ' && c!='\t' && c!='\r' && c!='\n')
+            break;
+         end--;
+        }
+
+      if(start>0 || end<n-1)
+         out=(end>=start ? StringSubstr(out,start,end-start+1) : "");
+
+      return StringToUpper(out);
+     }
+
+   static bool IsSameCanonicalSymbol(const string a,const string b)
+     {
+      return CanonicalSymbol(a)==CanonicalSymbol(b);
+     }
+
+   static int CompareSymbols(const string a,const string b)
+     {
+      const string ca=CanonicalSymbol(a);
+      const string cb=CanonicalSymbol(b);
+      const int primary=StringCompare(ca,cb);
+      if(primary!=0)
+         return primary;
+      return StringCompare(a,b);
+     }
+
    static void SortSymbols(string &symbols[])
      {
       const int n=ArraySize(symbols);
-      for(int i=0;i<n-1;i++)
+      for(int i=1;i<n;i++)
         {
-         int best=i;
-         for(int j=i+1;j<n;j++)
+         string key=symbols[i];
+         int j=i-1;
+         while(j>=0 && CompareSymbols(symbols[j],key)>0)
            {
-            if(StringCompare(symbols[j],symbols[best])<0)
-               best=j;
+            symbols[j+1]=symbols[j];
+            j--;
            }
-         if(best!=i)
-           {
-            string tmp=symbols[i];
-            symbols[i]=symbols[best];
-            symbols[best]=tmp;
-           }
+         symbols[j+1]=key;
         }
      }
 
@@ -38,7 +78,7 @@ public:
       int w=1;
       for(int i=1;i<n;i++)
         {
-         if(symbols[i]==symbols[w-1])
+         if(IsSameCanonicalSymbol(symbols[i],symbols[w-1]))
             continue;
          symbols[w]=symbols[i];
          w++;
