@@ -12,6 +12,9 @@ private:
    string m_file_name;
    string m_terminal_data_path;
    string m_terminal_common_data_path;
+   long   m_write_count;
+   string m_active_mode;
+   string m_active_path;
 
    string BuildTimestamp() const
      {
@@ -60,6 +63,11 @@ private:
      }
 
 public:
+   ISSX_DebugEngine()
+     {
+      Reset();
+     }
+
    void Reset()
      {
       m_ready=false;
@@ -68,6 +76,9 @@ public:
       m_file_name="";
       m_terminal_data_path="";
       m_terminal_common_data_path="";
+      m_write_count=0;
+      m_active_mode="inactive";
+      m_active_path="";
      }
 
    bool BeginSession(const string ea_name,const string symbol,const ENUM_TIMEFRAMES tf)
@@ -80,30 +91,45 @@ public:
       m_file_name=ea_name+"_"+m_session_id+".log";
 
       const string common_rel=CommonRelativeName();
-      EnsureFolderTree(ISSX_DEBUG_EXPORT_ROOT_REL,true);
+      const string local_rel=common_rel;
 
+      EnsureFolderTree(ISSX_DEBUG_EXPORT_ROOT_REL,true);
       ResetLastError();
       m_file_handle=FileOpen(common_rel,FILE_WRITE|FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
-      if(m_file_handle==INVALID_HANDLE)
+      if(m_file_handle!=INVALID_HANDLE)
+        {
+         m_active_mode="common";
+         m_active_path=common_rel;
+        }
+      else
         {
          const int common_err=GetLastError();
          PrintWithLevel("WARN","Common FileOpen failed err="+IntegerToString(common_err)+" rel="+common_rel);
 
-         // Local-terminal fallback stays relative to MQL5/Files for safety.
          EnsureFolderTree(ISSX_DEBUG_EXPORT_ROOT_REL,false);
          ResetLastError();
-         m_file_handle=FileOpen(common_rel,FILE_WRITE|FILE_READ|FILE_TXT|FILE_ANSI|FILE_SHARE_READ|FILE_SHARE_WRITE);
-         if(m_file_handle==INVALID_HANDLE)
+         m_file_handle=FileOpen(local_rel,FILE_WRITE|FILE_READ|FILE_TXT|FILE_ANSI|FILE_SHARE_READ|FILE_SHARE_WRITE);
+         if(m_file_handle!=INVALID_HANDLE)
+           {
+            m_active_mode="local";
+            m_active_path=local_rel;
+           }
+         else
            {
             const int local_err=GetLastError();
-            PrintWithLevel("ERROR","Local fallback FileOpen failed err="+IntegerToString(local_err)+" rel="+common_rel);
+            m_active_mode="terminal_only";
+            m_active_path="";
+            PrintWithLevel("ERROR","Local fallback FileOpen failed err="+IntegerToString(local_err)+" rel="+local_rel+" mode="+m_active_mode);
             return false;
            }
         }
 
+      m_write_count=0;
       m_ready=true;
-      PrintWithLevel("INFO","Debug session started rel="+common_rel+" terminal_data="+m_terminal_data_path+" terminal_common="+m_terminal_common_data_path);
-      Write("INFO","session","begin","file_rel="+common_rel+" symbol="+symbol+" tf="+EnumToString(tf));
+      PrintWithLevel("INFO","Debug session started mode="+m_active_mode+" path="+m_active_path+
+                     " terminal_data="+m_terminal_data_path+" terminal_common="+m_terminal_common_data_path);
+      Write("INFO","session","begin",
+            "mode="+m_active_mode+" path="+m_active_path+" symbol="+symbol+" tf="+EnumToString(tf));
       return true;
      }
 
@@ -117,24 +143,46 @@ public:
          return;
 
       FileSeek(m_file_handle,0,SEEK_END);
-      FileWriteString(m_file_handle,line+"\r\n");
-      m_write_count++;
-      if((m_write_count%5)==0)
+      const int chars_written=FileWriteString(m_file_handle,line+"\r\n");
+      if(chars_written>0)
+        {
+         m_write_count++;
+         if((m_write_count%5)==0)
+            FileFlush(m_file_handle);
+        }
+      else
+        {
+         const int write_err=GetLastError();
+         PrintWithLevel("WARN","Write failed err="+IntegerToString(write_err)+" mode="+m_active_mode+" path="+m_active_path);
+        }
+     }
+
+   void Flush()
+     {
+      if(m_file_handle!=INVALID_HANDLE)
          FileFlush(m_file_handle);
      }
 
    void Close(const int deinit_reason)
      {
-      Write("INFO","session","end","deinit_reason="+IntegerToString(deinit_reason));
+      const long writes_before_close=m_write_count;
+      Write("INFO","session","end",
+            "deinit_reason="+IntegerToString(deinit_reason)+
+            " write_count="+IntegerToString((int)writes_before_close)+
+            " mode="+m_active_mode+
+            " path="+m_active_path);
+
       if(m_file_handle!=INVALID_HANDLE)
         {
          FileFlush(m_file_handle);
          FileClose(m_file_handle);
          m_file_handle=INVALID_HANDLE;
         }
-      m_ready=false;
-     }
 
+      m_ready=false;
+      m_active_mode="closed";
+      m_active_path="";
+     }
 
    void Close(const int deinit_reason,const string detail)
      {
@@ -144,6 +192,7 @@ public:
 
    string ActiveMode() const { return m_active_mode; }
    string ActivePath() const { return m_active_path; }
+   long WriteCount() const { return m_write_count; }
 
    bool IsReady() const { return m_ready; }
    string SessionId() const { return m_session_id; }
