@@ -5,9 +5,13 @@
 
 #define ISSX_DEBUG_EXPORT_ROOT_REL "ISSX"
 
-// ISSX DEBUG ENGINE v1.723
+// ISSX DEBUG ENGINE v1.724
 
 #define ISSX_DEBUG_STAGE_COUNT 5
+#define ISSX_DEBUG_MAX_WRITES_PER_SESSION 4000
+#define ISSX_DEBUG_RESERVED_IMPORTANT_WRITES 200
+#define ISSX_DEBUG_SUPPRESSION_REPORT_EVERY 200
+#define ISSX_DEBUG_SAMPLE_BUCKETS 64
 
 enum ISSX_DebugErrorCategory
   {
@@ -43,12 +47,17 @@ private:
    string m_terminal_common_data_path;
    long   m_write_count;
    long   m_sample_count;
+   long   m_suppressed_count;
+   bool   m_suppression_active;
+   bool   m_suppression_warned;
    string m_active_mode;
    string m_active_path;
    long   m_stage_exec_count[ISSX_DEBUG_STAGE_COUNT];
    long   m_stage_exec_total_ms[ISSX_DEBUG_STAGE_COUNT];
    long   m_stage_exec_max_ms[ISSX_DEBUG_STAGE_COUNT];
    long   m_category_error_count[6];
+   string m_sample_keys[ISSX_DEBUG_SAMPLE_BUCKETS];
+   long   m_sample_values[ISSX_DEBUG_SAMPLE_BUCKETS];
 
    void CloseHandleIfOpen()
      {
@@ -71,6 +80,125 @@ private:
    void PrintWithLevel(const string level,const string text)
      {
       Print("[ISSX][",level,"] ",text);
+     }
+
+   bool IsSafePathPart(const string part) const
+     {
+      if(part=="" || part=="." || part=="..")
+         return false;
+      for(int i=0;i<StringLen(part);i++)
+        {
+         const ushort ch=(ushort)StringGetCharacter(part,i);
+         const bool is_digit=(ch>='0' && ch<='9');
+         const bool is_upper=(ch>='A' && ch<='Z');
+         const bool is_lower=(ch>='a' && ch<='z');
+         const bool is_safe=(is_digit || is_upper || is_lower || ch=='_' || ch=='-' || ch=='.');
+         if(!is_safe)
+            return false;
+        }
+      return true;
+     }
+
+   string SanitizeRelativeLogPath(const string operator_log_file_name) const
+     {
+      string candidate=operator_log_file_name;
+      StringTrimLeft(candidate);
+      StringTrimRight(candidate);
+      if(candidate=="")
+         return "ISSX/Market_Unknown_Server.log";
+
+      StringReplace(candidate,"\\","/");
+      while(StringFind(candidate,"//")>=0)
+         StringReplace(candidate,"//","/");
+
+      if(StringFind(candidate,":")>=0 || StringSubstr(candidate,0,1)=="/" || StringFind(candidate,"..")>=0)
+         return "ISSX/Market_Unknown_Server.log";
+
+      string parts[];
+      int n=StringSplit(candidate,'/',parts);
+      if(n<=0)
+         return "ISSX/Market_Unknown_Server.log";
+
+      string normalized="";
+      for(int i=0;i<n;i++)
+        {
+         if(!IsSafePathPart(parts[i]))
+            return "ISSX/Market_Unknown_Server.log";
+         normalized=(normalized=="" ? parts[i] : normalized+"/"+parts[i]);
+        }
+
+      if(StringLen(normalized)>220)
+         return "ISSX/Market_Unknown_Server.log";
+      if(StringFind(normalized,"ISSX/")!=0)
+         normalized="ISSX/"+normalized;
+      if(StringLen(normalized)<4 || StringSubstr(normalized,StringLen(normalized)-4)!=".log")
+         normalized=normalized+".log";
+      return normalized;
+     }
+
+   bool IsImportantEvent(const string level,const string event_name) const
+     {
+      if(level=="ERROR" || level=="WARN")
+         return true;
+      return (event_name=="first_heartbeat" || event_name=="slow_slice" || event_name=="begin" || event_name=="end" || event_name=="end_detail");
+     }
+
+   bool CanWriteLine(const bool important)
+     {
+      const long normal_budget=(ISSX_DEBUG_MAX_WRITES_PER_SESSION-ISSX_DEBUG_RESERVED_IMPORTANT_WRITES);
+      if(m_write_count<normal_budget)
+         return true;
+      if(important && m_write_count<ISSX_DEBUG_MAX_WRITES_PER_SESSION)
+         return true;
+
+      m_suppressed_count++;
+      m_suppression_active=true;
+      if(!m_suppression_warned)
+        {
+         m_suppression_warned=true;
+         PrintWithLevel("WARN","Debug write budget reached; suppression started mode="+m_active_mode+" path="+m_active_path+
+                        " write_count="+IntegerToString((int)m_write_count));
+        }
+      else if((m_suppressed_count%ISSX_DEBUG_SUPPRESSION_REPORT_EVERY)==0)
+        {
+         PrintWithLevel("WARN","Debug suppression ongoing suppressed="+IntegerToString((int)m_suppressed_count));
+        }
+      return false;
+     }
+
+   int SampleBucketIndex(const string key) const
+     {
+      uint hash=2166136261;
+      for(int i=0;i<StringLen(key);i++)
+        {
+         const uint ch=(uint)StringGetCharacter(key,i);
+         hash^=ch;
+         hash*=16777619;
+        }
+      return (int)(hash%ISSX_DEBUG_SAMPLE_BUCKETS);
+     }
+
+   long NextSampleCount(const string key)
+     {
+      int idx=SampleBucketIndex(key);
+      for(int probe=0;probe<ISSX_DEBUG_SAMPLE_BUCKETS;probe++)
+        {
+         int slot=(idx+probe)%ISSX_DEBUG_SAMPLE_BUCKETS;
+         if(m_sample_keys[slot]==key)
+           {
+            m_sample_values[slot]++;
+            return m_sample_values[slot];
+           }
+         if(m_sample_keys[slot]=="")
+           {
+            m_sample_keys[slot]=key;
+            m_sample_values[slot]=1;
+            return 1;
+           }
+        }
+      m_sample_keys[idx]=key;
+      m_sample_values[idx]=1;
+      return 1;
      }
 
    bool EnsureFolderTree(const string relative_path,const bool use_common)
@@ -123,12 +251,20 @@ public:
       m_terminal_common_data_path="";
       m_write_count=0;
       m_sample_count=0;
+      m_suppressed_count=0;
+      m_suppression_active=false;
+      m_suppression_warned=false;
       m_active_mode="inactive";
       m_active_path="";
       ArrayInitialize(m_stage_exec_count,0);
       ArrayInitialize(m_stage_exec_total_ms,0);
       ArrayInitialize(m_stage_exec_max_ms,0);
       ArrayInitialize(m_category_error_count,0);
+      for(int k=0;k<ISSX_DEBUG_SAMPLE_BUCKETS;k++)
+        {
+         m_sample_keys[k]="";
+         m_sample_values[k]=0;
+        }
      }
 
    bool BeginSession(const string operator_log_file_name,const string symbol,const ENUM_TIMEFRAMES tf,const string server_name,const string broker_name,const long login_id)
@@ -138,7 +274,7 @@ public:
       m_terminal_common_data_path=TerminalInfoString(TERMINAL_COMMONDATA_PATH);
 
       m_session_id=BuildTimestamp()+"_"+IntegerToString((int)ChartID())+"_"+IntegerToString((int)GetTickCount());
-      m_file_name=(ISSX_Util::IsEmpty(operator_log_file_name) ? "ISSX/Market_Unknown_Server.log" : operator_log_file_name);
+      m_file_name=SanitizeRelativeLogPath(operator_log_file_name);
 
       const string common_rel=CommonRelativeName();
       const string local_rel=common_rel;
@@ -202,13 +338,16 @@ public:
    void Write(const string level,const string area,const string event_name,const string detail)
      {
       const string line=BuildTimestamp()+" | "+level+" | "+area+" | "+event_name+" | "+detail;
-      const bool important=(level=="ERROR" || level=="WARN" || event_name=="first_heartbeat" || event_name=="slow_slice");
+      const bool important=IsImportantEvent(level,event_name);
       if(important)
          PrintWithLevel(level,area+"::"+event_name+" | "+detail);
       if(!m_ready || m_file_handle==INVALID_HANDLE)
          return;
+      if(!CanWriteLine(important))
+         return;
 
       FileSeek(m_file_handle,0,SEEK_END);
+      ResetLastError();
       const ulong chars_written=(ulong)FileWriteString(m_file_handle,line+"\r\n");
       if(chars_written>0)
         {
@@ -219,7 +358,7 @@ public:
       else
         {
          const int write_err=GetLastError();
-         PrintWithLevel("WARN","Write failed err="+IntegerToString(write_err)+" mode="+m_active_mode+" path="+m_active_path);
+         PrintWithLevel("ERROR","Write failed err="+IntegerToString(write_err)+" mode="+m_active_mode+" path="+m_active_path);
         }
      }
 
@@ -232,9 +371,11 @@ public:
    void Close(const int deinit_reason)
      {
       const long writes_before_close=m_write_count;
+      const long suppressed_before_close=m_suppressed_count;
       Write("INFO","session","end",
             "deinit_reason="+IntegerToString(deinit_reason)+
             " write_count="+IntegerToString((int)writes_before_close)+
+            " suppressed="+IntegerToString((int)suppressed_before_close)+
             " mode="+m_active_mode+
             " path="+m_active_path);
 
@@ -279,8 +420,10 @@ public:
          Write(level,area,event_name,detail);
          return;
         }
+      const string sample_key=level+"|"+area+"|"+event_name;
+      const long sample_count=NextSampleCount(sample_key);
       m_sample_count++;
-      if((m_sample_count%sample_every)==0)
+      if((sample_count%sample_every)==0)
          Write(level,area,event_name,detail);
      }
 
