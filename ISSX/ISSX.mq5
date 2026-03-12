@@ -1,5 +1,5 @@
 ﻿#property strict
-#property version   "1.704"
+#property version   "1.708"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
@@ -689,7 +689,7 @@ void ISSX_UpdateHUD()
       server_time=TimeCurrent();
 
    string hud="ISSX SYSTEM HUD\n";
-   hud+="version=1.704 server_time="+ISSX_FormatHudTime(server_time)+" pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count)+"\n";
+   hud+="version=1.708 server_time="+ISSX_FormatHudTime(server_time)+" pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count)+"\n";
    hud+="kernel_result="+g_last_kernel_result+" reason="+g_last_kernel_reason+" elapsed_ms="+IntegerToString((int)g_last_kernel_elapsed_ms)+"\n";
 
    hud+="[systems]\n";
