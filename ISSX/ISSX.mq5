@@ -66,8 +66,8 @@ string              g_last_checkpoint           = "boot";
 bool                g_first_tick_logged         = false;
 bool                g_first_timer_logged        = false;
 bool                g_first_chart_event_logged  = false;
-ulong               g_timer_pulse_count         = 0;
-ulong               g_last_comment_pulse        = 0;
+long                g_timer_count               = 0;
+long                g_last_comment_pulse        = 0;
 string              g_last_status_comment       = "";
 
 string ISSX_LongIdPart(const long value)
@@ -767,35 +767,30 @@ void OnTimer()
 
    g_kernel_busy=true;
 
-   g_timer_pulse_count++;
-
    ISSX_SetCheckpoint("ontimer_enter");
    if(!g_first_timer_logged)
      {
       g_debug.Write("INFO","timer","first_heartbeat","first timer heartbeat reached");
       g_first_timer_logged=true;
      }
-   if((g_timer_pulse_count%15)==1)
-      g_debug.Write("INFO","timer","heartbeat","count="+IntegerToString((int)g_timer_pulse_count)+" first_cycle="+(!g_first_cycle_done?"true":"false"));
+   g_debug.Write("INFO","timer","heartbeat","first_cycle="+(!g_first_cycle_done?"true":"false"));
 
    const long kernel_start_ms=(long)GetTickCount64();
    bool ok=ISSX_RunKernelCycle();
    const long kernel_elapsed_ms=(long)GetTickCount64()-kernel_start_ms;
 
-   if((g_timer_pulse_count%15)==1 || !ok)
-      g_debug.Write("INFO","timer","kernel_result",(ok?"ok":"degraded")+" elapsed_ms="+IntegerToString((int)kernel_elapsed_ms));
-   if(kernel_elapsed_ms>700)
-      g_debug.Write("WARN","timer","slow_slice","elapsed_ms="+IntegerToString((int)kernel_elapsed_ms));
+   if((timer_count%15)==1 || !ok)
+      g_debug.Write("INFO","timer","kernel_result",(ok?"ok":"degraded"));
 
    g_first_cycle_done=true;
    g_kernel_busy=false;
 
    string status=(ok ? "ISSX running | firm="+g_firm_id : "ISSX degraded | firm="+g_firm_id);
-   if(status!=g_last_status_comment || (g_timer_pulse_count-g_last_comment_pulse)>=15)
+   if(status!=g_last_status_comment || (g_timer_count-g_last_comment_pulse)>=15)
      {
       Comment(status);
       g_last_status_comment=status;
-      g_last_comment_pulse=g_timer_pulse_count;
+      g_last_comment_pulse=g_timer_count;
      }
   }
 
