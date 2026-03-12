@@ -11,7 +11,7 @@
 #include <ISSX/issx_debug_engine.mqh>
 #include <ISSX/issx_persistence.mqh>
 
-#define ISSX_UI_MODULE_VERSION "1.726"
+#define ISSX_UI_MODULE_VERSION "1.727"
 #define ISSX_UI_DEBUG_MODULE_VERSION ISSX_UI_MODULE_VERSION
 #define ISSX_HUD_PREFIX "ISSX_HUD_"
 #define ISSX_HUD_MAIN_OBJECT "MAIN"
@@ -246,7 +246,7 @@ public:
 // ============================================================================
 
 #ifndef ISSX_UI_MODULE_VERSION
-#define ISSX_UI_MODULE_VERSION                 "1.726"
+#define ISSX_UI_MODULE_VERSION                 "1.727"
 #endif
 #define ISSX_UI_TEST_MODULE_VERSION            ISSX_UI_MODULE_VERSION
 #define ISSX_TRACE_DEFAULT_COOLDOWN_MS         15000
