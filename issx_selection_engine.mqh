@@ -31,6 +31,9 @@
 #define ISSX_EA3_RESERVE_LIMIT               3
 #define ISSX_EA3_FRONTIER_SOFT_LIMIT         48
 #define ISSX_EA3_DEBUG_FRONTIER_LIMIT        12
+#define ISSX_EA3_MAX_CANDIDATES_PER_CYCLE    1024
+#define ISSX_EA3_MAX_RANKED_PER_BUCKET       256
+#define ISSX_EA3_PROGRESS_LOG_STEP           64
 
 // ============================================================================
 // SECTION 01: PHASE IDS / LOCAL ENUMS
@@ -624,6 +627,22 @@ private:
       if(v==issx_freshness_stale)  return "expired";
       return "unknown";
      }
+
+   static void SelectionDebug(const string event_name,const string details)
+     {
+      Print("ISSX_EA3 ",event_name,": ",details);
+     }
+
+   static string SelectionBoolText(const bool v)
+     {
+      return (v ? "true" : "false");
+     }
+
+   static bool IsCandidateCapacityExceeded(ISSX_EA3_State &state)
+     {
+      return (ArraySize(state.symbols)>=ISSX_EA3_MAX_CANDIDATES_PER_CYCLE);
+     }
+
 
    static bool IsUsableHistory(ISSX_EA2_SymbolState &ea2_symbol)
      {
@@ -1235,11 +1254,31 @@ private:
       state.counters.Reset();
       state.delta.Reset();
 
+      SelectionDebug("selection_batch_start",
+                     "phase=build_bucket_sets ea1_symbols="+ISSX_Util::IntToStringX(ArraySize(ea1.symbols))+
+                     " ea2_symbols="+ISSX_Util::IntToStringX(ArraySize(ea2.symbols))+
+                     " candidate_cap="+ISSX_Util::IntToStringX(ISSX_EA3_MAX_CANDIDATES_PER_CYCLE));
+
       for(int i=0;i<ArraySize(ea1.symbols);i++)
         {
+         if((i>0) && ((i%ISSX_EA3_PROGRESS_LOG_STEP)==0))
+            SelectionDebug("selection_batch_progress",
+                           "phase=build_bucket_sets scanned="+ISSX_Util::IntToStringX(i)+
+                           " candidates="+ISSX_Util::IntToStringX(ArraySize(state.symbols))+
+                           " buckets="+ISSX_Util::IntToStringX(ArraySize(state.buckets)));
+
+         SelectionDebug("selection_discovery_attempt",
+                        "symbol_norm="+ea1.symbols[i].normalized_identity.symbol_norm+
+                        " index="+ISSX_Util::IntToStringX(i));
+
          const int hidx=FindEA2Index(ea2,ea1.symbols[i].normalized_identity.symbol_norm);
          if(hidx<0)
+           {
+            SelectionDebug("selection_candidate_filtered",
+                           "symbol_norm="+ea1.symbols[i].normalized_identity.symbol_norm+
+                           " reason=missing_ea2_history_link");
             continue;
+           }
 
          ISSX_EA3_SymbolSelection s;
          s.Reset();
@@ -1315,12 +1354,29 @@ private:
             state.delta.changed_symbol_ids_compact=(state.delta.changed_symbol_ids_compact=="" ? s.symbol_norm : state.delta.changed_symbol_ids_compact+"|"+s.symbol_norm);
            }
 
+         if(IsCandidateCapacityExceeded(state))
+           {
+            state.degraded_flag=true;
+            state.projection_partial_success_flag=true;
+            state.dependency_block_reason="candidate_cap_reached";
+            state.debug_weak_link_code=issx_weak_link_queue_backlog;
+            SelectionDebug("selection_error_conditions",
+                           "reason=candidate_cap_reached cap="+ISSX_Util::IntToStringX(ISSX_EA3_MAX_CANDIDATES_PER_CYCLE));
+            break;
+           }
+
          const int out_idx=ArraySize(state.symbols);
          ArrayResize(state.symbols,out_idx+1);
          state.symbols[out_idx]=s;
 
          const int bucket_idx=EnsureBucket(state,s.leader_bucket_id,s.leader_bucket_type);
          PushIndex(state.buckets[bucket_idx].member_indices,out_idx);
+
+         SelectionDebug("selection_candidate_added",
+                        "symbol_norm="+s.symbol_norm+
+                        " bucket="+s.leader_bucket_id+
+                        " lane="+RankabilityLaneToText(s.rankability_lane)+
+                        " composite="+DoubleToString(s.bucket_local_composite,6));
         }
 
       string bucket_keys[];
@@ -1328,6 +1384,9 @@ private:
 
       for(int b=0;b<ArraySize(state.buckets);b++)
         {
+         SelectionDebug("selection_batch_progress",
+                        "phase=bucket_health bucket="+state.buckets[b].bucket_id+
+                        " members="+ISSX_Util::IntToStringX(ArraySize(state.buckets[b].member_indices)));
          const int n=ArraySize(state.buckets[b].member_indices);
          state.buckets[b].strong_count=0;
          state.buckets[b].compare_safe_count=0;
@@ -1367,10 +1426,17 @@ private:
 
       state.universe.rankable_universe_fingerprint=BuildStableFingerprint(bucket_keys);
       state.universe.publishable_universe_fingerprint=state.universe.rankable_universe_fingerprint;
+
+      SelectionDebug("selection_batch_complete",
+                     "phase=build_bucket_sets candidates="+ISSX_Util::IntToStringX(ArraySize(state.symbols))+
+                     " buckets="+ISSX_Util::IntToStringX(ArraySize(state.buckets))+
+                     " changed_symbols="+ISSX_Util::IntToStringX(state.delta.changed_symbol_count));
      }
 
    static void CollapseFamilies(ISSX_EA3_State &state)
      {
+      SelectionDebug("selection_batch_start","phase=collapse_families buckets="+ISSX_Util::IntToStringX(ArraySize(state.buckets)));
+
       for(int b=0;b<ArraySize(state.buckets);b++)
         {
          int kept_indices[];
@@ -1392,6 +1458,8 @@ private:
                state.symbols[idx].duplicate_family_rejected=true;
                state.symbols[idx].not_top5_reason_primary="family_collapse";
                state.counters.duplicate_family_reject_count++;
+               SelectionDebug("selection_candidate_filtered",
+                              "symbol_norm="+state.symbols[idx].symbol_norm+" reason=family_collapse bucket="+state.buckets[b].bucket_id);
                continue;
               }
 
@@ -1408,6 +1476,8 @@ private:
                state.symbols[idx].duplicate_family_rejected=true;
                state.symbols[idx].not_top5_reason_primary="family_collapse";
                state.counters.duplicate_family_reject_count++;
+               SelectionDebug("selection_candidate_filtered",
+                              "symbol_norm="+state.symbols[idx].symbol_norm+" reason=family_collapse_non_rep bucket="+state.buckets[b].bucket_id);
               }
            }
 
@@ -1422,10 +1492,14 @@ private:
             state.delta.changed_bucket_ids_compact=(state.delta.changed_bucket_ids_compact=="" ? state.buckets[b].bucket_id : state.delta.changed_bucket_ids_compact+"|"+state.buckets[b].bucket_id);
            }
         }
+      SelectionDebug("selection_batch_complete",
+                     "phase=collapse_families duplicate_rejects="+ISSX_Util::IntToStringX(state.counters.duplicate_family_reject_count));
      }
 
    static void RankBuckets(ISSX_EA3_State &state)
      {
+      SelectionDebug("selection_batch_start","phase=rank_buckets buckets="+ISSX_Util::IntToStringX(ArraySize(state.buckets)));
+
       for(int b=0;b<ArraySize(state.buckets);b++)
         {
          int ranked[];
@@ -1438,6 +1512,17 @@ private:
             if(state.symbols[idx].rankability_lane==issx_rankability_blocked)
                continue;
             PushIndex(ranked,idx);
+           }
+
+         if(ArraySize(ranked)>ISSX_EA3_MAX_RANKED_PER_BUCKET)
+           {
+            SelectionDebug("selection_error_conditions",
+                           "reason=ranked_bucket_cap bucket="+state.buckets[b].bucket_id+
+                           " before="+ISSX_Util::IntToStringX(ArraySize(ranked))+
+                           " cap="+ISSX_Util::IntToStringX(ISSX_EA3_MAX_RANKED_PER_BUCKET));
+            ArrayResize(ranked,ISSX_EA3_MAX_RANKED_PER_BUCKET);
+            state.degraded_flag=true;
+            state.projection_partial_success_flag=true;
            }
 
          SortIndicesByComposite(state,ranked);
@@ -1455,6 +1540,11 @@ private:
          for(int i=0;i<n;i++)
            {
             const int idx=state.buckets[b].ranked_indices[i];
+
+            if((i>0) && ((i%ISSX_EA3_PROGRESS_LOG_STEP)==0))
+               SelectionDebug("selection_batch_progress",
+                              "phase=rank_buckets bucket="+state.buckets[b].bucket_id+
+                              " progress="+ISSX_Util::IntToStringX(i)+"/"+ISSX_Util::IntToStringX(n));
 
             state.symbols[idx].bucket_rank=i+1;
             state.symbols[idx].bucket_member_quality_rank=i+1;
@@ -1476,6 +1566,8 @@ private:
                  {
                   allow_select=false;
                   state.symbols[idx].not_top5_reason_primary="below_enter_threshold";
+                  SelectionDebug("selection_candidate_filtered",
+                                 "symbol_norm="+state.symbols[idx].symbol_norm+" reason=below_enter_threshold");
                  }
                else
                  {
@@ -1507,6 +1599,11 @@ private:
                    : issx_ea3_security_contested);
 
                state.counters.top5_count++;
+               SelectionDebug("selection_rank_calculated",
+                              "symbol_norm="+state.symbols[idx].symbol_norm+
+                              " bucket="+state.buckets[b].bucket_id+
+                              " rank="+ISSX_Util::IntToStringX(state.symbols[idx].bucket_rank)+
+                              " top5_rank="+ISSX_Util::IntToStringX(state.symbols[idx].bucket_top5_rank));
               }
             else
               {
@@ -1539,6 +1636,11 @@ private:
                PushIndex(state.buckets[b].top5_indices,idx);
                state.counters.selected_by_shortfall_count++;
                state.counters.top5_count++;
+               SelectionDebug("selection_rank_calculated",
+                              "symbol_norm="+state.symbols[idx].symbol_norm+
+                              " bucket="+state.buckets[b].bucket_id+
+                              " rank="+ISSX_Util::IntToStringX(state.symbols[idx].bucket_rank)+
+                              " top5_rank="+ISSX_Util::IntToStringX(state.symbols[idx].bucket_top5_rank));
               }
            }
 
@@ -1551,6 +1653,10 @@ private:
 
    static void AssignReserves(ISSX_EA3_State &state)
      {
+      SelectionDebug("selection_batch_start",
+                     "phase=assign_reserves buckets="+ISSX_Util::IntToStringX(ArraySize(state.buckets))+
+                     " top5_count="+ISSX_Util::IntToStringX(state.counters.top5_count));
+
       for(int b=0;b<ArraySize(state.buckets);b++)
         {
          ArrayResize(state.buckets[b].reserve_indices,0);
@@ -1572,6 +1678,9 @@ private:
                                                 : "none");
             state.symbols[idx].reserve_promoted_for_diversity_flag=false;
             state.counters.reserve_count++;
+            SelectionDebug("selection_rank_calculated",
+                           "symbol_norm="+state.symbols[idx].symbol_norm+
+                           " reserve_confidence="+DoubleToString(state.symbols[idx].reserve_confidence,6));
            }
 
          for(int i=0;i<ArraySize(state.buckets[b].top5_indices);i++)
@@ -1587,10 +1696,14 @@ private:
             state.symbols[top_idx].replacement_pressure=Clamp01(1.0-state.symbols[top_idx].nearest_reserve_gap);
            }
         }
+      SelectionDebug("selection_batch_complete",
+                     "phase=assign_reserves reserve_count="+ISSX_Util::IntToStringX(state.counters.reserve_count));
      }
 
    static void BuildFrontier(ISSX_EA3_State &state)
      {
+      SelectionDebug("selection_batch_start","phase=build_frontier buckets="+ISSX_Util::IntToStringX(ArraySize(state.buckets)));
+
       string previous_frontier[];
       ArrayResize(previous_frontier,0);
       CopyFrontierSymbolNorms(state.frontier,previous_frontier);
@@ -1683,7 +1796,12 @@ private:
          state.degraded_flag=true;
          state.dependency_block_reason="frontier_empty";
          state.debug_weak_link_code=issx_weak_link_frontier_thin;
+         SelectionDebug("selection_error_conditions","reason=frontier_empty");
         }
+
+      SelectionDebug("selection_batch_complete",
+                     "phase=build_frontier frontier_count="+ISSX_Util::IntToStringX(ArraySize(state.frontier))+
+                     " changed_frontier="+ISSX_Util::IntToStringX(state.delta.changed_frontier_count));
      }
 
    static void UpdateSurvivorContinuity(ISSX_EA3_State &state)
@@ -1751,6 +1869,7 @@ private:
          state.degraded_flag=true;
          state.dependency_block_reason="rankable_universe_empty";
          state.debug_weak_link_code=issx_weak_link_rankable_thin;
+         SelectionDebug("selection_error_conditions","reason=rankable_universe_empty");
         }
       else if(state.counters.top5_count<=0)
         {
@@ -1769,6 +1888,22 @@ private:
                                               ? state.counters.top5_count : 0);
       state.counters.rejected_count=state.counters.blocked_count;
       state.counters.stale_usable_count=(state.degraded_flag ? state.counters.usable_lane_count : 0);
+
+      SelectionDebug("selection_ready_state",
+                     "minimum_ready="+SelectionBoolText(state.stage_minimum_ready_flag)+
+                     " publishability="+PublishabilityToText(state.stage_publishability_state)+
+                     " top5="+ISSX_Util::IntToStringX(state.counters.top5_count)+
+                     " frontier="+ISSX_Util::IntToStringX(state.counters.frontier_count));
+
+      if(state.stage_publishability_state==issx_publishability_warmup ||
+         state.stage_publishability_state==issx_publishability_not_ready ||
+         state.projection_partial_success_flag ||
+         state.degraded_flag)
+         SelectionDebug("selection_partial_state",
+                        "publishability="+PublishabilityToText(state.stage_publishability_state)+
+                        " degraded="+SelectionBoolText(state.degraded_flag)+
+                        " partial_projection="+SelectionBoolText(state.projection_partial_success_flag)+
+                        " dependency_block="+state.dependency_block_reason);
      }
 
    static void AppendJsonEscaped(string &json,const string value)
@@ -2250,6 +2385,11 @@ public:
                                ISSX_EA2_State &ea2,
                                ISSX_EA3_State &state)
      {
+      SelectionDebug("selection_batch_start",
+                     "phase=build_from_inputs firm="+firm_id+
+                     " ea1_symbols="+ISSX_Util::IntToStringX(ArraySize(ea1.symbols))+
+                     " ea2_symbols="+ISSX_Util::IntToStringX(ArraySize(ea2.symbols)));
+
       const long prev_cycle_no=state.runtime.scheduler_cycle_no;
 
       ISSX_EA3_SurvivorMemory previous_survivor_memory[];
@@ -2289,6 +2429,13 @@ public:
       UpdateHeaderAndManifest(state,firm_id);
 
       ResetRuntimeForPhase(state,issx_ea3_phase_publish);
+
+      SelectionDebug("selection_batch_complete",
+                     "phase=build_from_inputs cycle="+ISSX_Util::LongToStringX((long)state.runtime.scheduler_cycle_no)+
+                     " symbols="+ISSX_Util::IntToStringX(ArraySize(state.symbols))+
+                     " top5="+ISSX_Util::IntToStringX(state.counters.top5_count)+
+                     " reserve="+ISSX_Util::IntToStringX(state.counters.reserve_count)+
+                     " frontier="+ISSX_Util::IntToStringX(state.counters.frontier_count));
       return true;
      }
 

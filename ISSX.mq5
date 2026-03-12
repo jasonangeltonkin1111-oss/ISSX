@@ -6,6 +6,7 @@
 #include <ISSX/issx_registry.mqh>
 #include <ISSX/issx_runtime.mqh>
 #include <ISSX/issx_persistence.mqh>
+#include <ISSX/issx_data_handler.mqh>
 #include <ISSX/issx_market_engine.mqh>
 #include <ISSX/issx_history_engine.mqh>
 #include <ISSX/issx_selection_engine.mqh>
