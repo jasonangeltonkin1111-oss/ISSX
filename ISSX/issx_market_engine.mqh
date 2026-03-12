@@ -2243,12 +2243,28 @@ public:
 
       ArrayResize(io_state.symbols,0);
 
-      int accepted_count=0;
+      // Ported/adapted from legacy EA1_MarketCore.mq5 BuildUniverse sorting:
+      // keep symbol traversal deterministic so continuity/fingerprints do not
+      // drift when broker enumeration order changes across sessions.
+      string discovered_symbols[];
+      ArrayResize(discovered_symbols,0);
       for(int i=0;i<total;i++)
         {
          string symbol=SymbolName(i,false);
          if(symbol=="")
             continue;
+
+         int n=ArraySize(discovered_symbols);
+         ArrayResize(discovered_symbols,n+1);
+         discovered_symbols[n]=symbol;
+        }
+      if(ArraySize(discovered_symbols)>1)
+         ISSX_Util::SortStringsInPlace(discovered_symbols);
+
+      int accepted_count=0;
+      for(int i=0;i<ArraySize(discovered_symbols);i++)
+        {
+         const string symbol=discovered_symbols[i];
 
          bool is_custom=SafeSymbolBool(symbol,SYMBOL_CUSTOM);
          if(!include_custom_symbols && is_custom)
