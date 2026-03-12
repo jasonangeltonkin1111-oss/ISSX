@@ -21,7 +21,7 @@
 
 #define ISSX_ENGINE_NAME                              "ISSX"
 #define ISSX_ENGINE_FAMILY                            "ISSX_PIPELINE"
-#define ISSX_ENGINE_VERSION                           "1.725"
+#define ISSX_ENGINE_VERSION                           "1.726"
 #define ISSX_SCHEMA_VERSION                           "1.718"
 #define ISSX_SCHEMA_EPOCH                             10702
 #define ISSX_STORAGE_VERSION                          1721

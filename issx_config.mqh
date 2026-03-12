@@ -3,7 +3,7 @@
 
 #include <ISSX/issx_core.mqh>
 
-#define ISSX_CONFIG_MODULE_VERSION "1.725"
+#define ISSX_CONFIG_MODULE_VERSION "1.726"
 
 // Wrapper inputs (declared in ISSX.mq5)
 #ifndef ISSX_CONFIG_INPUTS_PROVIDED

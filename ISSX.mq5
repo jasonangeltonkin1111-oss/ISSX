@@ -1,5 +1,5 @@
 #property strict
-#property version   "1.725"
+#property version   "1.726"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
@@ -607,6 +607,7 @@ bool ISSX_ProjectEA1(const string stage_json,
 
    g_debug.Write("INFO","ea1_publish","publish_stage_write_start","path="+ISSX_PersistencePath::PayloadCurrent(g_firm_id,issx_stage_ea1)+" bytes="+IntegerToString(StringLen(stage_json)));
    const bool stage_write_ok=ISSX_PersistStageJson(issx_stage_ea1,header,manifest,stage_json);
+   g_debug.Write((stage_write_ok?"INFO":"ERROR"),"ea1_publish",(stage_write_ok?"publish_persistence_handoff_success":"publish_persistence_handoff_fail"),"checkpoint="+(stage_write_ok?"publish_persistence_handoff_success":"publish_persistence_handoff_fail")+" stage=ea1");
    g_last_ea1_stage_write_state=(stage_write_ok?"success":"failed");
    g_debug.Write((stage_write_ok?"INFO":"ERROR"),"ea1_publish",(stage_write_ok?"publish_stage_write_success":"publish_stage_write_fail"),
                  "path="+ISSX_PersistencePath::PayloadCurrent(g_firm_id,issx_stage_ea1)+" reason="+(stage_write_ok?"ok":"persist_stage_json_failed"));
@@ -638,22 +639,22 @@ bool ISSX_ProjectEA1(const string stage_json,
 
    ISSX_DataHandler::ForensicState fs_market;
    fs_market.Reset();
-   g_debug.Write("INFO","ea1_publish","publish_universe_write_start","checkpoint=publish_universe_write_start final_path="+g_market_json_relative_path+" bytes="+IntegerToString(ISSX_DataHandler::EstimateUtf8Bytes(broker_dump_json)));
+   g_debug.Write("INFO","ea1_publish","publish_root_status_write_start","checkpoint=publish_root_status_write_start final_path="+g_market_json_relative_path+" bytes="+IntegerToString(ISSX_DataHandler::EstimateUtf8Bytes(broker_dump_json)));
    bool operator_json_ok=false;
    if(StringLen(broker_dump_json)>2)
       operator_json_ok=ISSX_DataHandler::WritePayloadAtomic(g_market_json_relative_path,broker_dump_json,fs_market,true);
    else
       operator_json_ok=ISSX_DataHandler::CopyProjection(universe_current_path,g_market_json_relative_path,fs_market);
    g_last_ea1_root_status_state=(operator_json_ok?"success":"failed");
-   g_debug.Write((operator_json_ok?"INFO":"ERROR"),"ea1_publish",(operator_json_ok?"publish_universe_write_success":"publish_universe_write_fail"),
+   g_debug.Write((operator_json_ok?"INFO":"ERROR"),"ea1_publish",(operator_json_ok?"publish_root_status_write_success":"publish_root_status_write_fail"),
                  "checkpoint="+fs_market.checkpoint+" temp_path="+fs_market.temp_path+" final_path="+fs_market.final_path+" bytes_attempted="+IntegerToString(fs_market.payload_bytes_attempted)+" bytes_written="+IntegerToString(fs_market.payload_bytes_written)+" open_err="+IntegerToString(fs_market.open_error)+" write_err="+IntegerToString(fs_market.write_error)+" move_err="+IntegerToString(fs_market.move_error)+" copy_err="+IntegerToString(fs_market.copy_error)+" delete_err="+IntegerToString(fs_market.delete_error));
 
    ISSX_DataHandler::ForensicState fs_debug;
    fs_debug.Reset();
-   g_debug.Write("INFO","ea1_publish","publish_debug_write_start","checkpoint=publish_debug_write_start src="+g_debug.ActivePath()+" dst="+g_market_log_relative_path);
+   g_debug.Write("INFO","ea1_publish","publish_root_debug_write_start","checkpoint=publish_root_debug_write_start src="+g_debug.ActivePath()+" dst="+g_market_log_relative_path);
    const bool operator_log_projection_ok=ISSX_DataHandler::CopyProjection(g_debug.ActivePath(),g_market_log_relative_path,fs_debug);
    g_last_ea1_root_debug_state=(operator_log_projection_ok?"success":"failed");
-   g_debug.Write((operator_log_projection_ok?"INFO":"ERROR"),"ea1_publish",(operator_log_projection_ok?"publish_debug_write_success":"publish_debug_write_fail"),
+   g_debug.Write((operator_log_projection_ok?"INFO":"ERROR"),"ea1_publish",(operator_log_projection_ok?"publish_root_debug_write_success":"publish_root_debug_write_fail"),
                  "checkpoint="+fs_debug.checkpoint+" src="+fs_debug.temp_path+" dst="+fs_debug.final_path+" copy_err="+IntegerToString(fs_debug.copy_error));
 
    g_debug.Write("INFO","ea1_publish","publish_root_projection_start","json="+g_market_json_relative_path+" log="+g_market_log_relative_path);
@@ -778,11 +779,11 @@ string ISSX_DeinitReasonText(const int reason)
    return "unknown";
   }
 
-void ISSX_LogFoundationStartupProfile(const bool ea1_enabled,const bool timer_heavy_enabled)
+void ISSX_LogFoundationStartupProfile(const bool ea1_enabled,const bool timer_heavy_enabled,const bool ui_projection_enabled)
   {
-   if(!ea1_enabled && !timer_heavy_enabled)
+   if(!ea1_enabled && !timer_heavy_enabled && !ui_projection_enabled)
       g_startup_profile="shell_only";
-   else if(ea1_enabled && timer_heavy_enabled)
+   else if(ea1_enabled && timer_heavy_enabled && ui_projection_enabled)
       g_startup_profile="ea1_foundation_active";
    else
       g_startup_profile="invalid_contradictory";
@@ -792,7 +793,8 @@ void ISSX_LogFoundationStartupProfile(const bool ea1_enabled,const bool timer_he
                  " minimal_debug="+ISSX_OnOff(Config.GetBool("minimal_debug_mode"))+
                  " isolation="+ISSX_OnOff(Config.GetBool("isolation_mode"))+
                  " ea1="+ISSX_OnOff(ea1_enabled)+
-                 " timer_heavy="+ISSX_OnOff(timer_heavy_enabled));
+                 " timer_heavy="+ISSX_OnOff(timer_heavy_enabled)+
+                 " ui_projection="+ISSX_OnOff(ui_projection_enabled));
   }
 
 void ISSX_SetCheckpoint(const string cp)
@@ -1443,7 +1445,7 @@ int OnInit()
    g_debug.Write("INFO","feature_state","ea4_correlation","requested="+ISSX_OnOff(Config.GetBool("ea4_enabled"))+" effective="+ISSX_OnOff(g_ea_enabled[3])+" reason="+(g_ea_enabled[3]?"active":(Config.GetBool("isolation_mode")?"isolation_forced_off":"requested_off")));
    g_debug.Write("INFO","feature_state","ea5_contracts","requested="+ISSX_OnOff(Config.GetBool("ea5_enabled"))+" effective="+ISSX_OnOff(g_ea_enabled[4])+" reason="+(g_ea_enabled[4]?"active":(Config.GetBool("isolation_mode")?"isolation_forced_off":"requested_off")));
 
-   ISSX_LogFoundationStartupProfile(g_ea_enabled[0],eff_timer_heavy);
+   ISSX_LogFoundationStartupProfile(g_ea_enabled[0],eff_timer_heavy,eff_ui_projection);
    g_debug.Write("INFO","paths","operator_layout",
                  "operator_root="+g_operator_root_relative+"/"+
                  " market_json_path="+g_market_json_relative_path+
@@ -1452,6 +1454,14 @@ int OnInit()
                  " debug_sink="+g_debug.ActivePath());
 
    ISSX_LogGateSnapshot();
+
+   if(g_ea_enabled[0] && (!eff_timer_heavy || !eff_ui_projection))
+     {
+      const string block_reason="ea1_foundation_gate_off timer_heavy="+ISSX_OnOff(eff_timer_heavy)+" ui_projection="+ISSX_OnOff(eff_ui_projection);
+      g_debug.Write("ERROR","startup","profile_blocked",block_reason);
+      g_debug.Write("ERROR","lifecycle","oninit_end","result=INIT_FAILED reason="+block_reason);
+      return INIT_FAILED;
+     }
 
    // registry + runtime
    g_registry.SeedBlueprintV170();
