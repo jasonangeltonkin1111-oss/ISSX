@@ -7,7 +7,7 @@
 #include <ISSX/issx_persistence.mqh>
 
 // ============================================================================
-// ISSX MARKET ENGINE v1.712
+// ISSX MARKET ENGINE v1.713
 // EA1 shared engine for MarketStateCore.
 //
 // HARDENING NOTES
@@ -24,7 +24,14 @@
 //   owner runtime/persistence layer
 // ============================================================================
 
-#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.712"
+#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.713"
+
+enum ISSX_EA1_RuntimeState
+  {
+   EA1_STATE_DISCOVERY = 0,
+   EA1_STATE_HYDRATING = 1,
+   EA1_STATE_READY     = 2
+  };
 
 // ============================================================================
 // SECTION 01: EA1 PHASE IDS
@@ -46,6 +53,18 @@ enum ISSX_EA1_PhaseId
 // ============================================================================
 // SECTION 02: EA1 ADMISSION / LIFECYCLE ENUMS
 // ============================================================================
+
+
+string ISSX_EA1_RuntimeStateText(const ISSX_EA1_RuntimeState state)
+  {
+   switch(state)
+     {
+      case EA1_STATE_DISCOVERY: return "discovery";
+      case EA1_STATE_HYDRATING: return "hydrating";
+      case EA1_STATE_READY:     return "ready";
+      default:                  return "unknown";
+     }
+  }
 
 enum ISSX_EA1_AdmissionState
   {
@@ -796,6 +815,15 @@ struct ISSX_EA1_State
    bool                     deterministic_sort_applied;
    int                      deterministic_sorted_count;
    string                   deterministic_sort_basis;
+   ISSX_EA1_RuntimeState    runtime_state;
+   string                   hydration_queue[];
+   int                      hydration_cursor;
+   int                      hydration_processed;
+   int                      hydration_total;
+   int                      hydration_batch_size;
+   bool                     hydration_complete;
+   string                   hydration_last_symbol_start;
+   string                   hydration_last_symbol_done;
 
    void Reset()
      {
@@ -833,6 +861,15 @@ struct ISSX_EA1_State
       deterministic_sort_applied=false;
       deterministic_sorted_count=0;
       deterministic_sort_basis="none";
+      runtime_state=EA1_STATE_DISCOVERY;
+      ArrayResize(hydration_queue,0);
+      hydration_cursor=0;
+      hydration_processed=0;
+      hydration_total=0;
+      hydration_batch_size=25;
+      hydration_complete=false;
+      hydration_last_symbol_start="";
+      hydration_last_symbol_done="";
      }
   };
 
@@ -2210,6 +2247,10 @@ io_symbol.rankability_gate.contradiction_count=0;
       j.NameInt("discovery_elapsed_ms",state.discovery_elapsed_ms);
       j.NameInt("discovery_skip_streak",state.discovery_skip_streak);
       j.NameString("discovery_status_reason",state.discovery_status_reason);
+      j.NameString("ea1_runtime_state",ISSX_EA1_RuntimeStateText(state.runtime_state));
+      j.NameInt("hydration_processed",state.hydration_processed);
+      j.NameInt("hydration_total",state.hydration_total);
+      j.NameBool("hydration_complete",state.hydration_complete);
       j.NameBool("deterministic_sort_applied",state.deterministic_sort_applied);
       j.NameInt("deterministic_sorted_count",state.deterministic_sorted_count);
       j.NameString("deterministic_sort_basis",state.deterministic_sort_basis);
@@ -2365,6 +2406,10 @@ io_symbol.rankability_gate.contradiction_count=0;
       j.NameInt("discovery_elapsed_ms",state.discovery_elapsed_ms);
       j.NameInt("discovery_skip_streak",state.discovery_skip_streak);
       j.NameString("discovery_status_reason",state.discovery_status_reason);
+      j.NameString("ea1_runtime_state",ISSX_EA1_RuntimeStateText(state.runtime_state));
+      j.NameInt("hydration_processed",state.hydration_processed);
+      j.NameInt("hydration_total",state.hydration_total);
+      j.NameBool("hydration_complete",state.hydration_complete);
       j.NameBool("deterministic_sort_applied",state.deterministic_sort_applied);
       j.NameInt("deterministic_sorted_count",state.deterministic_sorted_count);
       j.NameString("deterministic_sort_basis",state.deterministic_sort_basis);
@@ -2406,8 +2451,50 @@ io_symbol.rankability_gate.contradiction_count=0;
                                          const string writer_boot_id,
                                          const string writer_nonce)
      {
-      string json=BuildUniverseDumpJson(state,firm_id,writer_boot_id,writer_nonce);
-      return (json!="");
+      if(!ISSX_FileIO::EnsureFolder(ISSX_PersistencePath::UniverseDir(firm_id)))
+         return false;
+
+      const string relative_path=ISSX_Util::JoinPath(ISSX_PersistencePath::UniverseDir(firm_id),ISSX_BIN_BROKER_UNIVERSE_CURRENT);
+      ResetLastError();
+      const int h=FileOpen(relative_path,FILE_WRITE|FILE_TXT|FILE_COMMON|FILE_ANSI,(short)0,(uint)65001);
+      if(h==INVALID_HANDLE)
+         return false;
+
+      bool ok=true;
+      ok=ok && ((int)FileWriteString(h,"{")>=1);
+      ok=ok && ((int)FileWriteString(h,"\"stage_alias\":\""+ISSX_JsonWriter::Escape(ISSX_OperatorSurface::StageAlias(issx_stage_ea1))+"\",")>=1);
+      ok=ok && ((int)FileWriteString(h,"\"internal_stage_id\":\"ea1\",")>=1);
+      ok=ok && ((int)FileWriteString(h,"\"version\":\""+ISSX_JsonWriter::Escape(ISSX_ENGINE_VERSION)+"\",")>=1);
+      ok=ok && ((int)FileWriteString(h,"\"firm_id\":\""+ISSX_JsonWriter::Escape(firm_id)+"\",")>=1);
+      ok=ok && ((int)FileWriteString(h,"\"writer_boot_id\":\""+ISSX_JsonWriter::Escape(writer_boot_id)+"\",")>=1);
+      ok=ok && ((int)FileWriteString(h,"\"writer_nonce\":\""+ISSX_JsonWriter::Escape(writer_nonce)+"\",")>=1);
+      ok=ok && ((int)FileWriteString(h,"\"minute_id\":"+IntegerToString(state.minute_id)+",")>=1);
+      ok=ok && ((int)FileWriteString(h,"\"sequence_no\":"+IntegerToString(state.sequence_no)+",")>=1);
+      ok=ok && ((int)FileWriteString(h,"\"hydration\":{\"processed\":"+IntegerToString(state.hydration_processed)+",\"total\":"+IntegerToString(state.hydration_total)+",\"complete\":"+(state.hydration_complete?"true":"false")+"},")>=1);
+      ok=ok && ((int)FileWriteString(h,"\"symbols\":[")>=1);
+
+      const int n=ArraySize(state.symbols);
+      for(int i=0;i<n;i++)
+        {
+         if(i>0)
+            ok=ok && ((int)FileWriteString(h,",")>=1);
+
+         string entry="{";
+         entry+="\"symbol\":\""+ISSX_JsonWriter::Escape(state.symbols[i].raw_broker_observation.symbol_raw)+"\",";
+         entry+="\"symbol_norm\":\""+ISSX_JsonWriter::Escape(state.symbols[i].normalized_identity.symbol_norm)+"\",";
+         entry+="\"sector\":\""+ISSX_JsonWriter::Escape(state.symbols[i].classification_truth.final_sector)+"\",";
+         entry+="\"industry\":\""+ISSX_JsonWriter::Escape(state.symbols[i].classification_truth.final_industry)+"\",";
+         entry+="\"publishable\":"+(state.symbols[i].rankability_gate.publishable_flag?"true":"false");
+         entry+="}";
+         ok=ok && ((int)FileWriteString(h,entry)>0);
+        }
+
+      ok=ok && ((int)FileWriteString(h,"]}")>=1);
+      ResetLastError();
+      FileFlush(h);
+      const int flush_error=GetLastError();
+      FileClose(h);
+      return (ok && flush_error==0);
      }
 
 public:
@@ -2494,11 +2581,18 @@ public:
       return (accepted_count>0);
      }
 
+   static void HydrateIdentitySymbol(ISSX_EA1_State &io_state,const int index)
+     {
+      if(index<0 || index>=ArraySize(io_state.symbols))
+         return;
+      NormalizeIdentity(io_state.symbols[index].raw_broker_observation,io_state.symbols[index].normalized_identity);
+     }
+
    static void BuildIdentityPhase(ISSX_EA1_State &io_state)
      {
       io_state.scheduler.phase_id=ISSX_EA1_MapToRuntimePhase(issx_ea1_phase_normalize_identity);
       for(int i=0;i<ArraySize(io_state.symbols);i++)
-         NormalizeIdentity(io_state.symbols[i].raw_broker_observation,io_state.symbols[i].normalized_identity);
+         HydrateIdentitySymbol(io_state,i);
      }
 
    static void CanonicalizeDeterministicOrder(ISSX_EA1_State &io_state)
@@ -2547,32 +2641,51 @@ public:
       io_state.deterministic_sort_basis="symbol_norm";
      }
 
+   static void HydrateRuntimeSymbol(ISSX_EA1_State &io_state,const int index)
+     {
+      if(index<0 || index>=ArraySize(io_state.symbols))
+         return;
+      BuildRuntimeTruth(io_state.symbols[index].raw_broker_observation,io_state.symbols[index].validated_runtime_truth);
+     }
+
    static void BuildRuntimePhase(ISSX_EA1_State &io_state)
      {
       io_state.scheduler.phase_id=ISSX_EA1_MapToRuntimePhase(issx_ea1_phase_sample_runtime_delta_first);
       for(int i=0;i<ArraySize(io_state.symbols);i++)
-         BuildRuntimeTruth(io_state.symbols[i].raw_broker_observation,io_state.symbols[i].validated_runtime_truth);
+         HydrateRuntimeSymbol(io_state,i);
+     }
+
+   static void HydrateClassificationSymbol(ISSX_EA1_State &io_state,const int index)
+     {
+      if(index<0 || index>=ArraySize(io_state.symbols))
+         return;
+      ISSX_MarketTaxonomy::Classify(io_state.symbols[index].raw_broker_observation,
+                                    io_state.symbols[index].normalized_identity.symbol_norm,
+                                    io_state.symbols[index].normalized_identity.canonical_root,
+                                    io_state.symbols[index].classification_truth);
      }
 
    static void BuildClassificationPhase(ISSX_EA1_State &io_state)
      {
       io_state.scheduler.phase_id=ISSX_EA1_MapToRuntimePhase(issx_ea1_phase_classify_symbols_delta_first);
       for(int i=0;i<ArraySize(io_state.symbols);i++)
-        {
-         ISSX_MarketTaxonomy::Classify(io_state.symbols[i].raw_broker_observation,
-                                       io_state.symbols[i].normalized_identity.symbol_norm,
-                                       io_state.symbols[i].normalized_identity.canonical_root,
-                                       io_state.symbols[i].classification_truth);
-        }
+         HydrateClassificationSymbol(io_state,i);
+     }
+
+   static void HydrateTradeabilitySymbol(ISSX_EA1_State &io_state,const int index)
+     {
+      if(index<0 || index>=ArraySize(io_state.symbols))
+         return;
+      BuildTradeability(io_state.symbols[index].raw_broker_observation,
+                        io_state.symbols[index].validated_runtime_truth,
+                        io_state.symbols[index].tradeability_baseline);
      }
 
    static void BuildTradeabilityPhase(ISSX_EA1_State &io_state)
      {
       io_state.scheduler.phase_id=ISSX_EA1_MapToRuntimePhase(issx_ea1_phase_update_tradeability_delta_first);
       for(int i=0;i<ArraySize(io_state.symbols);i++)
-         BuildTradeability(io_state.symbols[i].raw_broker_observation,
-                           io_state.symbols[i].validated_runtime_truth,
-                           io_state.symbols[i].tradeability_baseline);
+         HydrateTradeabilitySymbol(io_state,i);
      }
 
    static void BuildGateAndContinuityPhase(ISSX_EA1_State &io_state)
@@ -2666,6 +2779,106 @@ public:
       return DiscoverUniverse(io_state,false,0);
      }
 
+   static void PrepareHydrationQueue(ISSX_EA1_State &io_state,const int max_symbols)
+     {
+      ArrayResize(io_state.hydration_queue,0);
+      const int n=ArraySize(io_state.symbols);
+      int cap=n;
+      if(max_symbols>0)
+         cap=MathMin(cap,max_symbols);
+      if(cap<0)
+         cap=0;
+
+      ArrayResize(io_state.hydration_queue,cap);
+      for(int i=0;i<cap;i++)
+         io_state.hydration_queue[i]=io_state.symbols[i].raw_broker_observation.symbol_raw;
+
+      io_state.hydration_total=cap;
+      io_state.hydration_cursor=0;
+      io_state.hydration_processed=0;
+      io_state.hydration_complete=(cap<=0);
+      io_state.runtime_state=(io_state.hydration_complete?EA1_STATE_READY:EA1_STATE_HYDRATING);
+     }
+
+   static void BuildHydrationUniverse(ISSX_EA1_State &io_state)
+     {
+      const int n=io_state.hydration_total;
+      if(n<=0)
+        {
+         ArrayResize(io_state.symbols,0);
+         return;
+        }
+
+      if(ArraySize(io_state.symbols)>n)
+         ArrayResize(io_state.symbols,n);
+
+      io_state.universe.broker_universe=n;
+      io_state.counters.listed_count=n;
+     }
+
+   static void HydrateSymbolAt(ISSX_EA1_State &io_state,const int index)
+     {
+      if(index<0 || index>=ArraySize(io_state.symbols))
+         return;
+
+      string symbol=io_state.symbols[index].raw_broker_observation.symbol_raw;
+      LoadRawObservation(symbol,io_state.symbols[index].raw_broker_observation);
+      HydrateIdentitySymbol(io_state,index);
+      HydrateRuntimeSymbol(io_state,index);
+      HydrateClassificationSymbol(io_state,index);
+      HydrateTradeabilitySymbol(io_state,index);
+     }
+
+   static void HydrationRebuildUniverseMetrics(ISSX_EA1_State &io_state)
+     {
+      CanonicalizeDeterministicOrder(io_state);
+      BuildGateAndContinuityPhase(io_state);
+      io_state.stage_minimum_ready_flag=(io_state.hydration_processed>0);
+      if(io_state.hydration_complete)
+         UpdateGlobalStateFlags(io_state);
+      else
+         io_state.stage_publishability_state="not_ready";
+     }
+
+   static int RunHydrationCycle(ISSX_EA1_State &io_state)
+     {
+      const int total=io_state.hydration_total;
+      if(total<=0)
+        {
+         io_state.hydration_complete=true;
+         io_state.runtime_state=EA1_STATE_READY;
+         return 0;
+        }
+
+      if(io_state.hydration_complete)
+         return 0;
+
+      const int batch=MathMax(1,io_state.hydration_batch_size);
+      const int remaining=(total-io_state.hydration_cursor);
+      const int work=MathMin(batch,remaining);
+
+      for(int i=0;i<work;i++)
+        {
+         const int idx=io_state.hydration_cursor+i;
+         const string symbol=io_state.symbols[idx].raw_broker_observation.symbol_raw;
+         if(i==0)
+            io_state.hydration_last_symbol_start=symbol;
+         HydrateSymbolAt(io_state,idx);
+         io_state.hydration_last_symbol_done=symbol;
+        }
+
+      io_state.hydration_cursor+=work;
+      io_state.hydration_processed=io_state.hydration_cursor;
+      if(io_state.hydration_processed>=total)
+        {
+         io_state.hydration_complete=true;
+         io_state.runtime_state=EA1_STATE_READY;
+        }
+
+      HydrationRebuildUniverseMetrics(io_state);
+      return work;
+     }
+
    static void AdvanceOneCycle(ISSX_EA1_State &io_state)
      {
       io_state.minute_id=(int)(TimeCurrent()/60);
@@ -2743,15 +2956,8 @@ public:
       int current_minute=(int)(TimeCurrent()/60);
       io_state.minute_id=current_minute;
 
-      io_state.discovery_attempted=false;
-      io_state.discovery_skipped=false;
-      io_state.discovery_success=false;
-      io_state.discovery_no_change=false;
-      io_state.discovery_elapsed_ms=0;
-      io_state.discovery_status_reason="none";
-
-      const bool discovery_due=(io_state.sequence_no<=0 || io_state.discovery_minute_id!=current_minute);
-      if(discovery_due)
+      const bool initial_discovery_needed=(io_state.runtime_state==EA1_STATE_DISCOVERY || io_state.sequence_no<=0 || ArraySize(io_state.symbols)<=0);
+      if(initial_discovery_needed)
         {
          io_state.discovery_attempted=true;
          const int symbols_before=ArraySize(io_state.symbols);
@@ -2769,22 +2975,25 @@ public:
          g_ea1_last_discovery_symbols=ArraySize(io_state.symbols);
          g_ea1_last_discovery_elapsed_ms=(long)io_state.discovery_elapsed_ms;
 
-         if(discovery_ok)
+         if(!discovery_ok)
            {
-            io_state.discovery_status_reason="success";
-            g_ea1_last_discovery_error="";
-           }
-         else
-           {
+            io_state.runtime_state=EA1_STATE_DISCOVERY;
             io_state.discovery_status_reason="empty_discovery";
             g_ea1_last_discovery_error=io_state.discovery_status_reason;
+            return false;
            }
+
+         io_state.discovery_status_reason="success";
+         g_ea1_last_discovery_error="";
+         io_state.runtime_state=EA1_STATE_HYDRATING;
+         PrepareHydrationQueue(io_state,max_symbols);
+         BuildHydrationUniverse(io_state);
         }
       else
         {
          io_state.discovery_skipped=true;
          io_state.discovery_skip_streak++;
-         io_state.discovery_status_reason="cadence_same_minute";
+         io_state.discovery_status_reason=(io_state.runtime_state==EA1_STATE_HYDRATING?"hydration_in_progress":"ready");
 
          g_ea1_last_discovery_attempted=false;
          g_ea1_last_discovery_skipped=true;
@@ -2793,15 +3002,10 @@ public:
          g_ea1_last_skip_log_minute=current_minute;
         }
 
-      if(max_symbols>0 && ArraySize(io_state.symbols)>max_symbols)
-         ArrayResize(io_state.symbols,max_symbols);
-
-      BuildIdentityPhase(io_state);
-      CanonicalizeDeterministicOrder(io_state);
-      BuildRuntimePhase(io_state);
-      BuildClassificationPhase(io_state);
-      BuildTradeabilityPhase(io_state);
-      BuildGateAndContinuityPhase(io_state);
+      if(io_state.runtime_state==EA1_STATE_HYDRATING)
+         RunHydrationCycle(io_state);
+      else if(io_state.runtime_state==EA1_STATE_READY && io_state.sequence_no<=0)
+         HydrationRebuildUniverseMetrics(io_state);
 
       io_state.sequence_no++;
       io_state.dump_sequence_no=io_state.sequence_no;
@@ -2818,6 +3022,9 @@ public:
                             string &out_debug_snapshot_json)
      {
       io_state.scheduler.phase_id=ISSX_EA1_MapToRuntimePhase(issx_ea1_phase_publish);
+      if(!io_state.hydration_complete || io_state.runtime_state!=EA1_STATE_READY)
+         return false;
+
       out_stage_json=BuildStageSummaryJson(io_state);
       out_debug_snapshot_json=BuildDebugSnapshotJson(io_state,firm_id,writer_boot_id,writer_nonce);
 
@@ -2868,6 +3075,10 @@ public:
       j.NameInt("discovery_elapsed_ms",state.discovery_elapsed_ms);
       j.NameInt("discovery_skip_streak",state.discovery_skip_streak);
       j.NameString("discovery_status_reason",state.discovery_status_reason);
+      j.NameString("ea1_runtime_state",ISSX_EA1_RuntimeStateText(state.runtime_state));
+      j.NameInt("hydration_processed",state.hydration_processed);
+      j.NameInt("hydration_total",state.hydration_total);
+      j.NameBool("hydration_complete",state.hydration_complete);
       j.NameBool("deterministic_sort_applied",state.deterministic_sort_applied);
       j.NameInt("deterministic_sorted_count",state.deterministic_sorted_count);
       j.NameString("deterministic_sort_basis",state.deterministic_sort_basis);

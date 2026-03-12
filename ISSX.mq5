@@ -1,5 +1,5 @@
 ﻿#property strict
-#property version   "1.712"
+#property version   "1.713"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
@@ -17,7 +17,8 @@
 
 input string InpFirmId                  = "default_firm";
 input bool   InpIncludeCustomSymbols    = false;
-input int    InpEA1MaxSymbols           = 0;
+input int    InpEA1MaxSymbols           = 300;
+input int    InpEA1HydrationBatchSize   = 25;
 input bool   InpEA2DeepProfileDefault   = true;
 input int    InpEA2MaxSymbolsPerSlice   = 128;
 input bool   InpProjectStageStatusRoot  = true;
@@ -471,7 +472,7 @@ bool ISSX_ProjectEA1(const string stage_json,
 
    const bool stage_json_ok=(StringLen(stage_json)>2);
    const bool debug_json_ok=(StringLen(debug_snapshot_json)>2);
-   const bool universe_json_ok=(StringLen(broker_dump_json)>2);
+   const bool universe_json_ok=(StringLen(broker_dump_json)>2 || g_ea1.hydration_complete);
 
    g_last_ea1_stage_json_state=(stage_json_ok?"success":"failed");
    g_last_ea1_debug_json_state=(debug_json_ok?"success":"failed");
@@ -504,8 +505,18 @@ bool ISSX_ProjectEA1(const string stage_json,
    g_debug.Write((stage_write_ok?"INFO":"ERROR"),"ea1_publish",(stage_write_ok?"publish_internal_write_ok":"publish_internal_write_fail"),
                  "path="+ISSX_PersistencePath::PayloadCurrent(g_firm_id,issx_stage_ea1)+" reason="+(stage_write_ok?"ok":"persist_stage_json_failed"));
 
-   const bool universe_rotate_ok=ISSX_BrokerUniverseDump::RotateCurrentToPrevious(g_firm_id);
-   const bool universe_write_ok=ISSX_BrokerUniverseDump::WriteCurrent(g_firm_id,broker_dump_json,manifest,true);
+   bool universe_rotate_ok=true;
+   bool universe_write_ok=true;
+   string universe_current_path=ISSX_Util::JoinPath(ISSX_PersistencePath::UniverseDir(g_firm_id),ISSX_BIN_BROKER_UNIVERSE_CURRENT);
+   if(StringLen(broker_dump_json)>2)
+     {
+      universe_rotate_ok=ISSX_BrokerUniverseDump::RotateCurrentToPrevious(g_firm_id);
+      universe_write_ok=ISSX_BrokerUniverseDump::WriteCurrent(g_firm_id,broker_dump_json,manifest,true);
+     }
+   else
+     {
+      universe_write_ok=ISSX_FileIO::Exists(universe_current_path);
+     }
    g_last_ea1_universe_write_state=((universe_rotate_ok && universe_write_ok)?"success":"failed");
 
    bool debug_write_ok=true;
@@ -515,8 +526,13 @@ bool ISSX_ProjectEA1(const string stage_json,
 
    g_debug.Write("INFO","ea1_publish","publish_operator_market_write_start","path="+g_market_json_relative_path+" bytes="+IntegerToString(StringLen(broker_dump_json)));
    ResetLastError();
-   const bool operator_json_ok=ISSX_FileIO::WriteText(g_market_json_relative_path,broker_dump_json);
-   const int operator_json_err=GetLastError();
+   bool operator_json_ok=false;
+   int operator_json_err=0;
+   if(StringLen(broker_dump_json)>2)
+      operator_json_ok=ISSX_FileIO::WriteText(g_market_json_relative_path,broker_dump_json);
+   else
+      operator_json_ok=ISSX_FileIO::CopyText(universe_current_path,g_market_json_relative_path);
+   operator_json_err=GetLastError();
    g_last_ea1_root_status_state=(operator_json_ok?"success":"failed");
    g_debug.Write((operator_json_ok?"INFO":"ERROR"),"ea1_publish",(operator_json_ok?"publish_operator_market_write_ok":"publish_operator_market_write_fail"),
                  "path="+g_market_json_relative_path+" bytes="+IntegerToString(StringLen(broker_dump_json))+" last_error="+IntegerToString(operator_json_err));
@@ -768,10 +784,18 @@ void ISSX_UpdateHUD()
    if(server_time<=0)
       server_time=TimeCurrent();
 
-   string hud="ISSX Market HUD | v1.712 | pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count)+"\n";
+   string hud="ISSX Market HUD | v1.713 | pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count)+"\n";
    hud+="Broker="+g_operator_broker_name+" | Server="+g_operator_server_name+"\n";
    hud+="Kernel="+g_last_kernel_result+" ("+g_last_kernel_reason+") ms="+IntegerToString((int)g_last_kernel_elapsed_ms)+"\n";
-   hud+="Market="+g_last_ea1_stage_run+" reason="+g_last_ea1_stage_reason+" discovered="+IntegerToString(g_ea1.universe.broker_universe)+" publishable="+IntegerToString(g_ea1.universe.publishable_universe)+"\n";
+
+   string market_state="READY";
+   if(g_ea1.runtime_state==EA1_STATE_DISCOVERY)
+      market_state="DISCOVERY";
+   else if(g_ea1.runtime_state==EA1_STATE_HYDRATING)
+      market_state="HYDRATING";
+
+   hud+="Market="+market_state+" reason="+g_last_ea1_stage_reason+" discovered="+IntegerToString(g_ea1.universe.broker_universe)+" publishable="+IntegerToString(g_ea1.universe.publishable_universe)+"\n";
+   hud+="symbols processed: "+IntegerToString(g_ea1.hydration_processed)+" / "+IntegerToString(g_ea1.hydration_total)+"\n";
    hud+="Discovery="+g_ea1.discovery_status_reason+" publish="+g_last_ea1_publish_state+"/"+g_last_ea1_publish_reason+"\n";
    hud+="Writes json="+g_last_ea1_root_status_state+" log="+g_last_ea1_root_debug_state+" internal="+g_last_ea1_stage_write_state+"\n";
    hud+="Files: "+g_market_json_file_name+" | "+g_market_log_file_name+"\n";
@@ -889,6 +913,7 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
    g_debug.Write("INFO","stage_init","ea1_market","success");
    g_debug.Write("INFO","ea1","stage_slice","enter");
    ea1_stage_ran=true;
+   g_ea1.hydration_batch_size=MathMax(1,InpEA1HydrationBatchSize);
    if(!ISSX_MarketEngine::StageSlice(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,InpEA1MaxSymbols))
      {
       g_debug.Write("INFO","stage_run","ea1_market","failed");
@@ -905,6 +930,21 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
 
 
    g_debug.Write("INFO","ea1","stage_slice_ok","symbols="+IntegerToString(ArraySize(g_ea1.symbols)));
+
+   if(g_ea1.discovery_attempted)
+      g_debug.Write("INFO","ea1_hydration","ea1_hydration_queue_created","total="+IntegerToString(g_ea1.hydration_total)+" batch="+IntegerToString(g_ea1.hydration_batch_size));
+
+   if(g_ea1.runtime_state==EA1_STATE_HYDRATING)
+     {
+      g_debug.Write("INFO","ea1_hydration","ea1_hydration_cycle_start","cursor="+IntegerToString(g_ea1.hydration_cursor)+" total="+IntegerToString(g_ea1.hydration_total));
+      if(g_ea1.hydration_last_symbol_start!="")
+         g_debug.Write("INFO","ea1_hydration","ea1_hydration_symbol_start","symbol="+g_ea1.hydration_last_symbol_start);
+      if(g_ea1.hydration_last_symbol_done!="")
+         g_debug.Write("INFO","ea1_hydration","ea1_hydration_symbol_done","symbol="+g_ea1.hydration_last_symbol_done);
+      g_debug.Write("INFO","ea1_hydration","ea1_hydration_progress","processed="+IntegerToString(g_ea1.hydration_processed)+" total="+IntegerToString(g_ea1.hydration_total)+" remaining="+IntegerToString(MathMax(0,g_ea1.hydration_total-g_ea1.hydration_processed)));
+     }
+   else if(g_ea1.hydration_complete)
+      g_debug.Write("INFO","ea1_hydration","ea1_hydration_complete","processed="+IntegerToString(g_ea1.hydration_processed)+" total="+IntegerToString(g_ea1.hydration_total));
 
    if(g_ea1.discovery_attempted)
      {
@@ -979,29 +1019,34 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
    g_last_kernel_reason="ea1_ran";
 
    g_debug.Write("INFO","ea1","stage_publish","start");
-   g_debug.Write("INFO","ea1_publish","publish_enter","checkpoint=publish_enter");
-   g_debug.Write("INFO","ea1_publish","publish_build_stage_json_start","checkpoint=publish_build_stage_json_start");
-   const bool stage_publish_ok=ISSX_MarketEngine::StagePublish(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,stage_json,debug_json);
-   g_debug.Write((stage_publish_ok?"INFO":"ERROR"),"ea1_publish",(stage_publish_ok?"publish_build_stage_json_ok":"publish_build_stage_json_fail"),
-                 "len="+IntegerToString(StringLen(stage_json))+" reason="+(stage_publish_ok?"ok":"stage_publish_returned_false"));
-   g_debug.Write("INFO","ea1_publish","publish_build_debug_json_start","checkpoint=publish_build_debug_json_start");
-   const bool debug_json_ok=(StringLen(debug_json)>2);
-   g_debug.Write((debug_json_ok?"INFO":"ERROR"),"ea1_publish",(debug_json_ok?"publish_build_debug_json_ok":"publish_build_debug_json_fail"),
-                 "len="+IntegerToString(StringLen(debug_json))+" reason="+(debug_json_ok?"ok":"debug_json_too_small"));
-   g_debug.Write("INFO","ea1_publish","publish_build_market_dump_start","checkpoint=publish_build_market_dump_start");
-   const bool universe_build_ok=ISSX_MarketEngine::BuildUniverseDump(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,broker_dump_json);
-   g_debug.Write((universe_build_ok?"INFO":"ERROR"),"ea1_publish",(universe_build_ok?"publish_build_market_dump_ok":"publish_build_market_dump_fail"),
-                 "len="+IntegerToString(StringLen(broker_dump_json))+" reason="+(universe_build_ok?"ok":"universe_dump_build_failed"));
-   string ea1_publish_reason="ok";
-   bool publish_ok=false;
-   if(stage_publish_ok && universe_build_ok)
-      publish_ok=ISSX_ProjectEA1(stage_json,broker_dump_json,debug_json,ea1_publish_reason);
-   else
-      ea1_publish_reason=(stage_publish_ok?"market_universe_dump_build_failed":"stage_publish_build_failed");
-
-   if(!publish_ok)
+   if(!g_ea1.hydration_complete)
      {
-      g_debug.Write("WARN","ea1_publish","degraded","reason="+ea1_publish_reason+" stage_json="+(stage_publish_ok?"ok":"fail")+" universe="+(universe_build_ok?"ok":"fail"));
+      g_debug.Write("INFO","ea1_publish","publish_skip_hydration","reason=hydration_not_complete processed="+IntegerToString(g_ea1.hydration_processed)+" total="+IntegerToString(g_ea1.hydration_total));
+      g_last_ea1_publish_state="skipped";
+      g_last_ea1_publish_reason="hydration_not_complete";
+     }
+   else
+     {
+      g_debug.Write("INFO","ea1_publish","publish_enter","checkpoint=publish_enter");
+      g_debug.Write("INFO","ea1_publish","publish_build_stage_json_start","checkpoint=publish_build_stage_json_start");
+      const bool stage_publish_ok=ISSX_MarketEngine::StagePublish(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,stage_json,debug_json);
+      g_debug.Write((stage_publish_ok?"INFO":"ERROR"),"ea1_publish",(stage_publish_ok?"publish_build_stage_json_ok":"publish_build_stage_json_fail"),
+                    "len="+IntegerToString(StringLen(stage_json))+" reason="+(stage_publish_ok?"ok":"stage_publish_returned_false"));
+      g_debug.Write("INFO","ea1_publish","publish_build_debug_json_start","checkpoint=publish_build_debug_json_start");
+      const bool debug_json_ok=(StringLen(debug_json)>2);
+      g_debug.Write((debug_json_ok?"INFO":"ERROR"),"ea1_publish",(debug_json_ok?"publish_build_debug_json_ok":"publish_build_debug_json_fail"),
+                    "len="+IntegerToString(StringLen(debug_json))+" reason="+(debug_json_ok?"ok":"debug_json_too_small"));
+
+      string ea1_publish_reason="ok";
+      bool publish_ok=false;
+      if(stage_publish_ok)
+         publish_ok=ISSX_ProjectEA1(stage_json,"",debug_json,ea1_publish_reason);
+      else
+         ea1_publish_reason="stage_publish_build_failed";
+
+      if(!publish_ok)
+     {
+      g_debug.Write("WARN","ea1_publish","degraded","reason="+ea1_publish_reason+" stage_json="+(stage_publish_ok?"ok":"fail"));
       if(ea1_stage_result=="success")
          ea1_stage_result="degraded";
       if(ea1_stage_reason=="ready")
@@ -1011,6 +1056,7 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       g_debug.Write("INFO","stage_run","ea1_market",ea1_stage_result);
       g_debug.Write("INFO","stage_reason","ea1_market",ea1_stage_reason);
      }
+   }
 
    string ea1_symbols[];
    const int ea1_count=ISSX_CopyEA1Symbols(ea1_symbols);
@@ -1265,7 +1311,6 @@ void OnDeinit(const int reason)
    g_last_deinit_reason_text=ISSX_DeinitReasonText(reason);
    g_debug.Write("INFO","lifecycle","ondeinit","reason="+IntegerToString(reason)+" reason_text="+g_last_deinit_reason_text+" last_checkpoint="+g_last_checkpoint+" self_remove=false");
    g_debug.Close(reason,"last_checkpoint="+g_last_checkpoint+" file_mode="+g_debug.ActiveMode()+" file_path="+g_debug.ActivePath());
-   Comment("");
   }
 
 void OnTimer()
