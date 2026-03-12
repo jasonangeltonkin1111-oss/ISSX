@@ -7,7 +7,7 @@
 #include <ISSX/issx_persistence.mqh>
 
 // ============================================================================
-// ISSX MARKET ENGINE v1.704
+// ISSX MARKET ENGINE v1.705
 // EA1 shared engine for MarketStateCore.
 //
 // HARDENING NOTES
@@ -24,7 +24,7 @@
 //   owner runtime/persistence layer
 // ============================================================================
 
-#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.704"
+#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.705"
 
 // ============================================================================
 // SECTION 01: EA1 PHASE IDS
@@ -75,7 +75,7 @@ enum ISSX_EA1_SessionPhase
    issx_ea1_session_rollover
   };
 
-// Legacy owner-side bridge for pre-v1.704 EA1 session labels.
+// Legacy owner-side bridge for pre-v1.705 EA1 session labels.
 #define issx_ea1_session_preopen    issx_ea1_session_pre_open
 #define issx_ea1_session_transition issx_ea1_session_rollover
 
@@ -974,6 +974,15 @@ public:
 class ISSX_MarketEngine
   {
 private:
+   static int  m_last_discovery_minute;
+   static int  m_last_skip_log_minute;
+   static bool m_last_discovery_attempted;
+   static bool m_last_discovery_skipped;
+   static bool m_last_discovery_no_change;
+   static int  m_last_discovery_symbols;
+   static long m_last_discovery_elapsed_ms;
+   static string m_last_discovery_error;
+
    static string SafeUpper(const string s)
      {
       string r=s;
@@ -2450,6 +2459,14 @@ public:
       return (out_json!="");
      }
 
+public:
+   static bool LastDiscoveryAttempted() { return m_last_discovery_attempted; }
+   static bool LastDiscoverySkippedCadence() { return m_last_discovery_skipped; }
+   static bool LastDiscoveryNoChange() { return m_last_discovery_no_change; }
+   static int  LastDiscoverySymbols() { return m_last_discovery_symbols; }
+   static long LastDiscoveryElapsedMs() { return m_last_discovery_elapsed_ms; }
+   static string LastDiscoveryError() { return m_last_discovery_error; }
+
    static bool StageBoot(ISSX_EA1_State &io_state)
      {
       InitState(io_state);
@@ -2460,6 +2477,15 @@ public:
       io_state.discovery_minute_id=-1;
       io_state.resumed_from_persistence=false;
       io_state.stage_publishability_state="not_ready";
+
+      m_last_discovery_minute=-1;
+      m_last_skip_log_minute=-1;
+      m_last_discovery_attempted=false;
+      m_last_discovery_skipped=false;
+      m_last_discovery_no_change=false;
+      m_last_discovery_symbols=ArraySize(io_state.symbols);
+      m_last_discovery_elapsed_ms=0;
+      m_last_discovery_error="";
       return true;
      }
 
@@ -2482,13 +2508,38 @@ public:
                           const string writer_nonce,
                           const int max_symbols=0)
      {
-      io_state.minute_id=(int)(TimeCurrent()/60);
+      int current_minute=(int)(TimeCurrent()/60);
+      io_state.minute_id=current_minute;
 
-      const bool discovery_due=(io_state.sequence_no<=0 || io_state.discovery_minute_id!=io_state.minute_id);
-      if(discovery_due)
+      m_last_discovery_attempted=false;
+      m_last_discovery_skipped=false;
+      m_last_discovery_no_change=false;
+      m_last_discovery_elapsed_ms=0;
+      m_last_discovery_error="";
+
+      if(m_last_discovery_minute==current_minute)
         {
+         if(m_last_skip_log_minute!=current_minute)
+           {
+            m_last_discovery_skipped=true;
+            m_last_skip_log_minute=current_minute;
+           }
+        }
+      else
+        {
+         m_last_discovery_attempted=true;
+         int symbols_before=ArraySize(io_state.symbols);
+         ulong t0=GetTickCount();
          RefreshDiscoveryOnly(io_state);
-         io_state.discovery_minute_id=io_state.minute_id;
+         ulong elapsed_tick=(GetTickCount()-t0);
+         m_last_discovery_elapsed_ms=(long)elapsed_tick;
+         m_last_discovery_symbols=ArraySize(io_state.symbols);
+         m_last_discovery_no_change=(symbols_before==m_last_discovery_symbols);
+         m_last_discovery_minute=current_minute;
+         io_state.discovery_minute_id=current_minute;
+         m_last_skip_log_minute=-1;
+         if(m_last_discovery_symbols<=0)
+            m_last_discovery_error="no_symbols_discovered";
         }
 
       if(max_symbols>0 && ArraySize(io_state.symbols)>max_symbols)
@@ -2613,6 +2664,15 @@ public:
   };
 
 
+
+int ISSX_MarketEngine::m_last_discovery_minute=-1;
+int ISSX_MarketEngine::m_last_skip_log_minute=-1;
+bool ISSX_MarketEngine::m_last_discovery_attempted=false;
+bool ISSX_MarketEngine::m_last_discovery_skipped=false;
+bool ISSX_MarketEngine::m_last_discovery_no_change=false;
+int ISSX_MarketEngine::m_last_discovery_symbols=0;
+long ISSX_MarketEngine::m_last_discovery_elapsed_ms=0;
+string ISSX_MarketEngine::m_last_discovery_error="";
 
 string ISSX_MarketDiagTag()
   {
