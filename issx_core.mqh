@@ -510,7 +510,7 @@ enum ISSX_PublishabilityState
    issx_publishability_strong          = 6
   };
 
-// Legacy compatibility bridge for pre-v1.714 shared labels.
+// Legacy compatibility bridge for pre-v1.718 shared labels.
 // Shared compatibility aliases remain core-owned only.
 #define issx_publishability_publishable       issx_publishability_usable
 #define issx_publishability_degraded          issx_publishability_usable_degraded
@@ -1161,7 +1161,7 @@ enum ISSX_ThresholdBehavior
 
 // -----------------------------------------------------------------------------
 // Legacy compatibility aliases required by downstream stage files still using
-// pre-v1.714 shared names.
+// pre-v1.718 shared names.
 // -----------------------------------------------------------------------------
 
 // Compatibility-class legacy aliases

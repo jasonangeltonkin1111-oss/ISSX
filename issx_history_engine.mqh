@@ -1,4 +1,4 @@
-#ifndef __ISSX_HISTORY_ENGINE_MQH__
+﻿#ifndef __ISSX_HISTORY_ENGINE_MQH__
 #define __ISSX_HISTORY_ENGINE_MQH__
 
 #include <ISSX/issx_core.mqh>
