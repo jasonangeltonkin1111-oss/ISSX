@@ -1,11 +1,12 @@
 ﻿#property strict
-#property version   "1.713"
+#property version   "1.714"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
 #include <ISSX/issx_registry.mqh>
 #include <ISSX/issx_runtime.mqh>
 #include <ISSX/issx_persistence.mqh>
+#include <ISSX/issx_data_handler.mqh>
 #include <ISSX/issx_market_engine.mqh>
 #include <ISSX/issx_history_engine.mqh>
 #include <ISSX/issx_selection_engine.mqh>
@@ -784,7 +785,7 @@ void ISSX_UpdateHUD()
    if(server_time<=0)
       server_time=TimeCurrent();
 
-   string hud="ISSX Market HUD | v1.713 | pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count)+"\n";
+   string hud="ISSX Market HUD | v1.714 | pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count)+"\n";
    hud+="Broker="+g_operator_broker_name+" | Server="+g_operator_server_name+"\n";
    hud+="Kernel="+g_last_kernel_result+" ("+g_last_kernel_reason+") ms="+IntegerToString((int)g_last_kernel_elapsed_ms)+"\n";
 
