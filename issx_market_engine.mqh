@@ -7,7 +7,7 @@
 #include <ISSX/issx_persistence.mqh>
 
 // ============================================================================
-// ISSX MARKET ENGINE v1.710
+// ISSX MARKET ENGINE v1.711
 // EA1 shared engine for MarketStateCore.
 //
 // HARDENING NOTES
@@ -24,7 +24,7 @@
 //   owner runtime/persistence layer
 // ============================================================================
 
-#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.710"
+#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.711"
 
 // ============================================================================
 // SECTION 01: EA1 PHASE IDS
@@ -141,6 +141,10 @@ struct ISSX_EA1_RawBrokerObservation
    string   symbol_raw;
    string   path;
    string   description;
+   string   exchange;
+   string   country;
+   long     sector;
+   long     industry;
    long     trade_mode;
    long     calc_mode;
    int      digits;
@@ -187,6 +191,10 @@ struct ISSX_EA1_RawBrokerObservation
       symbol_raw="";
       path="";
       description="";
+      exchange="";
+      country="";
+      sector=-1;
+      industry=-1;
       trade_mode=0;
       calc_mode=0;
       digits=0;
@@ -397,6 +405,17 @@ struct ISSX_EA1_ClassificationTruth
    double                   taxonomy_change_severity;
    bool                     native_sector_present;
    bool                     native_industry_present;
+   string                   native_exchange;
+   string                   native_country;
+   string                   native_sector;
+   string                   native_industry;
+   string                   derived_sector;
+   string                   derived_industry;
+   string                   final_sector;
+   string                   final_industry;
+   string                   final_subsector;
+   string                   symbol_family;
+   string                   conflict_reason;
    double                   native_taxonomy_quality;
    bool                     native_vs_manual_conflict;
    bool                     classification_hard_block;
@@ -422,6 +441,17 @@ struct ISSX_EA1_ClassificationTruth
       taxonomy_change_severity=0.0;
       native_sector_present=false;
       native_industry_present=false;
+      native_exchange="";
+      native_country="";
+      native_sector="Unknown";
+      native_industry="Unknown";
+      derived_sector="Unknown";
+      derived_industry="Unknown";
+      final_sector="Unknown";
+      final_industry="Unknown";
+      final_subsector="Unknown";
+      symbol_family="Unknown";
+      conflict_reason="none";
       native_taxonomy_quality=0.0;
       native_vs_manual_conflict=false;
       classification_hard_block=false;
@@ -836,135 +866,98 @@ private:
       return r;
      }
 
-   static void SetTheme(ISSX_EA1_ClassificationTruth &out_cls,
+   static bool IsFxCode(const string c)
+     {
+      string u=c;
+      StringToUpper(u);
+      return (u=="EUR" || u=="USD" || u=="GBP" || u=="JPY" || u=="AUD" || u=="NZD" || u=="CAD" || u=="CHF" || u=="NOK" || u=="SEK" || u=="SGD" || u=="HKD" || u=="ZAR" || u=="CNH");
+     }
+
+   static string NormalizeOperatorSector(const string s)
+     {
+      string n=Normalize(s);
+      if(ContainsLower(n,"technology")) return "Technology";
+      if(ContainsLower(n,"communication")) return "Communication Services";
+      if(ContainsLower(n,"consumer cyc")) return "Consumer Cyclical";
+      if(ContainsLower(n,"consumer def")) return "Consumer Defensive";
+      if(ContainsLower(n,"energy")) return "Energy";
+      if(ContainsLower(n,"financial")) return "Financial";
+      if(ContainsLower(n,"health")) return "Healthcare";
+      if(ContainsLower(n,"industrial")) return "Industrials";
+      if(ContainsLower(n,"real estate")) return "Real Estate";
+      if(ContainsLower(n,"utilities")) return "Utilities";
+      if(ContainsLower(n,"basic material")) return "Basic Materials";
+      if(ContainsLower(n,"currency")) return "Currency";
+      if(ContainsLower(n,"crypto")) return "Crypto Currency";
+      if(ContainsLower(n,"index")) return "Index";
+      if(ContainsLower(n,"commodity") || ContainsLower(n,"metal")) return "Commodities";
+      return "Unknown";
+     }
+
+   static void SetClass(ISSX_EA1_ClassificationTruth &out_cls,
                         const string asset_class,
                         const string family,
                         const string bucket,
                         const string sector,
-                        const ISSX_LeaderBucketType bucket_type,
-                        const double confidence,
-                        const string source)
+                        const string industry,
+                        const string subsector,
+                        const string source,
+                        const double confidence)
      {
       out_cls.asset_class=asset_class;
       out_cls.instrument_family=family;
       out_cls.theme_bucket=bucket;
-      out_cls.equity_sector=sector;
-      out_cls.leader_bucket_id=(bucket_type==issx_leader_bucket_equity_sector ? sector : bucket);
-      out_cls.leader_bucket_type=bucket_type;
+      out_cls.equity_sector=(sector=="Unknown"?"na":ISSX_Util::Lower(sector));
+      out_cls.classification_source=source;
       out_cls.classification_confidence=confidence;
       out_cls.classification_reliability_score=confidence;
-      out_cls.classification_source=source;
-      out_cls.bucket_publishable=(bucket!="other" || sector!="na");
       out_cls.taxonomy_action_taken=(confidence>=0.60 ? issx_taxonomy_accepted : issx_taxonomy_theme_downgrade);
       out_cls.classification_hard_block=false;
+      out_cls.bucket_publishable=(sector!="Unknown");
+      out_cls.derived_sector=sector;
+      out_cls.derived_industry=industry;
+      out_cls.final_sector=sector;
+      out_cls.final_industry=industry;
+      out_cls.final_subsector=subsector;
+      out_cls.symbol_family=family;
+      out_cls.leader_bucket_type=issx_leader_bucket_theme_bucket;
+      out_cls.leader_bucket_id=(sector!="Unknown"?sector:bucket);
      }
-   static void CopySymbolStateArray(const ISSX_EA1_SymbolState &src[],ISSX_EA1_SymbolState &dst[])
+
+   static void DeriveFromHeuristics(const string blob,const string normalized_symbol,ISSX_EA1_ClassificationTruth &out_cls)
      {
-      const int n=ArraySize(src);
-      ArrayResize(dst,n);
-      for(int i=0;i<n;i++)
-         dst[i]=src[i];
-     }
-public:
-   static void Classify(const string raw_symbol,
-                        const string normalized_symbol,
-                        const string canonical_root,
-                        const string description,
-                        const string path,
-                        ISSX_EA1_ClassificationTruth &out_cls)
-     {
-      out_cls.Reset();
-
-      string blob=Normalize(raw_symbol+" "+normalized_symbol+" "+canonical_root+" "+description+" "+path);
-
-      if(ContainsLower(blob,"xau") || ContainsLower(blob,"gold"))
-        {
-         SetTheme(out_cls,"commodity","metal","metals","na",issx_leader_bucket_theme_bucket,0.95,"rule_metal");
-         return;
-        }
-
+      if(ContainsLower(blob,"xau") || ContainsLower(blob,"g au") || ContainsLower(blob,"gold"))
+        { SetClass(out_cls,"commodity","metal","commodities","Commodities","Precious Metals","Gold","heuristic_precious_metal",0.95); return; }
       if(ContainsLower(blob,"xag") || ContainsLower(blob,"silver"))
+        { SetClass(out_cls,"commodity","metal","commodities","Commodities","Precious Metals","Silver","heuristic_precious_metal",0.94); return; }
+      if(ContainsLower(blob,"xpt") || ContainsLower(blob,"platinum"))
+        { SetClass(out_cls,"commodity","metal","commodities","Commodities","Precious Metals","Platinum","heuristic_precious_metal",0.93); return; }
+      if(ContainsLower(blob,"xpd") || ContainsLower(blob,"palladium"))
+        { SetClass(out_cls,"commodity","metal","commodities","Commodities","Precious Metals","Palladium","heuristic_precious_metal",0.93); return; }
+      if(ContainsLower(blob,"xal") || ContainsLower(blob,"aluminium") || ContainsLower(blob,"aluminum"))
+        { SetClass(out_cls,"commodity","industrial_metal","commodities","Basic Materials","Industrial Metals","Aluminum","heuristic_industrial_metal",0.90); return; }
+
+      if(ContainsLower(blob,"btc") || ContainsLower(blob,"eth") || ContainsLower(blob,"xrp") || ContainsLower(blob,"sol") || ContainsLower(blob,"ada") || ContainsLower(blob,"doge") || ContainsLower(blob,"ltc"))
         {
-         SetTheme(out_cls,"commodity","metal","metals","na",issx_leader_bucket_theme_bucket,0.93,"rule_metal");
+         string ss="Major Crypto";
+         if(ContainsLower(blob,"doge")) ss="Meme Coin";
+         else if(ContainsLower(blob,"xrp") || ContainsLower(blob,"ltc")) ss="Payments Crypto";
+         else if(ContainsLower(blob,"sol") || ContainsLower(blob,"ada") || ContainsLower(blob,"eth")) ss="Layer1";
+         SetClass(out_cls,"crypto","crypto_spot","crypto","Crypto Currency","Crypto Spot",ss,"heuristic_crypto",0.93);
          return;
         }
 
-      if(ContainsLower(blob,"us30") || ContainsLower(blob,"dow") || ContainsLower(blob,"wall street"))
+      if(ContainsLower(blob,"us30") || ContainsLower(blob,"dj30") || ContainsLower(blob,"ws30") || ContainsLower(blob,"nas100") || ContainsLower(blob,"ustec") || ContainsLower(blob,"us100") || ContainsLower(blob,"spx500") || ContainsLower(blob,"us500") || ContainsLower(blob,"spx") || ContainsLower(blob,"ger40") || ContainsLower(blob,"dax") || ContainsLower(blob,"de40") || ContainsLower(blob,"uk100") || ContainsLower(blob,"jp225") || ContainsLower(blob,"hk50"))
         {
-         SetTheme(out_cls,"index","equity_index","indices","na",issx_leader_bucket_theme_bucket,0.92,"rule_index");
+         string sub="US Equity Index";
+         if(ContainsLower(blob,"ger") || ContainsLower(blob,"dax") || ContainsLower(blob,"de40") || ContainsLower(blob,"uk100")) sub="EU Equity Index";
+         if(ContainsLower(blob,"jp225") || ContainsLower(blob,"hk50")) sub="Asia Equity Index";
+         SetClass(out_cls,"index","equity_index","index","Index","Equity Index",sub,"heuristic_index",0.90);
          return;
         }
 
-      if(ContainsLower(blob,"nas100") || ContainsLower(blob,"nasdaq") || ContainsLower(blob,"ustec"))
-        {
-         SetTheme(out_cls,"index","equity_index","indices","na",issx_leader_bucket_theme_bucket,0.92,"rule_index");
-         return;
-        }
-
-      if(ContainsLower(blob,"spx") || ContainsLower(blob,"sp500") || ContainsLower(blob,"us500"))
-        {
-         SetTheme(out_cls,"index","equity_index","indices","na",issx_leader_bucket_theme_bucket,0.92,"rule_index");
-         return;
-        }
-      if(ContainsLower(blob,"cash") || ContainsLower(blob,"us30cash") || ContainsLower(blob,"ger30cash") || ContainsLower(blob,"aus200cash"))
-        {
-         SetTheme(out_cls,"index","equity_index","indices","na",issx_leader_bucket_theme_bucket,0.90,"rule_index_cash");
-         return;
-        }
-
-      if(ContainsLower(blob,".oq") || ContainsLower(blob,"nasdaq") || ContainsLower(blob,"apple") || ContainsLower(blob,"google") || ContainsLower(blob,"meta"))
-        {
-         SetTheme(out_cls,"equity","single_stock","equities","technology",issx_leader_bucket_equity_sector,0.81,"rule_equity_oq");
-         return;
-        }
-
-      if(ContainsLower(blob,"ger40") || ContainsLower(blob,"dax"))
-        {
-         SetTheme(out_cls,"index","equity_index","indices","na",issx_leader_bucket_theme_bucket,0.89,"rule_index");
-         return;
-        }
-
-      if(ContainsLower(blob,"uk100") || ContainsLower(blob,"ftse"))
-        {
-         SetTheme(out_cls,"index","equity_index","indices","na",issx_leader_bucket_theme_bucket,0.88,"rule_index");
-         return;
-        }
-
-      if(ContainsLower(blob,"nikkei") || ContainsLower(blob,"jp225"))
-        {
-         SetTheme(out_cls,"index","equity_index","indices","na",issx_leader_bucket_theme_bucket,0.88,"rule_index");
-         return;
-        }
-
-      if(ContainsLower(blob,"btc") || ContainsLower(blob,"bitcoin"))
-        {
-         SetTheme(out_cls,"crypto","crypto_spot","crypto","na",issx_leader_bucket_theme_bucket,0.95,"rule_crypto");
-         return;
-        }
-
-      if(ContainsLower(blob,"eth") || ContainsLower(blob,"ethereum"))
-        {
-         SetTheme(out_cls,"crypto","crypto_spot","crypto","na",issx_leader_bucket_theme_bucket,0.92,"rule_crypto");
-         return;
-        }
-
-      if(ContainsLower(blob,"brent") || ContainsLower(blob,"ukoil") || ContainsLower(blob,"xbrusd"))
-        {
-         SetTheme(out_cls,"commodity","energy","energy","na",issx_leader_bucket_theme_bucket,0.90,"rule_energy");
-         return;
-        }
-
-      if(ContainsLower(blob,"wti") || ContainsLower(blob,"usoil") || ContainsLower(blob,"xtiusd"))
-        {
-         SetTheme(out_cls,"commodity","energy","energy","na",issx_leader_bucket_theme_bucket,0.90,"rule_energy");
-         return;
-        }
-
-      if(ContainsLower(blob,"jpn225") || ContainsLower(blob,"hk50") || ContainsLower(blob,"china") || ContainsLower(blob,"hsi"))
-        {
-         SetTheme(out_cls,"index","equity_index","indices","na",issx_leader_bucket_theme_bucket,0.84,"rule_index");
-         return;
-        }
+      if(ContainsLower(blob,"brent") || ContainsLower(blob,"wti") || ContainsLower(blob,"usoil") || ContainsLower(blob,"ukoil") || ContainsLower(blob,"xbrusd") || ContainsLower(blob,"xtiusd"))
+        { SetClass(out_cls,"commodity","energy","energy","Energy","Oil","Crude Oil","heuristic_energy",0.90); return; }
 
       string s=normalized_symbol;
       StringToUpper(s);
@@ -972,29 +965,69 @@ public:
         {
          string a=StringSubstr(s,0,3);
          string b=StringSubstr(s,3,3);
-
-         bool a_ok=(a=="EUR" || a=="USD" || a=="GBP" || a=="JPY" || a=="AUD" || a=="NZD" || a=="CAD" || a=="CHF" || a=="NOK" || a=="SEK" || a=="SGD" || a=="HKD" || a=="ZAR");
-         bool b_ok=(b=="EUR" || b=="USD" || b=="GBP" || b=="JPY" || b=="AUD" || b=="NZD" || b=="CAD" || b=="CHF" || b=="NOK" || b=="SEK" || b=="SGD" || b=="HKD" || b=="ZAR");
-
-         if(a_ok && b_ok)
+         if(IsFxCode(a) && IsFxCode(b))
            {
-            SetTheme(out_cls,"fx","spot_fx","fx","na",issx_leader_bucket_theme_bucket,0.86,"rule_fx");
+            string sub=((a=="USD" || b=="USD")?"Major FX":"Cross FX");
+            SetClass(out_cls,"fx","spot_fx","currency","Currency","Foreign Exchange",sub,"heuristic_fx",0.87);
             return;
            }
         }
 
-      out_cls.asset_class="unknown";
-      out_cls.instrument_family="unknown";
-      out_cls.theme_bucket="other";
-      out_cls.equity_sector="na";
-      out_cls.leader_bucket_id="other";
-      out_cls.leader_bucket_type=issx_leader_bucket_theme_bucket;
-      out_cls.classification_source="fallback_other";
-      out_cls.classification_confidence=0.30;
-      out_cls.classification_reliability_score=0.30;
-      out_cls.taxonomy_action_taken=issx_taxonomy_theme_downgrade;
-      out_cls.bucket_publishable=false;
-      out_cls.classification_hard_block=false;
+      SetClass(out_cls,"unknown","unknown","other","Unknown","Unknown","Unknown","fallback_unknown",0.25);
+     }
+
+public:
+   static void Classify(const ISSX_EA1_RawBrokerObservation &obs,
+                        const string normalized_symbol,
+                        const string canonical_root,
+                        ISSX_EA1_ClassificationTruth &out_cls)
+     {
+      out_cls.Reset();
+      string native_sector_text=NormalizeOperatorSector(EnumToString((ENUM_SYMBOL_SECTOR)obs.sector));
+      string native_industry_text=EnumToString((ENUM_SYMBOL_INDUSTRY)obs.industry);
+      if(obs.sector<0 || native_sector_text=="Unknown")
+         native_sector_text="Unknown";
+      if(obs.industry<0)
+         native_industry_text="Unknown";
+
+      out_cls.native_exchange=obs.exchange;
+      out_cls.native_country=obs.country;
+      out_cls.native_sector=native_sector_text;
+      out_cls.native_industry=native_industry_text;
+      out_cls.native_sector_present=(native_sector_text!="Unknown");
+      out_cls.native_industry_present=(native_industry_text!="Unknown");
+      out_cls.native_taxonomy_quality=(out_cls.native_sector_present?0.75:0.0)+(out_cls.native_industry_present?0.20:0.0);
+
+      string blob=Normalize(obs.symbol_raw+" "+normalized_symbol+" "+canonical_root+" "+obs.description+" "+obs.path+" "+obs.base_currency+" "+obs.profit_currency+" "+obs.quote_currency);
+      DeriveFromHeuristics(blob,normalized_symbol,out_cls);
+
+      if(out_cls.native_sector_present)
+        {
+         out_cls.final_sector=out_cls.native_sector;
+         out_cls.classification_source="native";
+         out_cls.classification_confidence=MathMax(out_cls.classification_confidence,0.82);
+         out_cls.classification_reliability_score=MathMax(out_cls.classification_reliability_score,0.80);
+         out_cls.taxonomy_action_taken=issx_taxonomy_accepted;
+        }
+
+      if(out_cls.native_sector_present && out_cls.native_sector=="Currency" && (ContainsLower(blob,"xal") || ContainsLower(blob,"aluminium") || ContainsLower(blob,"aluminum") || ContainsLower(blob,"xau") || ContainsLower(blob,"xag") || ContainsLower(blob,"xpt") || ContainsLower(blob,"xpd") || ContainsLower(blob,"g au")))
+        {
+         out_cls.native_vs_manual_conflict=true;
+         out_cls.taxonomy_conflict_scope="sector";
+         out_cls.conflict_reason="native_currency_conflicts_with_metal_identity";
+         out_cls.final_sector=out_cls.derived_sector;
+         out_cls.final_industry=out_cls.derived_industry;
+         out_cls.classification_source="native_overridden_by_heuristic";
+         out_cls.classification_confidence=MathMax(out_cls.classification_confidence,0.90);
+         out_cls.classification_reliability_score=MathMax(out_cls.classification_reliability_score,0.88);
+         out_cls.taxonomy_action_taken=issx_taxonomy_recovered_with_heuristics;
+        }
+
+      out_cls.equity_sector=(out_cls.final_sector=="Technology"?"technology":"na");
+      out_cls.leader_bucket_id=out_cls.final_sector;
+      if(out_cls.final_sector=="Technology")
+         out_cls.leader_bucket_type=issx_leader_bucket_equity_sector;
+      out_cls.bucket_publishable=(out_cls.final_sector!="Unknown");
      }
   };
 
@@ -1199,6 +1232,10 @@ private:
       out_obs.symbol_raw=symbol;
       out_obs.path=SafeSymbolString(symbol,SYMBOL_PATH,"");
       out_obs.description=SafeSymbolString(symbol,SYMBOL_DESCRIPTION,"");
+      out_obs.exchange=SafeSymbolString(symbol,SYMBOL_EXCHANGE,"");
+      out_obs.country="";
+      out_obs.sector=SafeSymbolLong(symbol,SYMBOL_SECTOR,-1);
+      out_obs.industry=SafeSymbolLong(symbol,SYMBOL_INDUSTRY,-1);
       out_obs.trade_mode=SafeSymbolLong(symbol,SYMBOL_TRADE_MODE,0);
       out_obs.calc_mode=SafeSymbolLong(symbol,SYMBOL_TRADE_CALC_MODE,0);
       out_obs.digits=SafeSymbolInt(symbol,SYMBOL_DIGITS,0);
@@ -1880,6 +1917,10 @@ io_symbol.rankability_gate.contradiction_count=0;
       j.NameString("symbol_raw",o.symbol_raw);
       j.NameString("path",o.path);
       j.NameString("description",o.description);
+      j.NameString("exchange",o.exchange);
+      j.NameString("country",o.country);
+      j.NameLong("native_sector_id",o.sector);
+      j.NameLong("native_industry_id",o.industry);
       j.NameLong("trade_mode",o.trade_mode);
       j.NameLong("calc_mode",o.calc_mode);
       j.NameInt("digits",o.digits);
@@ -2015,8 +2056,19 @@ io_symbol.rankability_gate.contradiction_count=0;
       j.NameDouble("taxonomy_change_severity",cls.taxonomy_change_severity,4);
       j.NameBool("native_sector_present",cls.native_sector_present);
       j.NameBool("native_industry_present",cls.native_industry_present);
+      j.NameString("native_exchange",cls.native_exchange);
+      j.NameString("native_country",cls.native_country);
+      j.NameString("native_sector",cls.native_sector);
+      j.NameString("native_industry",cls.native_industry);
+      j.NameString("derived_sector",cls.derived_sector);
+      j.NameString("derived_industry",cls.derived_industry);
+      j.NameString("final_sector",cls.final_sector);
+      j.NameString("final_industry",cls.final_industry);
+      j.NameString("final_subsector",cls.final_subsector);
+      j.NameString("symbol_family",cls.symbol_family);
       j.NameDouble("native_taxonomy_quality",cls.native_taxonomy_quality,4);
       j.NameBool("native_vs_manual_conflict",cls.native_vs_manual_conflict);
+      j.NameString("conflict_reason",cls.conflict_reason);
       j.NameBool("classification_hard_block",cls.classification_hard_block);
       j.NameBool("bucket_publishable",cls.bucket_publishable);
       j.NameString("taxonomy_hash",cls.taxonomy_hash);
@@ -2100,6 +2152,15 @@ io_symbol.rankability_gate.contradiction_count=0;
       j.NameString("owner_module_name",life.owner_module_name);
       j.NameString("owner_module_hash",life.owner_module_hash);
       j.EndObject();
+     }
+
+   static int CountFinalIndustry(const ISSX_EA1_SymbolState &symbols[],const string industry)
+     {
+      int c=0;
+      for(int i=0;i<ArraySize(symbols);i++)
+         if(symbols[i].classification_truth.final_industry==industry)
+            c++;
+      return c;
      }
 
    static string BuildUniverseDumpJson(const ISSX_EA1_State &state,
@@ -2201,7 +2262,8 @@ io_symbol.rankability_gate.contradiction_count=0;
       j.EndObject();
 
       int asset_unknown=0,asset_fx=0,asset_index=0,asset_crypto=0,asset_commodity=0,asset_equity=0;
-      int sector_na=0,sector_tech=0,sector_other=0;
+      int sector_unknown=0,sector_currency=0,sector_crypto=0,sector_index=0,sector_commodities=0,sector_energy=0,sector_basic_materials=0,sector_technology=0;
+      int native_accepted=0,heuristic_only=0,native_overridden=0,conflict_count=0,weak_confidence_count=0;
 
       j.BeginNamedArray("symbols");
       for(int i=0;i<ArraySize(state.symbols);i++)
@@ -2214,10 +2276,27 @@ io_symbol.rankability_gate.contradiction_count=0;
          else if(ac=="equity") asset_equity++;
          else asset_unknown++;
 
-         string sec=state.symbols[i].classification_truth.equity_sector;
-         if(sec=="na") sector_na++;
-         else if(sec=="technology") sector_tech++;
-         else sector_other++;
+         string sec=state.symbols[i].classification_truth.final_sector;
+         if(sec=="Currency") sector_currency++;
+         else if(sec=="Crypto Currency") sector_crypto++;
+         else if(sec=="Index") sector_index++;
+         else if(sec=="Commodities") sector_commodities++;
+         else if(sec=="Energy") sector_energy++;
+         else if(sec=="Basic Materials") sector_basic_materials++;
+         else if(sec=="Technology") sector_technology++;
+         else sector_unknown++;
+
+         if(state.symbols[i].classification_truth.classification_source=="native")
+            native_accepted++;
+         else if(state.symbols[i].classification_truth.classification_source=="native_overridden_by_heuristic")
+            native_overridden++;
+         else
+            heuristic_only++;
+
+         if(state.symbols[i].classification_truth.native_vs_manual_conflict)
+            conflict_count++;
+         if(state.symbols[i].classification_truth.classification_confidence<0.60)
+            weak_confidence_count++;
          j.BeginObject();
          j.NameInt("symbol_id",state.symbols[i].symbol_id);
          j.NameString("symbol_fingerprint",state.symbols[i].symbol_fingerprint);
@@ -2242,9 +2321,22 @@ io_symbol.rankability_gate.contradiction_count=0;
       j.NameInt("asset_class_commodity",asset_commodity);
       j.NameInt("asset_class_equity",asset_equity);
       j.NameInt("asset_class_unknown",asset_unknown);
-      j.NameInt("equity_sector_technology",sector_tech);
-      j.NameInt("equity_sector_na",sector_na);
-      j.NameInt("equity_sector_other",sector_other);
+      j.NameInt("sector_currency",sector_currency);
+      j.NameInt("sector_crypto_currency",sector_crypto);
+      j.NameInt("sector_index",sector_index);
+      j.NameInt("sector_commodities",sector_commodities);
+      j.NameInt("sector_energy",sector_energy);
+      j.NameInt("sector_basic_materials",sector_basic_materials);
+      j.NameInt("sector_technology",sector_technology);
+      j.NameInt("sector_unknown",sector_unknown);
+      j.NameInt("industry_precious_metals_count",CountFinalIndustry(state.symbols,"Precious Metals"));
+      j.NameInt("industry_foreign_exchange_count",CountFinalIndustry(state.symbols,"Foreign Exchange"));
+      j.NameInt("unknown_count",sector_unknown);
+      j.NameInt("native_accepted_count",native_accepted);
+      j.NameInt("heuristic_only_count",heuristic_only);
+      j.NameInt("native_overridden_count",native_overridden);
+      j.NameInt("conflict_count",conflict_count);
+      j.NameInt("weak_confidence_count",weak_confidence_count);
       j.EndObject();
 
       j.EndObject();
@@ -2467,11 +2559,9 @@ public:
       io_state.scheduler.phase_id=ISSX_EA1_MapToRuntimePhase(issx_ea1_phase_classify_symbols_delta_first);
       for(int i=0;i<ArraySize(io_state.symbols);i++)
         {
-         ISSX_MarketTaxonomy::Classify(io_state.symbols[i].raw_broker_observation.symbol_raw,
+         ISSX_MarketTaxonomy::Classify(io_state.symbols[i].raw_broker_observation,
                                        io_state.symbols[i].normalized_identity.symbol_norm,
                                        io_state.symbols[i].normalized_identity.canonical_root,
-                                       io_state.symbols[i].raw_broker_observation.description,
-                                       io_state.symbols[i].raw_broker_observation.path,
                                        io_state.symbols[i].classification_truth);
         }
      }
