@@ -4,7 +4,7 @@
 #include <ISSX/issx_core.mqh>
 
 // ============================================================================
-// ISSX RUNTIME v1.712
+// ISSX RUNTIME v1.714
 // Canonical runtime owner for scheduler / timer-lossiness / budgets / fairness /
 // resumable phase state in the single-wrapper five-stage ISSX architecture.
 //
@@ -1607,7 +1607,7 @@ public:
 
 string ISSX_RuntimeDiagTag()
   {
-   return "runtime_diag_v172f";
+   return "runtime_diag_v174f";
   }
 
 

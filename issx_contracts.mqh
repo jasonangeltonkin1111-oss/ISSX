@@ -1832,7 +1832,7 @@ public:
 
 string ISSX_ContractsDiagTag()
   {
-   return "contracts_diag_v172f";
+   return "contracts_diag_v174f";
   }
 
 

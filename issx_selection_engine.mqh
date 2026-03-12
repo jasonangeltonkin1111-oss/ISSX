@@ -9,7 +9,7 @@
 #include <ISSX/issx_history_engine.mqh>
 
 // ============================================================================
-// ISSX SELECTION ENGINE v1.712
+// ISSX SELECTION ENGINE v1.714
 // EA3 shared engine for SelectionCore.
 //
 // BLUEPRINT ALIGNMENT NOTES
@@ -23,7 +23,7 @@
 // - degraded / unknown semantics remain explicit
 // ============================================================================
 
-#define ISSX_SELECTION_ENGINE_MODULE_VERSION "1.712"
+#define ISSX_SELECTION_ENGINE_MODULE_VERSION "1.714"
 #define ISSX_SELECTION_ENGINE_STAGE_API_VERSION "ea3_stage_api_v1"
 #define ISSX_SELECTION_ENGINE_SERIALIZER_VERSION "ea3_json_v1"
 
@@ -2340,7 +2340,7 @@ public:
 
 string ISSX_SelectionDiagTag()
   {
-   return "selection_diag_v172f";
+   return "selection_diag_v174f";
   }
 
 
