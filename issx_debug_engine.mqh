@@ -5,7 +5,7 @@
 
 #define ISSX_DEBUG_EXPORT_ROOT_REL "ISSX"
 
-// ISSX DEBUG ENGINE v1.722
+// ISSX DEBUG ENGINE v1.723
 
 #define ISSX_DEBUG_STAGE_COUNT 5
 
@@ -42,12 +42,23 @@ private:
    string m_terminal_data_path;
    string m_terminal_common_data_path;
    long   m_write_count;
+   long   m_sample_count;
    string m_active_mode;
    string m_active_path;
    long   m_stage_exec_count[ISSX_DEBUG_STAGE_COUNT];
    long   m_stage_exec_total_ms[ISSX_DEBUG_STAGE_COUNT];
    long   m_stage_exec_max_ms[ISSX_DEBUG_STAGE_COUNT];
    long   m_category_error_count[6];
+
+   void CloseHandleIfOpen()
+     {
+      if(m_file_handle!=INVALID_HANDLE)
+        {
+         FileFlush(m_file_handle);
+         FileClose(m_file_handle);
+         m_file_handle=INVALID_HANDLE;
+        }
+     }
 
    string BuildTimestamp() const
      {
@@ -103,6 +114,7 @@ public:
 
    void Reset()
      {
+      CloseHandleIfOpen();
       m_ready=false;
       m_file_handle=INVALID_HANDLE;
       m_session_id="";
@@ -110,6 +122,7 @@ public:
       m_terminal_data_path="";
       m_terminal_common_data_path="";
       m_write_count=0;
+      m_sample_count=0;
       m_active_mode="inactive";
       m_active_path="";
       ArrayInitialize(m_stage_exec_count,0);
@@ -175,6 +188,7 @@ public:
         }
 
       m_write_count=0;
+      m_sample_count=0;
       m_ready=true;
       PrintWithLevel("INFO","Debug session started mode="+m_active_mode+" path="+m_active_path+
                      " terminal_data="+m_terminal_data_path+" terminal_common="+m_terminal_common_data_path);
@@ -224,12 +238,7 @@ public:
             " mode="+m_active_mode+
             " path="+m_active_path);
 
-      if(m_file_handle!=INVALID_HANDLE)
-        {
-         FileFlush(m_file_handle);
-         FileClose(m_file_handle);
-         m_file_handle=INVALID_HANDLE;
-        }
+      CloseHandleIfOpen();
 
       m_ready=false;
       m_active_mode="closed";
@@ -270,7 +279,8 @@ public:
          Write(level,area,event_name,detail);
          return;
         }
-      if((m_write_count%sample_every)==0)
+      m_sample_count++;
+      if((m_sample_count%sample_every)==0)
          Write(level,area,event_name,detail);
      }
 
