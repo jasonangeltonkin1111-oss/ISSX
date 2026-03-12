@@ -1,5 +1,5 @@
 #property strict
-#property version   "1.728"
+#property version   "1.729"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
@@ -1013,7 +1013,6 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
    ISSX_SetCheckpoint("ea1_stage_slice_enter");
    g_telemetry.StageStart(issx_telemetry_stage_ea1_market);
    g_debug.Write("INFO","ea1","stage_slice","enter");
-   ea1_stage_ran=true;
    g_ea1.hydration_batch_size=MathMax(1,Config.GetInt("ea1_hydration_batch"));
    if(!g_scheduler.RunStage("ea1_market",10))
      {
@@ -1026,6 +1025,7 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       return true;
      }
    const ulong ea1_stage_start_us=(ulong)GetMicrosecondCount();
+   ea1_stage_ran=true;
    if(!ISSX_MarketEngine::StageSlice(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,Config.GetInt("ea1_max_symbols")))
      {
       g_debug.Write("INFO","stage_run","ea1_market","failed");
@@ -1481,7 +1481,15 @@ int OnInit()
                  " persistence_root="+ISSX_PersistencePath::SharedDir(g_firm_id)+
                  " debug_sink="+g_debug.ActivePath());
 
-   ISSX_LogGateSnapshot();
+  ISSX_LogGateSnapshot();
+
+   if(!Config.IsValid())
+     {
+      const string invalid_reason="config_validation_failed";
+      g_debug.Write("ERROR","startup","config_invalid",invalid_reason);
+      g_debug.Write("ERROR","lifecycle","oninit_end","result=INIT_FAILED reason="+invalid_reason);
+      return INIT_FAILED;
+     }
 
    if(g_ea_enabled[0] && (!eff_timer_heavy || !eff_ui_projection))
      {
@@ -1538,6 +1546,8 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    EventKillTimer();
+   g_runtime_ready=false;
+   g_bootstrapped=false;
    if(g_menu_initialized)
      {
       g_menu.Destroy();
