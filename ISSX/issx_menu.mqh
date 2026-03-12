@@ -7,6 +7,7 @@ class ISSX_MenuEngine
   {
 private:
    string m_prefix;
+   string m_last_error;
 
    string Obj(const string key) const
      {
@@ -53,12 +54,16 @@ public:
    void Init(const string unique_prefix)
      {
       m_prefix=unique_prefix;
+      m_last_error="";
      }
 
    bool Build(const bool &enabled[])
      {
       if(StringLen(m_prefix)==0)
+        {
+         m_last_error="menu_prefix_missing";
          return false;
+        }
 
       CreateLabel(Obj("TITLE"),12,10,"ISSX 5-EA Control",clrAqua,10);
       for(int i=0;i<ISSX_MENU_ROWS;i++)
@@ -75,19 +80,28 @@ public:
       return true;
      }
 
-   bool HandleClick(const string object_name,bool &enabled[])
+   bool HandleClick(const string object_name,bool &enabled[],const bool allow_toggle=true)
      {
+      m_last_error="";
       for(int i=0;i<ISSX_MENU_ROWS;i++)
         {
          string row=IntegerToString(i+1);
          if(object_name==Obj("TOGGLE_"+row))
            {
+            if(!allow_toggle)
+              {
+               m_last_error="isolation_mode_locked";
+               return false;
+              }
             enabled[i]=!enabled[i];
             return true;
            }
         }
+      m_last_error="object_not_owned";
       return false;
      }
+
+   string LastError() const { return m_last_error; }
 
    void Destroy()
      {
