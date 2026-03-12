@@ -8,7 +8,7 @@
 #include <ISSX/issx_data_handler.mqh>
 
 // ============================================================================
-// ISSX MARKET ENGINE v1.722
+// ISSX MARKET ENGINE v1.728
 // EA1 shared engine for MarketStateCore.
 //
 // HARDENING NOTES
@@ -25,7 +25,7 @@
 //   owner runtime/persistence layer
 // ============================================================================
 
-#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.727"
+#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.728"
 #define ISSX_EA1_PUBLISH_STAGE_JSON_MAX_BYTES     262144
 #define ISSX_EA1_PUBLISH_DEBUG_JSON_MAX_BYTES     524288
 #define ISSX_EA1_PUBLISH_UNIVERSE_JSON_MAX_BYTES  6291456
@@ -1124,6 +1124,16 @@ class ISSX_MarketEngine
   {
 private:
    static int m_last_discovery_minute;
+
+public:
+   // Compatibility bridge for call sites that still reference owner-scoped
+   // RuntimeStateText(). Canonical mapping is ISSX_EA1_RuntimeStateText().
+   static string RuntimeStateText(const ISSX_EA1_RuntimeState state)
+     {
+      return ISSX_EA1_RuntimeStateText(state);
+     }
+
+private:
 
    static string SafeUpper(const string s)
      {
