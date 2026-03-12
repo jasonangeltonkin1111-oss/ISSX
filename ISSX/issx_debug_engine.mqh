@@ -3,7 +3,7 @@
 
 #define ISSX_DEBUG_EXPORT_ROOT_REL "ISSX\\debug_reports"
 
-// ISSX DEBUG ENGINE v1.705
+// ISSX DEBUG ENGINE v1.707
 
 class ISSX_DebugEngine
   {
