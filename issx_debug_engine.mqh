@@ -1,9 +1,9 @@
 #ifndef __ISSX_DEBUG_ENGINE_MQH__
 #define __ISSX_DEBUG_ENGINE_MQH__
 
-#define ISSX_DEBUG_EXPORT_ROOT_REL "ISSX\\debug_reports"
+#define ISSX_DEBUG_EXPORT_ROOT_REL "ISSX"
 
-// ISSX DEBUG ENGINE v1.711
+// ISSX DEBUG ENGINE v1.712
 
 class ISSX_DebugEngine
   {
@@ -61,7 +61,7 @@ private:
 
    string CommonRelativeName() const
      {
-      return ISSX_DEBUG_EXPORT_ROOT_REL+"\\"+m_file_name;
+      return m_file_name;
      }
 
 public:
@@ -90,12 +90,25 @@ public:
       m_terminal_common_data_path=TerminalInfoString(TERMINAL_COMMONDATA_PATH);
 
       m_session_id=BuildTimestamp()+"_"+IntegerToString((int)ChartID())+"_"+IntegerToString((int)GetTickCount());
-      m_file_name=(ISSX_Util::IsEmpty(operator_log_file_name) ? "Market_Unknown_Server.log" : operator_log_file_name);
+      m_file_name=(ISSX_Util::IsEmpty(operator_log_file_name) ? "ISSX/Market_Unknown_Server.log" : operator_log_file_name);
 
       const string common_rel=CommonRelativeName();
       const string local_rel=common_rel;
 
-      EnsureFolderTree(ISSX_DEBUG_EXPORT_ROOT_REL,true);
+      string common_folder=common_rel;
+      int slash_pos=StringFind(common_folder,"/",0);
+      int last_slash=-1;
+      while(slash_pos>=0)
+        {
+         last_slash=slash_pos;
+         slash_pos=StringFind(common_folder,"/",slash_pos+1);
+        }
+      if(last_slash>0)
+         common_folder=StringSubstr(common_folder,0,last_slash);
+      else
+         common_folder=ISSX_DEBUG_EXPORT_ROOT_REL;
+
+      EnsureFolderTree(common_folder,true);
       ResetLastError();
       m_file_handle=FileOpen(common_rel,FILE_WRITE|FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
       if(m_file_handle!=INVALID_HANDLE)
@@ -108,7 +121,7 @@ public:
          const int common_err=GetLastError();
          PrintWithLevel("WARN","Common FileOpen failed err="+IntegerToString(common_err)+" rel="+common_rel);
 
-         EnsureFolderTree(ISSX_DEBUG_EXPORT_ROOT_REL,false);
+         EnsureFolderTree(common_folder,false);
          ResetLastError();
          m_file_handle=FileOpen(local_rel,FILE_WRITE|FILE_READ|FILE_TXT|FILE_ANSI|FILE_SHARE_READ|FILE_SHARE_WRITE);
          if(m_file_handle!=INVALID_HANDLE)

@@ -7,7 +7,7 @@
 #include <ISSX/issx_persistence.mqh>
 
 // ============================================================================
-// ISSX MARKET ENGINE v1.711
+// ISSX MARKET ENGINE v1.712
 // EA1 shared engine for MarketStateCore.
 //
 // HARDENING NOTES
@@ -24,7 +24,7 @@
 //   owner runtime/persistence layer
 // ============================================================================
 
-#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.711"
+#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.712"
 
 // ============================================================================
 // SECTION 01: EA1 PHASE IDS
