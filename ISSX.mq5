@@ -115,6 +115,7 @@ string              g_market_log_file_name         = "";
 string              g_market_json_relative_path    = "";
 string              g_market_log_relative_path     = "";
 string              g_operator_root_relative       = "ISSX";
+string              g_startup_profile           = "unknown";
 
 #define ISSX_HUD_OBJECT_NAME "ISSX_HUD"
 
@@ -948,25 +949,25 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
    g_last_ea1_stage_reason=ea1_stage_reason;
    g_last_ea1_stage_elapsed_ms=g_ea1.discovery_elapsed_ms;
 
-   string ea1_stage_status="success";
-   string ea1_stage_reason="discovery_success";
+   string ea1_stage_status_detail="success";
+   string ea1_stage_reason_detail="discovery_success";
    if(g_ea1.discovery_skipped)
      {
-      ea1_stage_status="skipped";
-      ea1_stage_reason=g_ea1.discovery_status_reason;
+      ea1_stage_status_detail="skipped";
+      ea1_stage_reason_detail=g_ea1.discovery_status_reason;
      }
    else if(!g_ea1.discovery_success)
      {
-      ea1_stage_status="failed";
-      ea1_stage_reason=g_ea1.discovery_status_reason;
+      ea1_stage_status_detail="failed";
+      ea1_stage_reason_detail=g_ea1.discovery_status_reason;
      }
    else if(g_ea1.counters.degraded_count>0 || g_ea1.counters.accepted_degraded_count>0)
      {
-      ea1_stage_status="degraded";
-      ea1_stage_reason="accepted_degraded_or_exploratory";
+      ea1_stage_status_detail="degraded";
+      ea1_stage_reason_detail="accepted_degraded_or_exploratory";
      }
-   g_debug.Write("INFO","stage_run","ea1_market",ea1_stage_status);
-   g_debug.Write("INFO","stage_reason","ea1_market",ea1_stage_reason+" elapsed_ms="+IntegerToString(g_ea1.discovery_elapsed_ms));
+   g_debug.Write("INFO","stage_run","ea1_market",ea1_stage_status_detail);
+   g_debug.Write("INFO","stage_reason","ea1_market",ea1_stage_reason_detail+" elapsed_ms="+IntegerToString(g_ea1.discovery_elapsed_ms));
    g_debug.Write("INFO","stage_elapsed_ms","ea1_market","value="+IntegerToString(g_ea1.discovery_elapsed_ms));
 
    if(ArraySize(g_ea1.symbols)<=0)
