@@ -1,4 +1,4 @@
-﻿#ifndef __ISSX_CORE_MQH__
+#ifndef __ISSX_CORE_MQH__
 #define __ISSX_CORE_MQH__
 // ============================================================================
 // ISSX CORE v1.723
@@ -21,7 +21,7 @@
 
 #define ISSX_ENGINE_NAME                              "ISSX"
 #define ISSX_ENGINE_FAMILY                            "ISSX_PIPELINE"
-#define ISSX_ENGINE_VERSION                           "1.730"
+#define ISSX_ENGINE_VERSION                           "1.732"
 #define ISSX_SCHEMA_VERSION                           "1.718"
 #define ISSX_SCHEMA_EPOCH                             10702
 #define ISSX_STORAGE_VERSION                          1721

@@ -1,4 +1,4 @@
-﻿#ifndef __ISSX_PERSISTENCE_MQH__
+#ifndef __ISSX_PERSISTENCE_MQH__
 #define __ISSX_PERSISTENCE_MQH__
 
 #include <ISSX/issx_core.mqh>
@@ -6,7 +6,7 @@
 #include <ISSX/issx_data_handler.mqh>
 
 // ============================================================================
-// ISSX PERSISTENCE v1.730
+// ISSX PERSISTENCE v1.732
 // Blueprint-aligned persistence / handoff / fallback / warehouse / lock helpers.
 // Authoritative truth remains: accepted internal current + coherent manifest chain.
 // ============================================================================

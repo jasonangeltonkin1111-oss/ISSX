@@ -1,4 +1,4 @@
-﻿#ifndef __ISSX_CORRELATION_ENGINE_MQH__
+#ifndef __ISSX_CORRELATION_ENGINE_MQH__
 #define __ISSX_CORRELATION_ENGINE_MQH__
 
 #include <ISSX/issx_core.mqh>
@@ -43,7 +43,7 @@
 // - same-tick handoff is never implied here; upstream accepted truth only
 // ============================================================================
 
-#define ISSX_CORRELATION_ENGINE_MODULE_VERSION "1.730"
+#define ISSX_CORRELATION_ENGINE_MODULE_VERSION "1.732"
 #define ISSX_CORRELATION_ENGINE_STAGE_API_VERSION "1.0"
 #define ISSX_EA4_PAIR_CACHE_MAX_AGE_MINUTES    30
 #define ISSX_EA4_FRONTIER_HARD_LIMIT           64

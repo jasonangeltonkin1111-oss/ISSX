@@ -1,4 +1,4 @@
-﻿#ifndef __ISSX_SELECTION_ENGINE_MQH__
+#ifndef __ISSX_SELECTION_ENGINE_MQH__
 #define __ISSX_SELECTION_ENGINE_MQH__
 
 #include <ISSX/issx_core.mqh>
@@ -23,7 +23,7 @@
 // - degraded / unknown semantics remain explicit
 // ============================================================================
 
-#define ISSX_SELECTION_ENGINE_MODULE_VERSION "1.730"
+#define ISSX_SELECTION_ENGINE_MODULE_VERSION "1.732"
 #define ISSX_SELECTION_ENGINE_STAGE_API_VERSION "ea3_stage_api_v1"
 #define ISSX_SELECTION_ENGINE_SERIALIZER_VERSION "ea3_json_v1"
 
