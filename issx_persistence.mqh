@@ -6,7 +6,7 @@
 #include <ISSX/issx_data_handler.mqh>
 
 // ============================================================================
-// ISSX PERSISTENCE v1.722
+// ISSX PERSISTENCE v1.723
 // Blueprint-aligned persistence / handoff / fallback / warehouse / lock helpers.
 // Authoritative truth remains: accepted internal current + coherent manifest chain.
 // ============================================================================
@@ -227,7 +227,24 @@ private:
          pos=p;
          p=StringFind(path,ISSX_PATH_SEP,p+1);
         }
-      return pos;
+     return pos;
+     }
+
+   static bool IsSafeRelativePath(const string relative_path)
+     {
+      if(ISSX_Util::IsEmpty(relative_path))
+         return false;
+
+      if(StringSubstr(relative_path,0,1)=="/" || StringSubstr(relative_path,0,1)=="\\")
+         return false;
+
+      if(StringFind(relative_path,":",0)>=0)
+         return false;
+
+      if(StringFind(relative_path,"..",0)>=0)
+         return false;
+
+      return true;
      }
 
 public:
@@ -267,6 +284,9 @@ public:
 
    static bool WriteTextAtomic(const string relative_path,const string text)
      {
+      if(!IsSafeRelativePath(relative_path))
+         return false;
+
       if(!EnsureParentFolder(relative_path))
          return false;
 
@@ -284,6 +304,9 @@ public:
      {
       out_text="";
 
+      if(!IsSafeRelativePath(relative_path))
+         return false;
+
       ResetLastError();
       const int h=FileOpen(relative_path,
                            FILE_READ|FILE_TXT|FILE_COMMON|FILE_ANSI,
@@ -299,7 +322,8 @@ public:
          return false;
         }
 
-      out_text=FileReadString(h,(int)sz);
+      ResetLastError();
+      out_text=FileReadString(h);
       if(GetLastError()!=0)
         {
          FileClose(h);
@@ -325,6 +349,9 @@ public:
 
    static bool CopyText(const string src,const string dst)
      {
+      if(!IsSafeRelativePath(src) || !IsSafeRelativePath(dst))
+         return false;
+
       if(!EnsureParentFolder(dst))
          return false;
       ISSX_DataHandler::ForensicState fs;
@@ -340,6 +367,9 @@ public:
 
    static bool DeleteIfExists(const string relative_path)
      {
+      if(!IsSafeRelativePath(relative_path))
+         return false;
+
       if(!FileIsExist(relative_path,FILE_COMMON))
          return true;
 
@@ -349,7 +379,18 @@ public:
 
    static bool Exists(const string relative_path)
      {
+      if(!IsSafeRelativePath(relative_path))
+         return false;
+
       return FileIsExist(relative_path,FILE_COMMON);
+     }
+
+   static bool WriteTextIfChanged(const string relative_path,const string text)
+     {
+      string existing="";
+      if(ReadText(relative_path,existing) && existing==text)
+         return true;
+      return WriteText(relative_path,text);
      }
   };
 
@@ -1497,7 +1538,7 @@ class ISSX_RootProjection
 public:
    static bool ProjectRootView(const string firm_id,const string target_file,const string payload_text)
      {
-      return ISSX_FileIO::WriteText(ISSX_PersistencePath::RootFile(firm_id,target_file),payload_text);
+      return ISSX_FileIO::WriteTextIfChanged(ISSX_PersistencePath::RootFile(firm_id,target_file),payload_text);
      }
 
    static bool ProjectFromAccepted(const string firm_id,
@@ -1538,7 +1579,7 @@ public:
       else
          outcome.last_projection_reason="projection_failed";
 
-      return export_ok;
+      return (export_ok && debug_ok && status_ok && universe_ok);
      }
   };
 
@@ -1914,7 +1955,7 @@ public:
 
 string ISSX_PersistenceDiagTag()
   {
-   return "persistence_diag_v174f";
+   return "persistence_diag_v174g";
   }
 
 
