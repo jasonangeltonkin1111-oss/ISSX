@@ -763,17 +763,13 @@ void OnTimer()
 
    g_kernel_busy=true;
 
-   static long timer_count=0;
-   timer_count++;
-
    ISSX_SetCheckpoint("ontimer_enter");
    if(!g_first_timer_logged)
      {
       g_debug.Write("INFO","timer","first_heartbeat","first timer heartbeat reached");
       g_first_timer_logged=true;
      }
-   if((timer_count%15)==1)
-      g_debug.Write("INFO","timer","heartbeat","count="+IntegerToString((int)timer_count)+" first_cycle="+(!g_first_cycle_done?"true":"false"));
+   g_debug.Write("INFO","timer","heartbeat","first_cycle="+(!g_first_cycle_done?"true":"false"));
 
    bool ok=ISSX_RunKernelCycle();
 
