@@ -11,7 +11,7 @@
 #include <ISSX/issx_debug_engine.mqh>
 #include <ISSX/issx_persistence.mqh>
 
-#define ISSX_UI_MODULE_VERSION "1.724"
+#define ISSX_UI_MODULE_VERSION "1.725"
 #define ISSX_UI_DEBUG_MODULE_VERSION ISSX_UI_MODULE_VERSION
 #define ISSX_HUD_PREFIX "ISSX_HUD_"
 #define ISSX_HUD_MAIN_OBJECT "ISSX_HUD_MAIN"
@@ -123,6 +123,11 @@ public:
                const bool gate_menu_engine,
                const bool gate_chart_ui_updates,
                const bool gate_ui_projection,
+               const bool req_runtime_scheduler,
+               const bool req_timer_heavy,
+               const bool req_ui_projection,
+               const bool req_ea1_enabled,
+               const string startup_profile,
                const string scheduler_state,
                const string kernel_result,
                const string kernel_reason,
@@ -139,6 +144,15 @@ public:
                const string ea1_reason,
                const long ea1_elapsed_ms,
                const string ea1_publish_state,
+               const string ea1_publish_reason,
+               const string ea1_stage_json_state,
+               const string ea1_debug_json_state,
+               const string ea1_universe_build_state,
+               const string ea1_stage_write_state,
+               const string ea1_debug_write_state,
+               const string ea1_universe_write_state,
+               const string ea1_root_status_state,
+               const string ea1_root_debug_state,
                const string ea2_run,
                const string ea2_reason,
                const long ea2_elapsed_ms,
@@ -164,14 +178,17 @@ public:
       text+=" server_time="+server_time_text+" timer_pulse="+ISSX_Util::ULongToStringX(timer_pulse)+"\n";
 
       text+="SYSTEM STATE\n";
-      text+=" minimal_debug_mode="+(minimal_debug?"on":"off")+" isolation_mode="+(isolation_mode?"on":"off")+"\n";
-      text+=" runtime_scheduler="+(gate_runtime_scheduler?"on":"off")+" timer_heavy_work="+(gate_timer_heavy?"on":"off")+" tick_heavy_work="+(gate_tick_heavy?"on":"off")+"\n";
-      text+=" menu_engine="+(gate_menu_engine?"on":"off")+" chart_ui_updates="+(gate_chart_ui_updates?"on":"off")+" ui_projection="+(gate_ui_projection?"on":"off")+"\n";
+      text+=" minimal_debug_mode="+(minimal_debug?"on":"off")+" isolation_mode="+(isolation_mode?"on":"off")+" startup_profile="+startup_profile+"\n";
+      text+=" runtime_scheduler=req:"+(req_runtime_scheduler?"on":"off")+" eff:"+(gate_runtime_scheduler?"on":"off")+" timer_heavy_work=req:"+(req_timer_heavy?"on":"off")+" eff:"+(gate_timer_heavy?"on":"off")+"\n";
+      text+=" tick_heavy_work="+(gate_tick_heavy?"on":"off")+" menu_engine="+(gate_menu_engine?"on":"off")+" chart_ui_updates="+(gate_chart_ui_updates?"on":"off")+"\n";
+      text+=" ui_projection=req:"+(req_ui_projection?"on":"off")+" eff:"+(gate_ui_projection?"on":"off")+" ea1_market=req:"+(req_ea1_enabled?"on":"off")+" eff:"+(ea_enabled[0]?"on":"off")+"\n";
       text+=" scheduler="+scheduler_state+" kernel="+kernel_result+" reason="+kernel_reason+" elapsed_ms="+IntegerToString((int)kernel_elapsed_ms)+"\n";
       text+=" boot="+boot_id+" broker="+broker+" server="+server+"\n";
+      if(startup_profile=="invalid_contradictory")
+         text+=" WARNING=invalid_contradictory_profile\n";
 
       text+="STAGE STATES\n";
-      text+=" EA1 Market="+ea1.stage_publishability_state+" | run="+ea1_run+" | reason="+ea1_reason+"\n";
+      text+=" EA1 Market="+ea1.stage_publishability_state+" | run="+ea1_run+" | reason="+ea1_reason+" | elapsed_ms="+IntegerToString((int)ea1_elapsed_ms)+"\n";
       text+=" EA2 History="+ea2.stage_publishability_state+" | run="+ea2_run+" | reason="+ea2_reason+"\n";
       text+=" EA3 Selection="+ISSX_PublishabilityStateToString(ea3.stage_publishability_state)+" | run="+ea3_run+" | reason="+ea3_reason+"\n";
       text+=" EA4 Correlation="+ISSX_PublishabilityStateToString(ea4.stage_publishability_state)+" | run="+ea4_run+" | reason="+ea4_reason+"\n";
@@ -180,7 +197,10 @@ public:
       text+="EA1 DETAIL\n";
       text+=" symbols_discovered="+IntegerToString(ea1.universe.broker_universe)+" active="+IntegerToString(ea1.universe.active_universe)+" publishable="+IntegerToString(ea1.universe.publishable_universe)+"\n";
       text+=" cadence_state="+ea1.discovery_status_reason+" discovery_minute_id="+IntegerToString(ea1.discovery_minute_id)+" last_discovery_elapsed_ms="+IntegerToString(ea1.discovery_elapsed_ms)+"\n";
-      text+=" publish_state="+ea1_publish_state+" publish_checkpoint="+ea1.publish_last_checkpoint+" publish_error="+ea1.publish_last_error+"\n";
+      text+=" hydration_progress="+DoubleToString((ea1.hydration_total>0 ? (double)ea1.hydration_processed/(double)ea1.hydration_total : 0.0),4)+" hydration="+IntegerToString(ea1.hydration_processed)+"/"+IntegerToString(ea1.hydration_total)+"\n";
+      text+=" publish_state="+ea1_publish_state+" reason="+ea1_publish_reason+" checkpoint="+ea1.publish_last_checkpoint+" error="+ea1.publish_last_error+"\n";
+      text+=" build:stage="+ea1_stage_json_state+" debug="+ea1_debug_json_state+" universe="+ea1_universe_build_state+"\n";
+      text+=" write:stage="+ea1_stage_write_state+" debug="+ea1_debug_write_state+" universe="+ea1_universe_write_state+" root_status="+ea1_root_status_state+" root_debug="+ea1_root_debug_state+"\n";
       text+=" projection_state="+last_cycle_status+" fx:create="+IntegerToString(m_fx.objects_created)+" update="+IntegerToString(m_fx.objects_updated)+" skip="+IntegerToString(m_fx.objects_skipped)+"\n";
       const string obj=ObjName(ISSX_HUD_MAIN_OBJECT);
       if(text==m_last_text)
@@ -223,7 +243,7 @@ public:
 // ============================================================================
 
 #ifndef ISSX_UI_MODULE_VERSION
-#define ISSX_UI_MODULE_VERSION                 "1.724"
+#define ISSX_UI_MODULE_VERSION                 "1.725"
 #endif
 #define ISSX_UI_TEST_MODULE_VERSION            ISSX_UI_MODULE_VERSION
 #define ISSX_TRACE_DEFAULT_COOLDOWN_MS         15000

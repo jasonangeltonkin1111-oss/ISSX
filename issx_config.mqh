@@ -3,7 +3,7 @@
 
 #include <ISSX/issx_core.mqh>
 
-#define ISSX_CONFIG_MODULE_VERSION "1.723"
+#define ISSX_CONFIG_MODULE_VERSION "1.725"
 
 // Wrapper inputs (declared in ISSX.mq5)
 #ifndef ISSX_CONFIG_INPUTS_PROVIDED
@@ -197,12 +197,26 @@ private:
       const bool req_chart=GetBool("gate_chart_ui_requested");
       const bool req_ui_projection=GetBool("gate_ui_projection_requested");
 
+      const bool ea1_requested=GetBool("ea1_enabled");
+      const bool isolation=GetBool("isolation_mode");
+      const bool ea1_foundation_profile=(ea1_requested || isolation);
+
       m_snapshot.runtime_scheduler_enabled=(req_runtime && !minimal);
       m_snapshot.timer_heavy_work_enabled=(req_timer && !minimal);
       m_snapshot.tick_heavy_work_enabled=(req_tick && !minimal);
       m_snapshot.menu_engine_enabled=(req_menu && !minimal);
       m_snapshot.chart_ui_updates_enabled=(req_chart && !minimal);
       m_snapshot.ui_projection_enabled=(req_ui_projection && !minimal);
+
+      if(ea1_foundation_profile)
+        {
+         if(!m_snapshot.timer_heavy_work_enabled)
+            Print("ISSX: profile_normalization gate=timer_heavy_work_enabled reason=ea1_foundation_forced_on requested=",(req_timer?"on":"off")," minimal=",(minimal?"on":"off"));
+         if(!m_snapshot.ui_projection_enabled)
+            Print("ISSX: profile_normalization gate=ui_projection_enabled reason=ea1_foundation_forced_on requested=",(req_ui_projection?"on":"off")," minimal=",(minimal?"on":"off"));
+         m_snapshot.timer_heavy_work_enabled=true;
+         m_snapshot.ui_projection_enabled=true;
+        }
 
       SetBool("runtime_scheduler_enabled",m_snapshot.runtime_scheduler_enabled);
       SetBool("timer_heavy_work_enabled",m_snapshot.timer_heavy_work_enabled);

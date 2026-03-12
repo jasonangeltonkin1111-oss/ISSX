@@ -6,7 +6,7 @@
 // Infrastructure-only in-memory telemetry for structured diagnostics.
 // ============================================================================
 
-#define ISSX_TELEMETRY_VERSION         "1.724"
+#define ISSX_TELEMETRY_VERSION         "1.725"
 #define ISSX_TELEMETRY_MAX_EVENTS      256
 #define ISSX_TELEMETRY_STAGE_COUNT     9
 

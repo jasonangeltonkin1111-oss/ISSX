@@ -25,7 +25,7 @@
 //   owner runtime/persistence layer
 // ============================================================================
 
-#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.723"
+#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.725"
 
 enum ISSX_EA1_RuntimeState
   {
@@ -3079,30 +3079,51 @@ public:
       io_state.publish_debug_json_bytes=0;
       io_state.publish_universe_json_bytes=0;
       io_state.publish_elapsed_ms=0;
+      io_state.publish_payload_bytes_attempted=0;
+      io_state.publish_payload_bytes_written=0;
 
       out_stage_json="";
       out_broker_dump_json="";
       out_debug_snapshot_json="";
 
+      io_state.publish_last_checkpoint="publish_preconditions_check";
       if(!io_state.hydration_complete || io_state.runtime_state!=EA1_STATE_READY)
         {
-         io_state.publish_last_checkpoint="publish_gate_blocked";
+         io_state.publish_last_checkpoint="publish_failed";
          io_state.publish_last_error=ISSX_ErrorToString(ISSX_ERR_RUNTIME_LIMIT);
+         io_state.publish_elapsed_ms=(int)(GetTickCount()-t0);
          return false;
         }
 
       ISSX_DataHandler::ForensicState forensic;
       forensic.Reset();
 
-      io_state.publish_last_checkpoint="json_build_start";
-      ISSX_DataHandler::JsonBuildStart(forensic,"json_build_start");
+      io_state.publish_last_checkpoint="publish_build_stage_json_start";
+      ISSX_DataHandler::JsonBuildStart(forensic,"publish_build_stage_json_start");
       out_stage_json=BuildStageSummaryJson(io_state);
       io_state.publish_stage_json_bytes=StringLen(out_stage_json);
-      io_state.publish_payload_bytes_attempted=ISSX_DataHandler::EstimateUtf8Bytes(out_stage_json);
-      io_state.publish_payload_bytes_written=io_state.publish_payload_bytes_attempted;
-      io_state.publish_last_checkpoint="json_stage_payload_ready";
+      if(out_stage_json=="")
+        {
+         io_state.publish_last_checkpoint="publish_build_stage_json_fail";
+         io_state.publish_last_error=ISSX_ErrorToString(ISSX_ERR_JSON_BUILD);
+         io_state.publish_elapsed_ms=(int)(GetTickCount()-t0);
+         return false;
+        }
+      io_state.publish_last_checkpoint="publish_build_stage_json_success";
 
-      io_state.publish_last_checkpoint="json_symbol_serialize_start";
+      io_state.publish_last_checkpoint="publish_build_debug_json_start";
+      out_debug_snapshot_json=BuildDebugSnapshotJson(io_state,firm_id,writer_boot_id,writer_nonce);
+      io_state.publish_debug_json_bytes=StringLen(out_debug_snapshot_json);
+      if(out_debug_snapshot_json=="")
+        {
+         io_state.publish_last_checkpoint="publish_build_debug_json_fail";
+         io_state.publish_last_error=ISSX_ErrorToString(ISSX_ERR_JSON_BUILD);
+         io_state.publish_elapsed_ms=(int)(GetTickCount()-t0);
+         return false;
+        }
+      io_state.publish_last_checkpoint="publish_build_debug_json_success";
+
+      io_state.publish_last_checkpoint="publish_build_universe_dump_start";
       if(ArraySize(io_state.symbols)>0)
         {
          io_state.publish_last_serialized_symbol=io_state.symbols[ArraySize(io_state.symbols)-1].normalized_identity.symbol_norm;
@@ -3110,40 +3131,30 @@ public:
          ISSX_DataHandler::JsonSymbolSerializeComplete(forensic,io_state.publish_last_serialized_symbol);
          io_state.publish_last_successful_symbol=forensic.last_successful_symbol;
         }
-
+      io_state.publish_symbols_serialized=ArraySize(io_state.symbols);
       out_broker_dump_json=BuildUniverseDumpJson(io_state,firm_id,writer_boot_id,writer_nonce);
       io_state.publish_universe_json_bytes=StringLen(out_broker_dump_json);
-      io_state.publish_symbols_serialized=ArraySize(io_state.symbols);
-      io_state.publish_last_checkpoint="json_universe_payload_ready";
-
-      out_debug_snapshot_json=BuildDebugSnapshotJson(io_state,firm_id,writer_boot_id,writer_nonce);
-      io_state.publish_debug_json_bytes=StringLen(out_debug_snapshot_json);
-      io_state.publish_last_checkpoint="json_debug_payload_ready";
-      ISSX_DataHandler::JsonBuildComplete(forensic,out_stage_json,"json_build_complete");
-
-      if(out_stage_json=="")
-        {
-         io_state.publish_last_checkpoint="json_fail";
-         io_state.publish_last_error=ISSX_ErrorToString(ISSX_ERR_JSON_BUILD);
-         return false;
-        }
       if(out_broker_dump_json=="")
         {
-         io_state.publish_last_checkpoint="json_fail";
+         io_state.publish_last_checkpoint="publish_build_universe_dump_fail";
          io_state.publish_last_error=ISSX_ErrorToString(ISSX_ERR_JSON_BUILD);
+         io_state.publish_elapsed_ms=(int)(GetTickCount()-t0);
          return false;
         }
-      if(out_debug_snapshot_json=="")
-        {
-         io_state.publish_last_checkpoint="json_fail";
-         io_state.publish_last_error=ISSX_ErrorToString(ISSX_ERR_JSON_BUILD);
-         return false;
-        }
+      io_state.publish_last_checkpoint="publish_build_universe_dump_success";
 
-      io_state.publish_last_checkpoint="publish_complete";
+      io_state.publish_payload_bytes_attempted=ISSX_DataHandler::EstimateUtf8Bytes(out_stage_json)+
+                                               ISSX_DataHandler::EstimateUtf8Bytes(out_debug_snapshot_json)+
+                                               ISSX_DataHandler::EstimateUtf8Bytes(out_broker_dump_json);
+      io_state.publish_payload_bytes_written=0;
+      io_state.publish_last_checkpoint="publish_payload_sizes";
+      ISSX_DataHandler::JsonBuildComplete(forensic,out_stage_json,"publish_payload_sizes");
+
+      io_state.publish_last_checkpoint="publish_persistence_handoff_start";
       io_state.publish_elapsed_ms=(int)(GetTickCount()-t0);
       return true;
      }
+
 
    static string BuildDebugSnapshotJson(const ISSX_EA1_State &state,
                                         const string firm_id,
