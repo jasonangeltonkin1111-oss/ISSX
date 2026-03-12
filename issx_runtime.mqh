@@ -4,7 +4,7 @@
 #include <ISSX/issx_core.mqh>
 
 // ============================================================================
-// ISSX RUNTIME v1.722
+// ISSX RUNTIME v1.723
 // Canonical runtime owner for scheduler / timer-lossiness / budgets / fairness /
 // resumable phase state in the single-wrapper five-stage ISSX architecture.
 //
@@ -412,6 +412,13 @@ int ISSX_Runtime_ClampDoubleToIntFloor(const double v)
    return (int)MathFloor(v);
   }
 
+int ISSX_Runtime_SaturatingIncInt(const int value)
+  {
+   if(value>=2147483647)
+      return 2147483647;
+   return (value+1);
+  }
+
 long ISSX_Runtime_MaxLong(const long a,const long b)
   {
    return (a>b ? a : b);
@@ -433,6 +440,11 @@ int ISSX_Runtime_AbsDatetimeDiffSec(const datetime a,const datetime b)
 bool ISSX_Runtime_IsKernelPhase(const ISSX_PhaseId value)
   {
    return (value>=issx_phase_kernel_boot_restore && value<=issx_phase_kernel_publish_fastlane);
+  }
+
+bool ISSX_Runtime_IsStagePhase(const ISSX_PhaseId value)
+  {
+   return (ISSX_Runtime_StageOfPhase(value)>=issx_stage_ea1 && ISSX_Runtime_StageOfPhase(value)<=issx_stage_ea5);
   }
 
 bool ISSX_Runtime_IsPublishPhase(const ISSX_PhaseId value)
@@ -903,6 +915,14 @@ public:
                           const int phase_budget_ms,
                           const string progress_key="")
      {
+      if(phase_id!=issx_phase_none && !ISSX_Runtime_IsKernelPhase(phase_id) && !ISSX_Runtime_IsStagePhase(phase_id))
+        {
+         state.scheduler.phase_aborted_reason=issx_phase_abort_compatibility_fail;
+         state.budgets.degraded_cycle_flag=true;
+         state.kernel.kernel_degraded_cycle_flag=true;
+         return false;
+        }
+
       const long now_ms=(long)GetTickCount64();
       long minute_id=state.kernel.kernel_minute_id;
       if(minute_id<=0)
@@ -910,8 +930,8 @@ public:
 
       if(state.scheduler.phase_id==phase_id && state.scheduler.phase_epoch_minute==minute_id)
         {
-         state.scheduler.phase_resume_count++;
-         state.scheduler.phase_attempt_no++;
+         state.scheduler.phase_resume_count=ISSX_Runtime_SaturatingIncInt(state.scheduler.phase_resume_count);
+         state.scheduler.phase_attempt_no=ISSX_Runtime_SaturatingIncInt(state.scheduler.phase_attempt_no);
         }
       else
         {
@@ -919,6 +939,7 @@ public:
          state.scheduler.phase_epoch_minute=minute_id;
          state.scheduler.phase_attempt_no=1;
          state.scheduler.phase_resume_count=0;
+         state.scheduler.phase_work_cap=0;
          state.scheduler.phase_work_used=0;
         }
 
@@ -990,7 +1011,7 @@ public:
      {
       state.scheduler.phase_last_completed=state.scheduler.phase_id;
       state.scheduler.phase_aborted_reason=issx_phase_abort_none;
-      state.scheduler.stage_finished_this_minute=true;
+      state.scheduler.stage_finished_this_minute=(state.scheduler.stage_slot>=issx_stage_ea1 && state.scheduler.stage_slot<=issx_stage_ea5);
 
       if(state.scheduler.stage_slot>=issx_stage_ea1 && state.scheduler.stage_slot<=issx_stage_ea5)
         {
@@ -1276,7 +1297,7 @@ public:
 
       state.kernel.stage_last_attempted_service_mono_ms[idx]=now_ms;
       if(state.kernel.stage_last_successful_service_mono_ms[idx]<=0)
-         state.kernel.stage_missed_due_cycles[idx]++;
+         state.kernel.stage_missed_due_cycles[idx]=ISSX_Runtime_SaturatingIncInt(state.kernel.stage_missed_due_cycles[idx]);
 
       SyncKernelBudgetSurface(state);
      }
@@ -1607,7 +1628,7 @@ public:
 
 string ISSX_RuntimeDiagTag()
   {
-   return "runtime_diag_v174f";
+   return "runtime_diag_v1750";
   }
 
 
