@@ -1,5 +1,5 @@
 #property strict
-#property version   "1.727"
+#property version   "1.728"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
@@ -813,12 +813,26 @@ bool ISSX_IsGateOn(const bool gate_value,const bool minimal_default_on)
 
 bool ISSX_IsTimerHeavyWorkOn()
   {
-   return Config.GetBool("timer_heavy_work_enabled") || Config.IsEAEnabled(issx_stage_ea1);
+   return Config.GetBool("timer_heavy_work_enabled");
   }
 
 bool ISSX_IsUiProjectionOn()
   {
-   return Config.GetBool("ui_projection_enabled") || Config.IsEAEnabled(issx_stage_ea1);
+   return Config.GetBool("ui_projection_enabled");
+  }
+
+ISSX_InfraStageState ISSX_EA1InfraStateFromRun(const string stage_run)
+  {
+   const string v=ISSX_Util::Lower(ISSX_Util::Trim(stage_run));
+   if(v=="success")
+      return issx_infra_stage_ready;
+   if(v=="failed" || v=="error")
+      return issx_infra_stage_degraded;
+   if(v=="degraded")
+      return issx_infra_stage_degraded;
+   if(v=="blocked")
+      return issx_infra_stage_blocked;
+   return issx_infra_stage_booting;
   }
 
 void ISSX_LogGateSnapshot()
@@ -998,7 +1012,6 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
 
    ISSX_SetCheckpoint("ea1_stage_slice_enter");
    g_telemetry.StageStart(issx_telemetry_stage_ea1_market);
-   g_debug.Write("INFO","stage_init","ea1_market","success");
    g_debug.Write("INFO","ea1","stage_slice","enter");
    ea1_stage_ran=true;
    g_ea1.hydration_batch_size=MathMax(1,Config.GetInt("ea1_hydration_batch"));
@@ -1134,6 +1147,7 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
    g_debug.Write("INFO","ea1","stage_publish","start");
    if(!g_ea1.hydration_complete)
      {
+      ISSX_ResetEA1PublishStatus();
       g_debug.Write("INFO","ea1_publish","publish_skip_hydration","reason=hydration_not_complete processed="+IntegerToString(g_ea1.hydration_processed)+" total="+IntegerToString(g_ea1.hydration_total));
       g_ea1.publish_last_checkpoint="publish_skip_hydration";
       g_ea1.publish_last_error="hydration_not_complete";
@@ -1145,6 +1159,12 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       g_last_ea1_stage_json_state="skipped";
       g_last_ea1_debug_json_state="skipped";
       g_last_ea1_universe_build_state="skipped";
+      g_last_ea1_stage_write_state="skipped";
+      g_last_ea1_debug_write_state="skipped";
+      g_last_ea1_universe_write_state="skipped";
+      g_last_ea1_root_status_state="skipped";
+      g_last_ea1_root_debug_state="skipped";
+      g_last_ea1_root_universe_state="skipped";
      }
    else
      {
@@ -1661,7 +1681,7 @@ void OnTimer()
    if(sampled)
       g_debug.FlushStageCountersSample();
 
-   g_stage_registry_infra.SetState(issx_stage_ea1,(g_last_ea1_stage_run=="failed"?issx_infra_stage_degraded:issx_infra_stage_ready));
+   g_stage_registry_infra.SetState(issx_stage_ea1,ISSX_EA1InfraStateFromRun(g_last_ea1_stage_run));
    g_stage_registry_infra.SetReason(issx_stage_ea1,g_last_ea1_stage_reason);
    g_stage_registry_infra.SetElapsed(issx_stage_ea1,g_last_ea1_stage_elapsed_ms);
    g_metrics.RecordLatency(issx_stage_ea1,g_last_ea1_stage_elapsed_ms);
