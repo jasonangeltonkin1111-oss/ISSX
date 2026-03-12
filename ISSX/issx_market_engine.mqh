@@ -1,4 +1,4 @@
-﻿#ifndef __ISSX_MARKET_ENGINE_MQH__
+#ifndef __ISSX_MARKET_ENGINE_MQH__
 #define __ISSX_MARKET_ENGINE_MQH__
 
 #include <ISSX/issx_core.mqh>
@@ -2580,6 +2580,13 @@ public:
 
       int current_minute=(int)(TimeCurrent()/60);
       io_state.minute_id=current_minute;
+
+      io_state.discovery_attempted=false;
+      io_state.discovery_skipped=false;
+      io_state.discovery_success=false;
+      io_state.discovery_no_change=false;
+      io_state.discovery_elapsed_ms=0;
+      io_state.discovery_status_reason="none";
 
       const bool discovery_due=(io_state.sequence_no<=0 || io_state.discovery_minute_id!=current_minute);
       if(discovery_due)
