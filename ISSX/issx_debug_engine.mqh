@@ -110,7 +110,9 @@ public:
    void Write(const string level,const string area,const string event_name,const string detail)
      {
       const string line=BuildTimestamp()+" | "+level+" | "+area+" | "+event_name+" | "+detail;
-      PrintWithLevel(level,area+"::"+event_name+" | "+detail);
+      const bool important=(level=="ERROR" || level=="WARN" || event_name=="first_heartbeat" || event_name=="slow_slice");
+      if(important)
+         PrintWithLevel(level,area+"::"+event_name+" | "+detail);
       if(!m_ready || m_file_handle==INVALID_HANDLE)
          return;
 

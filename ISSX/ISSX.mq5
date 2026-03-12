@@ -24,6 +24,7 @@ input bool   InpProjectStageStatusRoot  = true;
 input bool   InpProjectUniverseSnapshot = true;
 input bool   InpProjectDebugSnapshots   = true;
 input int    InpLockStaleAfterSec       = 90;
+input string InpInstanceTag             = "";
 
 // debug / safety controls
 input bool   InpSafeMode                = false; // true = attach + timer only, no kernel
@@ -65,6 +66,9 @@ string              g_last_checkpoint           = "boot";
 bool                g_first_tick_logged         = false;
 bool                g_first_timer_logged        = false;
 bool                g_first_chart_event_logged  = false;
+long                g_timer_count               = 0;
+long                g_last_comment_pulse        = 0;
+string              g_last_status_comment       = "";
 
 string ISSX_LongIdPart(const long value)
   {
@@ -771,7 +775,9 @@ void OnTimer()
      }
    g_debug.Write("INFO","timer","heartbeat","first_cycle="+(!g_first_cycle_done?"true":"false"));
 
+   const long kernel_start_ms=(long)GetTickCount64();
    bool ok=ISSX_RunKernelCycle();
+   const long kernel_elapsed_ms=(long)GetTickCount64()-kernel_start_ms;
 
    if((timer_count%15)==1 || !ok)
       g_debug.Write("INFO","timer","kernel_result",(ok?"ok":"degraded"));
@@ -779,10 +785,13 @@ void OnTimer()
    g_first_cycle_done=true;
    g_kernel_busy=false;
 
-   if(ok)
-      Comment("ISSX running | firm="+g_firm_id);
-   else
-      Comment("ISSX degraded | firm="+g_firm_id);
+   string status=(ok ? "ISSX running | firm="+g_firm_id : "ISSX degraded | firm="+g_firm_id);
+   if(status!=g_last_status_comment || (g_timer_count-g_last_comment_pulse)>=15)
+     {
+      Comment(status);
+      g_last_status_comment=status;
+      g_last_comment_pulse=g_timer_count;
+     }
   }
 
 void OnTick()

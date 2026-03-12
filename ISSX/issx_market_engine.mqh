@@ -751,6 +751,7 @@ struct ISSX_EA1_State
    bool                     resumed_from_persistence;
    int                      dump_sequence_no;
    int                      dump_minute_id;
+   int                      discovery_minute_id;
    bool                     stage_minimum_ready_flag;
    string                   stage_publishability_state;
    string                   dependency_block_reason;
@@ -777,6 +778,7 @@ struct ISSX_EA1_State
       resumed_from_persistence=false;
       dump_sequence_no=0;
       dump_minute_id=0;
+      discovery_minute_id=-1;
       stage_minimum_ready_flag=false;
       stage_publishability_state="not_ready";
       dependency_block_reason="none";
@@ -2435,6 +2437,7 @@ public:
       io_state.sequence_no++;
       io_state.dump_sequence_no=io_state.sequence_no;
       io_state.dump_minute_id=io_state.minute_id;
+      io_state.discovery_minute_id=io_state.minute_id;
      }
 
    static bool BuildUniverseDump(const ISSX_EA1_State &state,
@@ -2454,6 +2457,7 @@ public:
       io_state.sequence_no=0;
       io_state.dump_sequence_no=0;
       io_state.dump_minute_id=io_state.minute_id;
+      io_state.discovery_minute_id=-1;
       io_state.resumed_from_persistence=false;
       io_state.stage_publishability_state="not_ready";
       return true;
@@ -2480,7 +2484,12 @@ public:
      {
       io_state.minute_id=(int)(TimeCurrent()/60);
 
-      RefreshDiscoveryOnly(io_state);
+      const bool discovery_due=(io_state.sequence_no<=0 || io_state.discovery_minute_id!=io_state.minute_id);
+      if(discovery_due)
+        {
+         RefreshDiscoveryOnly(io_state);
+         io_state.discovery_minute_id=io_state.minute_id;
+        }
 
       if(max_symbols>0 && ArraySize(io_state.symbols)>max_symbols)
          ArrayResize(io_state.symbols,max_symbols);
@@ -2495,8 +2504,6 @@ public:
       io_state.dump_sequence_no=io_state.sequence_no;
       io_state.dump_minute_id=io_state.minute_id;
 
-      string ignored="";
-      BuildUniverseDump(io_state,firm_id,writer_boot_id,writer_nonce,ignored);
       return true;
      }
 
