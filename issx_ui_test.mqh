@@ -27,7 +27,7 @@
 // ============================================================================
 
 #ifndef ISSX_UI_MODULE_VERSION
-#define ISSX_UI_MODULE_VERSION                 "1.721"
+#define ISSX_UI_MODULE_VERSION                 "1.722"
 #endif
 #define ISSX_UI_TEST_MODULE_VERSION            ISSX_UI_MODULE_VERSION
 #define ISSX_TRACE_DEFAULT_COOLDOWN_MS         15000

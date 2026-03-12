@@ -5,7 +5,7 @@
 
 #define ISSX_MENU_STAGE_COUNT 5
 
-// ISSX MENU ENGINE v1.720
+// ISSX MENU ENGINE v1.722
 
 class ISSX_MenuEngine
   {

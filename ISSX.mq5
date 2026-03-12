@@ -1,5 +1,5 @@
 ﻿#property strict
-#property version   "1.721"
+#property version   "1.722"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
@@ -19,6 +19,11 @@
 #include <ISSX/issx_menu.mqh>
 #include <ISSX/issx_ui.mqh>
 #include <ISSX/issx_debug_engine.mqh>
+#include <ISSX/issx_error_codes.mqh>
+#include <ISSX/issx_metrics.mqh>
+#include <ISSX/issx_stage_registry.mqh>
+#include <ISSX/issx_universe_manager.mqh>
+#include <ISSX/issx_system_snapshot.mqh>
 #include <ISSX/issx_telemetry.mqh>
 
 input string InpFirmId                  = "default_firm";
@@ -83,6 +88,9 @@ ISSX_UI             g_ui;
 ISSX_MenuEngine     g_menu;
 ISSX_Config         Config;
 ISSX_TelemetryEngine g_telemetry;
+ISSX_MetricsBook    g_metrics;
+ISSX_InfraStageRegistry g_stage_registry_infra;
+string              g_last_system_snapshot = "";
 bool                g_ea_enabled[5]={true,false,false,false,false};
 string              g_last_checkpoint           = "boot";
 bool                g_first_tick_logged         = false;
@@ -1409,6 +1417,7 @@ int OnInit()
    // registry + runtime
    g_registry.SeedBlueprintV170();
    StageRegistry.Reset();
+   g_stage_registry_infra.Reset();
    ISSX_SyncEA1StageRegistry("init","oninit",0,false);
    string runtime_init_state="skipped | reason="+(Config.GetBool("minimal_debug_mode")?"minimal_debug_mode":"gate_off");
    if(Config.GetBool("runtime_scheduler_enabled"))
@@ -1583,7 +1592,25 @@ void OnTimer()
    if(sampled)
       g_debug.FlushStageCountersSample();
 
-   g_ui.Render(g_debug,"1.721",g_boot_id,ISSX_FormatHudTime(TimeTradeServer()),g_timer_pulse_count,
+   g_stage_registry_infra.SetState(issx_stage_ea1,(g_last_ea1_stage_run=="failed"?issx_infra_stage_degraded:issx_infra_stage_ready));
+   g_stage_registry_infra.SetReason(issx_stage_ea1,g_last_ea1_stage_reason);
+   g_stage_registry_infra.SetElapsed(issx_stage_ea1,g_last_ea1_stage_elapsed_ms);
+   g_metrics.RecordLatency(issx_stage_ea1,g_last_ea1_stage_elapsed_ms);
+   g_metrics.RecordThroughput(issx_stage_ea1,g_ea1.universe.active_universe);
+   g_metrics.RecordCopyRates(issx_stage_ea2,g_ea2.forensic.max_rates_returned);
+   g_metrics.RecordPayloadSize(issx_stage_ea1,g_ea1.publish_stage_json_bytes);
+   g_last_system_snapshot=ISSX_SystemSnapshot::DumpSystemState(g_runtime.State(),
+                                                               g_ea1.universe.broker_universe,
+                                                               g_ea2.counters.symbols_total,
+                                                               g_ea3.universe.frontier_universe,
+                                                               g_ea4.universe.frontier_universe_count,
+                                                               g_ea5.debug_contract_build_count,
+                                                               (long)g_ea5.debug_estimated_export_bytes,
+                                                               g_ea1.publish_last_error);
+   if(sampled)
+      g_debug.SampledLog("INFO","snapshot","system_state",g_last_system_snapshot,1);
+
+   g_ui.Render(g_debug,ISSX_ENGINE_VERSION,g_boot_id,ISSX_FormatHudTime(TimeTradeServer()),g_timer_pulse_count,
                Config.GetBool("minimal_debug_mode"),
                Config.GetBool("isolation_mode"),
                Config.GetBool("runtime_scheduler_enabled"),
