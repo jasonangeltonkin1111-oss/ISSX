@@ -1047,6 +1047,7 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       return false;
      }
 
+   const long ea1_stage_elapsed_ms=(long)(((ulong)GetMicrosecondCount()-ea1_stage_start_us)/1000);
    g_scheduler.RecordStageTime("ea1_market",(long)((ulong)GetMicrosecondCount()-ea1_stage_start_us));
 
    g_debug.Write("INFO","ea1","stage_slice_ok","symbols="+IntegerToString(ArraySize(g_ea1.symbols)));
@@ -1100,26 +1101,39 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
      {
       if(g_ea1.discovery_skip_streak<=3 || (g_timer_pulse_count%30)==1)
          g_debug.Write("INFO","ea1_market","discovery_skipped","reason="+g_ea1.discovery_status_reason+" minute_id="+IntegerToString(g_ea1.minute_id));
-      ea1_stage_result="skipped";
-      ea1_stage_reason=g_ea1.discovery_status_reason;
+      if(g_ea1.runtime_state==EA1_STATE_HYDRATING)
+        {
+         ea1_stage_result="degraded";
+         ea1_stage_reason="hydration_in_progress";
+        }
+      else if(g_ea1.runtime_state==EA1_STATE_READY)
+        {
+         ea1_stage_result=(g_ea1.degraded_flag?"degraded":"success");
+         ea1_stage_reason=(g_ea1.degraded_flag?"ready_degraded":"ready");
+        }
+      else
+        {
+         ea1_stage_result="skipped";
+         ea1_stage_reason=g_ea1.discovery_status_reason;
+        }
      }
 
    g_debug.Write((ea1_stage_result=="failed"?"ERROR":"INFO"),"stage_run","ea1_market",ea1_stage_result);
    g_debug.Write((ea1_stage_result=="failed"?"ERROR":"INFO"),"stage_reason","ea1_market",ea1_stage_reason);
-   g_debug.Write("INFO","stage_elapsed_ms","ea1_market",IntegerToString(g_ea1.discovery_elapsed_ms));
+   g_debug.Write("INFO","stage_elapsed_ms","ea1_market",IntegerToString((int)ea1_stage_elapsed_ms));
    g_last_ea1_stage_run=ea1_stage_result;
    g_last_ea1_stage_reason=ea1_stage_reason;
-   g_last_ea1_stage_elapsed_ms=g_ea1.discovery_elapsed_ms;
+   g_last_ea1_stage_elapsed_ms=ea1_stage_elapsed_ms;
    ISSX_SyncEA1StageRegistry(g_last_ea1_stage_run,g_last_ea1_stage_reason,g_last_ea1_stage_elapsed_ms,true);
 
-   string ea1_stage_status_detail="success";
-   string ea1_stage_reason_detail="discovery_success";
-   if(g_ea1.discovery_skipped)
+   string ea1_stage_status_detail=ea1_stage_result;
+   string ea1_stage_reason_detail=ea1_stage_reason;
+   if(!g_ea1.discovery_attempted && g_ea1.discovery_skipped && g_ea1.runtime_state==EA1_STATE_HYDRATING)
      {
-      ea1_stage_status_detail="skipped";
-      ea1_stage_reason_detail=g_ea1.discovery_status_reason;
+      ea1_stage_status_detail="degraded";
+      ea1_stage_reason_detail="hydration_in_progress";
      }
-   else if(!g_ea1.discovery_success)
+   else if(!g_ea1.discovery_success && g_ea1.discovery_attempted)
      {
       ea1_stage_status_detail="failed";
       ea1_stage_reason_detail=g_ea1.discovery_status_reason;
@@ -1130,8 +1144,8 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       ea1_stage_reason_detail="accepted_degraded_or_exploratory";
      }
    g_debug.Write("INFO","stage_run","ea1_market",ea1_stage_status_detail);
-   g_debug.Write("INFO","stage_reason","ea1_market",ea1_stage_reason_detail+" elapsed_ms="+IntegerToString(g_ea1.discovery_elapsed_ms));
-   g_debug.Write("INFO","stage_elapsed_ms","ea1_market","value="+IntegerToString(g_ea1.discovery_elapsed_ms));
+   g_debug.Write("INFO","stage_reason","ea1_market",ea1_stage_reason_detail+" elapsed_ms="+IntegerToString((int)ea1_stage_elapsed_ms));
+   g_debug.Write("INFO","stage_elapsed_ms","ea1_market","value="+IntegerToString((int)ea1_stage_elapsed_ms));
 
    if(ArraySize(g_ea1.symbols)<=0)
      {
