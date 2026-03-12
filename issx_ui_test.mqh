@@ -27,7 +27,7 @@
 // ============================================================================
 
 #ifndef ISSX_UI_MODULE_VERSION
-#define ISSX_UI_MODULE_VERSION                 "1.719"
+#define ISSX_UI_MODULE_VERSION                 "1.722"
 #endif
 #define ISSX_UI_TEST_MODULE_VERSION            ISSX_UI_MODULE_VERSION
 #define ISSX_TRACE_DEFAULT_COOLDOWN_MS         15000
@@ -944,15 +944,15 @@ private:
 
    static string BuildHudIdentityRow(const ISSX_DebugAggregate &agg)
      {
-      return "[ISSX] "+agg.engine_name+" v"+agg.engine_version+" | firm="+ISSX_UI_Text::NonEmptyOrNA(agg.firm_id,"na");
+      return "ISSX SYSTEM STATUS | engine="+agg.engine_name+" v"+agg.engine_version+" | firm="+ISSX_UI_Text::NonEmptyOrNA(agg.firm_id,"na");
      }
 
    static string BuildHudRuntimeRow(const ISSX_DebugAggregate &agg)
      {
-      string s="Kernel: minute="+LongToString(agg.kernel_minute_id);
-      s+=" | cycle="+LongToString(agg.scheduler_cycle_no);
-      s+=" | late_ms="+ISSX_UI_Text::LongToStringSafe(agg.scheduler_late_by_ms);
-      s+=" | gap_ms="+ISSX_UI_Text::LongToStringSafe(agg.timer_gap_ms_now);
+      string s="version="+agg.engine_version;
+      s+=" | server_time=na";
+      s+=" | timer_pulse="+LongToString(agg.scheduler_cycle_no);
+      s+=" | kernel_minute="+LongToString(agg.kernel_minute_id);
       s+=" | degraded="+ISSX_UI_Text::BoolToWord(agg.kernel_degraded_cycle_flag);
       return s;
      }
@@ -1103,45 +1103,37 @@ public:
       string lines[];
       ArrayResize(lines,0);
 
-      const int n0=ArraySize(lines);
-      ArrayResize(lines,n0+1);
-      lines[n0]="================ ISSX KERNEL HUD ================";
+      int n=ArraySize(lines); ArrayResize(lines,n+1); lines[n]=BuildHudIdentityRow(agg);
+      n=ArraySize(lines); ArrayResize(lines,n+1); lines[n]=BuildHudRuntimeRow(agg);
 
-      const int n1=ArraySize(lines);
-      ArrayResize(lines,n1+1);
-      lines[n1]=BuildHudIdentityRow(agg);
+      n=ArraySize(lines); ArrayResize(lines,n+1); lines[n]="SYSTEM STATE | minimal_debug_mode=na isolation_mode=na runtime_scheduler=na timer_heavy_work=na tick_heavy_work=na";
+      n=ArraySize(lines); ArrayResize(lines,n+1); lines[n]="SYSTEM STATE | menu_engine=na chart_ui_updates=na ui_projection=na";
 
-      const int n2=ArraySize(lines);
-      ArrayResize(lines,n2+1);
-      lines[n2]=BuildHudRuntimeRow(agg);
-
-      const int n3=ArraySize(lines);
-      ArrayResize(lines,n3+1);
-      lines[n3]="---------------- Stage Ladder ----------------";
-
+      n=ArraySize(lines); ArrayResize(lines,n+1); lines[n]="STAGE STATES";
       const int stage_n=ArraySize(agg.stage_rows);
       for(int i=0;i<stage_n && i<5;i++)
         {
-         const int n=ArraySize(lines);
-         ArrayResize(lines,n+1);
-         lines[n]=BuildHudStageRow(agg.stage_rows[i]);
+         const ISSX_StageLadderRow row=agg.stage_rows[i];
+         n=ArraySize(lines); ArrayResize(lines,n+1);
+         lines[n]=" "+StageLongName(row.stage_id)+" | pub="+row.publishability_state+" | dep="+ValueOrNA(row.dependency_block_reason);
         }
 
-      const int n4=ArraySize(lines);
-      ArrayResize(lines,n4+1);
-      lines[n4]="---------------- Diagnostics ----------------";
+      n=ArraySize(lines); ArrayResize(lines,n+1); lines[n]="EA1 DETAIL";
+      for(int i=0;i<stage_n && i<5;i++)
+        {
+         const ISSX_StageLadderRow row=agg.stage_rows[i];
+         if(row.stage_id!=issx_stage_ea1)
+            continue;
+         n=ArraySize(lines); ArrayResize(lines,n+1);
+         lines[n]=" symbols_discovered=na cadence_state="+row.phase_id+" last_discovery_time=na";
+         n=ArraySize(lines); ArrayResize(lines,n+1);
+         lines[n]=" publish_state="+row.publishability_state+" projection_state="+row.source_mode;
+         break;
+        }
 
-      const int n5=ArraySize(lines);
-      ArrayResize(lines,n5+1);
-      lines[n5]=BuildHudQueuesRow(agg);
-
-      const int n6=ArraySize(lines);
-      ArrayResize(lines,n6+1);
-      lines[n6]=BuildHudWeakLinksRow(agg);
-
-      const int n7=ArraySize(lines);
-      ArrayResize(lines,n7+1);
-      lines[n7]=BuildHudWarningsRow(agg.warnings);
+      n=ArraySize(lines); ArrayResize(lines,n+1); lines[n]=BuildHudQueuesRow(agg);
+      n=ArraySize(lines); ArrayResize(lines,n+1); lines[n]=BuildHudWeakLinksRow(agg);
+      n=ArraySize(lines); ArrayResize(lines,n+1); lines[n]=BuildHudWarningsRow(agg.warnings);
 
       string out="";
       const int total=ArraySize(lines);

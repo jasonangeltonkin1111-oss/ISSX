@@ -1,5 +1,5 @@
 ﻿#property strict
-#property version   "1.720"
+#property version   "1.722"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
@@ -16,8 +16,14 @@
 #include <ISSX/issx_selection_engine.mqh>
 #include <ISSX/issx_correlation_engine.mqh>
 #include <ISSX/issx_contracts.mqh>
+#include <ISSX/issx_menu.mqh>
 #include <ISSX/issx_ui.mqh>
 #include <ISSX/issx_debug_engine.mqh>
+#include <ISSX/issx_error_codes.mqh>
+#include <ISSX/issx_metrics.mqh>
+#include <ISSX/issx_stage_registry.mqh>
+#include <ISSX/issx_universe_manager.mqh>
+#include <ISSX/issx_system_snapshot.mqh>
 #include <ISSX/issx_telemetry.mqh>
 
 input string InpFirmId                  = "default_firm";
@@ -79,8 +85,12 @@ long                g_sequence_seed             = 0;
 long                g_last_ea5_export_minute_id = 0;
 ISSX_DebugEngine    g_debug;
 ISSX_UI             g_ui;
+ISSX_MenuEngine     g_menu;
 ISSX_Config         Config;
 ISSX_TelemetryEngine g_telemetry;
+ISSX_MetricsBook    g_metrics;
+ISSX_InfraStageRegistry g_stage_registry_infra;
+string              g_last_system_snapshot = "";
 bool                g_ea_enabled[5]={true,false,false,false,false};
 string              g_last_checkpoint           = "boot";
 bool                g_first_tick_logged         = false;
@@ -91,6 +101,7 @@ ulong               g_last_comment_pulse        = 0;
 string              g_last_status_comment       = "";
 bool                g_logged_timer_heavy_skip   = false;
 bool                g_logged_tick_heavy_skip    = false;
+bool                g_menu_initialized          = false;
 string              g_last_feature_runtime_scheduler = "";
 string              g_last_feature_timer_heavy       = "";
 string              g_last_feature_init_runtime_scheduler = "";
@@ -881,6 +892,22 @@ bool ISSX_RunUiProjectionSafe()
    return true;
   }
 
+void ISSX_RenderMenu()
+  {
+   if(!Config.GetBool("menu_engine_enabled"))
+      return;
+
+   if(!g_menu_initialized)
+     {
+      g_menu.Init("ISSX_MENU");
+      g_menu_initialized=true;
+      g_debug.Write("INFO","menu","init","prefix=ISSX_MENU");
+     }
+
+   if(!g_menu.Build(g_ea_enabled))
+      g_debug.Write("WARN","menu","build_failed",g_menu.LastError());
+  }
+
 bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea1_stage_reason)
   {
    ea1_stage_ran=false;
@@ -1390,6 +1417,7 @@ int OnInit()
    // registry + runtime
    g_registry.SeedBlueprintV170();
    StageRegistry.Reset();
+   g_stage_registry_infra.Reset();
    ISSX_SyncEA1StageRegistry("init","oninit",0,false);
    string runtime_init_state="skipped | reason="+(Config.GetBool("minimal_debug_mode")?"minimal_debug_mode":"gate_off");
    if(Config.GetBool("runtime_scheduler_enabled"))
@@ -1423,6 +1451,11 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    EventKillTimer();
+   if(g_menu_initialized)
+     {
+      g_menu.Destroy();
+      g_menu_initialized=false;
+     }
    g_ui.Shutdown(g_debug);
    g_kernel_busy=false;
    g_last_deinit_reason_code=reason;
@@ -1551,10 +1584,41 @@ void OnTimer()
    if(sampled || !timer_cycle_ok)
       g_debug.Write("INFO","timer","elapsed_us","value="+ISSX_Util::ULongToStringX(elapsed_us));
 
+   g_debug.MarkStageExecution(issx_stage_ea1,g_last_ea1_stage_elapsed_ms);
+   g_debug.MarkStageExecution(issx_stage_ea2,g_last_ea2_stage_elapsed_ms);
+   g_debug.MarkStageExecution(issx_stage_ea3,g_last_ea3_stage_elapsed_ms);
+   g_debug.MarkStageExecution(issx_stage_ea4,g_last_ea4_stage_elapsed_ms);
+   g_debug.MarkStageExecution(issx_stage_ea5,g_last_ea5_stage_elapsed_ms);
+   if(sampled)
+      g_debug.FlushStageCountersSample();
 
-   g_ui.Render(g_debug,"1.719",g_boot_id,g_timer_pulse_count,
+   g_stage_registry_infra.SetState(issx_stage_ea1,(g_last_ea1_stage_run=="failed"?issx_infra_stage_degraded:issx_infra_stage_ready));
+   g_stage_registry_infra.SetReason(issx_stage_ea1,g_last_ea1_stage_reason);
+   g_stage_registry_infra.SetElapsed(issx_stage_ea1,g_last_ea1_stage_elapsed_ms);
+   g_metrics.RecordLatency(issx_stage_ea1,g_last_ea1_stage_elapsed_ms);
+   g_metrics.RecordThroughput(issx_stage_ea1,g_ea1.universe.active_universe);
+   g_metrics.RecordCopyRates(issx_stage_ea2,g_ea2.forensic.max_rates_returned);
+   g_metrics.RecordPayloadSize(issx_stage_ea1,g_ea1.publish_stage_json_bytes);
+   g_last_system_snapshot=ISSX_SystemSnapshot::DumpSystemState(g_runtime.State(),
+                                                               g_ea1.universe.broker_universe,
+                                                               g_ea2.counters.symbols_total,
+                                                               g_ea3.universe.frontier_universe,
+                                                               g_ea4.universe.frontier_universe_count,
+                                                               g_ea5.debug_contract_build_count,
+                                                               (long)g_ea5.debug_estimated_export_bytes,
+                                                               g_ea1.publish_last_error);
+   if(sampled)
+      g_debug.SampledLog("INFO","snapshot","system_state",g_last_system_snapshot,1);
+
+   g_ui.Render(g_debug,ISSX_ENGINE_VERSION,g_boot_id,ISSX_FormatHudTime(TimeTradeServer()),g_timer_pulse_count,
                Config.GetBool("minimal_debug_mode"),
                Config.GetBool("isolation_mode"),
+               Config.GetBool("runtime_scheduler_enabled"),
+               Config.GetBool("timer_heavy_work_enabled"),
+               Config.GetBool("tick_heavy_work_enabled"),
+               Config.GetBool("menu_engine_enabled"),
+               Config.GetBool("chart_ui_updates_enabled"),
+               Config.GetBool("ui_projection_enabled"),
                (Config.GetBool("runtime_scheduler_enabled")?"on":"off"),
                g_last_kernel_result,g_last_kernel_reason,g_last_kernel_elapsed_ms,
                g_operator_broker_name,g_operator_server_name,g_ea_enabled,
@@ -1565,6 +1629,8 @@ void OnTimer()
                g_last_ea4_stage_run,g_last_ea4_stage_reason,g_last_ea4_stage_elapsed_ms,
                g_last_ea5_stage_run,g_last_ea5_stage_reason,g_last_ea5_stage_elapsed_ms,
                g_last_kernel_result+"/"+g_last_kernel_reason);
+
+   ISSX_RenderMenu();
 
    g_first_cycle_done=true;
    g_kernel_busy=false;
@@ -1597,4 +1663,29 @@ void OnTick()
    ISSX_LogFeatureStatus("feature_run","tick_heavy_work","success",g_last_feature_run_tick_heavy,tick_sampled);
    if((tick_count%50)==0)
       g_debug.Write("INFO","tick","heartbeat","count="+IntegerToString((int)tick_count)+" mode=heavy_enabled");
+  }
+
+
+void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
+  {
+   const long event_lparam=lparam;
+   const double event_dparam=dparam;
+
+   if(id!=CHARTEVENT_OBJECT_CLICK)
+      return;
+
+   if(!g_menu_initialized || !Config.GetBool("menu_engine_enabled"))
+      return;
+
+   if(!g_menu.IsOwnedObject(sparam))
+      return;
+
+   bool allow_toggle=!Config.GetBool("isolation_mode");
+   if(g_menu.HandleClick(sparam,g_ea_enabled,allow_toggle))
+     {
+      g_debug.Write("INFO","menu","toggle","object="+sparam+" state=ok lp="+ISSX_Util::LongToStringX(event_lparam)+" dp="+DoubleToString(event_dparam,2));
+      g_menu.Build(g_ea_enabled);
+     }
+   else
+      g_debug.Write("WARN","menu","toggle_denied","object="+sparam+" reason="+g_menu.LastError());
   }

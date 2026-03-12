@@ -1,7 +1,10 @@
-#ifndef __ISSX_SCHEDULER_MQH__
+﻿#ifndef __ISSX_SCHEDULER_MQH__
 #define __ISSX_SCHEDULER_MQH__
 
 #include <ISSX/issx_core.mqh>
+
+// ISSX SCHEDULER v1.722
+#define ISSX_SCHEDULER_MODULE_VERSION "1.722"
 
 #define ISSX_SCHEDULER_MAX_STAGES 16
 

@@ -11,7 +11,7 @@
 #include <ISSX/issx_debug_engine.mqh>
 #include <ISSX/issx_ui_test.mqh>
 
-#define ISSX_UI_MODULE_VERSION "1.719"
+#define ISSX_UI_MODULE_VERSION "1.722"
 #define ISSX_UI_DEBUG_MODULE_VERSION ISSX_UI_MODULE_VERSION
 #define ISSX_HUD_PREFIX "ISSX_HUD_"
 #define ISSX_HUD_MAIN_OBJECT "ISSX_HUD_MAIN"
@@ -113,9 +113,16 @@ public:
    void Render(ISSX_DebugEngine &dbg,
                const string wrapper_version,
                const string boot_id,
+               const string server_time_text,
                const ulong timer_pulse,
                const bool minimal_debug,
                const bool isolation_mode,
+               const bool gate_runtime_scheduler,
+               const bool gate_timer_heavy,
+               const bool gate_tick_heavy,
+               const bool gate_menu_engine,
+               const bool gate_chart_ui_updates,
+               const bool gate_ui_projection,
                const string scheduler_state,
                const string kernel_result,
                const string kernel_reason,
@@ -152,35 +159,29 @@ public:
       Log(dbg,"hud_render_cycle","pulse="+ISSX_Util::ULongToStringX(timer_pulse));
       EnsureMainObject(dbg);
 
-      string text="ISSX HUD v"+wrapper_version+" (ui="+string(ISSX_UI_MODULE_VERSION)+")\n";
-      text+="SYSTEM\n";
-      text+=" boot="+boot_id+" broker="+broker+" server="+server+" pulse="+ISSX_Util::ULongToStringX(timer_pulse)+"\n";
-      text+=" kernel="+kernel_result+" reason="+kernel_reason+" elapsed_ms="+IntegerToString((int)kernel_elapsed_ms)+" scheduler="+scheduler_state+"\n";
-      text+=" debug_min="+(minimal_debug?"on":"off")+" isolation="+(isolation_mode?"on":"off")+" cycle="+last_cycle_status+"\n";
-      text+=" fx:create="+IntegerToString(m_fx.objects_created)+" update="+IntegerToString(m_fx.objects_updated)+" skip="+IntegerToString(m_fx.objects_skipped)+"\n";
+      string text="ISSX SYSTEM STATUS\n";
+      text+=" version="+wrapper_version+" ui="+string(ISSX_UI_MODULE_VERSION)+"\n";
+      text+=" server_time="+server_time_text+" timer_pulse="+ISSX_Util::ULongToStringX(timer_pulse)+"\n";
 
-      text+="EA1 MARKET\n";
-      text+=" enabled="+(ea_enabled[0]?"on":"off")+" effective="+ISSX_PublishabilityStateToString(ea1.stage_publishability_state)+" run="+ea1_run+" reason="+ea1_reason+" elapsed="+IntegerToString((int)ea1_elapsed_ms)+"ms\n";
-      text+=" discovery="+(ea1.discovery_attempted?"attempted":"idle")+" accepted="+IntegerToString(ea1.counters.accepted_strong_count+ea1.counters.accepted_degraded_count)+" rejected="+IntegerToString(ea1.counters.rejected_count)+" degraded="+IntegerToString(ea1.counters.degraded_count)+"\n";
-      text+=" hydration="+IntegerToString(ea1.hydration_processed)+"/"+IntegerToString(ea1.hydration_total)+" batch="+IntegerToString(ea1.hydration_batch_size)+" publish="+ea1_publish_state+" gate="+ea1.dependency_block_reason+"\n";
-      text+=" publish_ckpt="+ea1.publish_last_checkpoint+" publish_err="+ea1.publish_last_error+" bytes="+IntegerToString(ea1.publish_stage_json_bytes)+"\n";
+      text+="SYSTEM STATE\n";
+      text+=" minimal_debug_mode="+(minimal_debug?"on":"off")+" isolation_mode="+(isolation_mode?"on":"off")+"\n";
+      text+=" runtime_scheduler="+(gate_runtime_scheduler?"on":"off")+" timer_heavy_work="+(gate_timer_heavy?"on":"off")+" tick_heavy_work="+(gate_tick_heavy?"on":"off")+"\n";
+      text+=" menu_engine="+(gate_menu_engine?"on":"off")+" chart_ui_updates="+(gate_chart_ui_updates?"on":"off")+" ui_projection="+(gate_ui_projection?"on":"off")+"\n";
+      text+=" scheduler="+scheduler_state+" kernel="+kernel_result+" reason="+kernel_reason+" elapsed_ms="+IntegerToString((int)kernel_elapsed_ms)+"\n";
+      text+=" boot="+boot_id+" broker="+broker+" server="+server+"\n";
 
-      text+="EA2 HISTORY\n";
-      text+=" enabled="+(ea_enabled[1]?"on":"off")+" effective="+ISSX_PublishabilityStateToString(ea2.stage_publishability_state)+" run="+ea2_run+" reason="+ea2_reason+" elapsed="+IntegerToString((int)ea2_elapsed_ms)+"ms\n";
-      text+=" readiness="+(ea2.stage_minimum_ready_flag?"ready":"not_ready")+" copyrates="+IntegerToString(ea2.forensic.copyrates_successes)+"/"+IntegerToString(ea2.forensic.copyrates_attempts)+" retries="+IntegerToString(ea2.forensic.copyrates_failures)+" partial="+(ea2.projection_partial_success_flag?"partial":"none")+"\n";
+      text+="STAGE STATES\n";
+      text+=" EA1 Market="+ISSX_PublishabilityStateToString(ea1.stage_publishability_state)+" | run="+ea1_run+" | reason="+ea1_reason+"\n";
+      text+=" EA2 History="+ISSX_PublishabilityStateToString(ea2.stage_publishability_state)+" | run="+ea2_run+" | reason="+ea2_reason+"\n";
+      text+=" EA3 Selection="+ISSX_PublishabilityStateToString(ea3.stage_publishability_state)+" | run="+ea3_run+" | reason="+ea3_reason+"\n";
+      text+=" EA4 Correlation="+ISSX_PublishabilityStateToString(ea4.stage_publishability_state)+" | run="+ea4_run+" | reason="+ea4_reason+"\n";
+      text+=" EA5 Contracts="+ea5.debug_ready_state+" | run="+ea5_run+" | reason="+ea5_reason+"\n";
 
-      text+="EA3 SELECTION\n";
-      text+=" enabled="+(ea_enabled[2]?"on":"off")+" effective="+ISSX_PublishabilityStateToString(ea3.stage_publishability_state)+" run="+ea3_run+" reason="+ea3_reason+" elapsed="+IntegerToString((int)ea3_elapsed_ms)+"ms\n";
-      text+=" candidates="+IntegerToString(ea3.universe.active_universe)+" frontier="+IntegerToString(ea3.universe.frontier_universe)+" bounded="+IntegerToString(ea3.universe.publishable_universe)+" readiness="+(ea3.stage_minimum_ready_flag?"ready":"not_ready")+"\n";
-
-      text+="EA4 CORRELATION\n";
-      text+=" enabled="+(ea_enabled[3]?"on":"off")+" effective="+ISSX_PublishabilityStateToString(ea4.stage_publishability_state)+" run="+ea4_run+" reason="+ea4_reason+" elapsed="+IntegerToString((int)ea4_elapsed_ms)+"ms\n";
-      text+=" workload="+IntegerToString(ea4.universe.frontier_universe_count)+" batch="+IntegerToString(ea4.forensic.pair_cursor)+"/"+IntegerToString(ea4.forensic.pair_batch_end_cursor)+" matrix="+ea4.forensic.error_conditions+" partial="+(ea4.forensic.partial_ready_flag?"partial":"none")+"\n";
-
-      text+="EA5 CONTRACTS\n";
-      text+=" enabled="+(ea_enabled[4]?"on":"off")+" effective="+ea5.debug_ready_state+" run="+ea5_run+" reason="+ea5_reason+" elapsed="+IntegerToString((int)ea5_elapsed_ms)+"ms\n";
-      text+=" attempted="+IntegerToString(ea5.debug_discovery_attempt_count)+" built="+IntegerToString(ea5.debug_contract_build_count)+" unresolved="+ea5.why_publish_is_stale+" export="+ea5.debug_persistence_interactions+" payload="+IntegerToString(ea5.debug_estimated_export_bytes)+"\n";
-
+      text+="EA1 DETAIL\n";
+      text+=" symbols_discovered="+IntegerToString(ea1.universe.broker_universe)+" active="+IntegerToString(ea1.universe.active_universe)+" publishable="+IntegerToString(ea1.universe.publishable_universe)+"\n";
+      text+=" cadence_state="+ea1.discovery_status_reason+" discovery_minute_id="+IntegerToString(ea1.discovery_minute_id)+" last_discovery_elapsed_ms="+IntegerToString(ea1.discovery_elapsed_ms)+"\n";
+      text+=" publish_state="+ea1_publish_state+" publish_checkpoint="+ea1.publish_last_checkpoint+" publish_error="+ea1.publish_last_error+"\n";
+      text+=" projection_state="+last_cycle_status+" fx:create="+IntegerToString(m_fx.objects_created)+" update="+IntegerToString(m_fx.objects_updated)+" skip="+IntegerToString(m_fx.objects_skipped)+"\n";
       const string obj=ObjName(ISSX_HUD_MAIN_OBJECT);
       if(text==m_last_text)
         {

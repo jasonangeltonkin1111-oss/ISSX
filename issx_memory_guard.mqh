@@ -1,10 +1,10 @@
-#ifndef __ISSX_MEMORY_GUARD_MQH__
+﻿#ifndef __ISSX_MEMORY_GUARD_MQH__
 #define __ISSX_MEMORY_GUARD_MQH__
 
 #include <ISSX/issx_core.mqh>
 
 // ============================================================================
-// ISSX MEMORY GUARD v1.718
+// ISSX MEMORY GUARD v1.722
 // Lightweight, non-blocking runtime guardrails for allocation/loop diagnostics.
 // ============================================================================
 

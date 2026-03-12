@@ -4,7 +4,7 @@
 #include <ISSX/issx_core.mqh>
 
 // ============================================================================
-// ISSX RUNTIME v1.718
+// ISSX RUNTIME v1.722
 // Canonical runtime owner for scheduler / timer-lossiness / budgets / fairness /
 // resumable phase state in the single-wrapper five-stage ISSX architecture.
 //
