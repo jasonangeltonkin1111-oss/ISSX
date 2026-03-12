@@ -1135,13 +1135,21 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
    if(!g_ea1.hydration_complete)
      {
       g_debug.Write("INFO","ea1_publish","publish_skip_hydration","reason=hydration_not_complete processed="+IntegerToString(g_ea1.hydration_processed)+" total="+IntegerToString(g_ea1.hydration_total));
+      g_ea1.publish_last_checkpoint="publish_skip_hydration";
+      g_ea1.publish_last_error="hydration_not_complete";
+      g_ea1.publish_elapsed_ms=0;
+      g_ea1.publish_payload_bytes_attempted=0;
+      g_ea1.publish_payload_bytes_written=0;
       g_last_ea1_publish_state="skipped";
       g_last_ea1_publish_reason="hydration_not_complete";
+      g_last_ea1_stage_json_state="skipped";
+      g_last_ea1_debug_json_state="skipped";
+      g_last_ea1_universe_build_state="skipped";
      }
    else
      {
       g_debug.Write("INFO","ea1_publish","publish_enter","checkpoint=publish_enter");
-      g_debug.Write("INFO","ea1_publish","publish_preconditions_check","checkpoint=publish_preconditions_check hydration_complete="+ISSX_OnOff(g_ea1.hydration_complete)+" runtime_state="+ISSX_MarketEngine::RuntimeStateText(g_ea1.runtime_state));
+      g_debug.Write("INFO","ea1_publish","publish_preconditions_check","checkpoint=publish_preconditions_check hydration_complete="+ISSX_OnOff(g_ea1.hydration_complete)+" runtime_state="+ISSX_EA1_RuntimeStateText(g_ea1.runtime_state));
       g_debug.Write("INFO","ea1_publish","publish_build_stage_json_start","checkpoint=publish_build_stage_json_start");
       const bool stage_publish_ok=ISSX_MarketEngine::StagePublish(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,stage_json,broker_dump_json,debug_json);
       g_telemetry.Payload(issx_telemetry_stage_ea1_market,StringLen(stage_json));
