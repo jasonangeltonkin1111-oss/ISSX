@@ -8,7 +8,7 @@
 #include <ISSX/issx_data_handler.mqh>
 
 // ============================================================================
-// ISSX MARKET ENGINE v1.718
+// ISSX MARKET ENGINE v1.719
 // EA1 shared engine for MarketStateCore.
 //
 // HARDENING NOTES
@@ -25,7 +25,7 @@
 //   owner runtime/persistence layer
 // ============================================================================
 
-#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.718"
+#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.719"
 
 enum ISSX_EA1_RuntimeState
   {
@@ -3029,7 +3029,7 @@ public:
       io_state.publish_last_checkpoint="json_symbol_serialize_start";
       if(ArraySize(io_state.symbols)>0)
         {
-         io_state.publish_last_serialized_symbol=io_state.symbols[ArraySize(io_state.symbols)-1].symbol_norm;
+         io_state.publish_last_serialized_symbol=io_state.symbols[ArraySize(io_state.symbols)-1].normalized_identity.symbol_norm;
          ISSX_DataHandler::JsonSymbolSerializeStart(forensic,io_state.publish_last_serialized_symbol);
          ISSX_DataHandler::JsonSymbolSerializeComplete(forensic,io_state.publish_last_serialized_symbol);
          io_state.publish_last_successful_symbol=forensic.last_successful_symbol;

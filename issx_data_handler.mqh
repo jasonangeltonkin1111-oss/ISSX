@@ -1,14 +1,14 @@
-#ifndef __ISSX_DATA_HANDLER_MQH__
+﻿#ifndef __ISSX_DATA_HANDLER_MQH__
 #define __ISSX_DATA_HANDLER_MQH__
 
 #include <ISSX/issx_core.mqh>
 
 // ============================================================================
-// ISSX DATA HANDLER v1.715
+// ISSX DATA HANDLER v1.716
 // Shared JSON/payload/file-commit safety layer for ISSX stages.
 // ============================================================================
 
-#define ISSX_DATA_HANDLER_MODULE_VERSION "1.715"
+#define ISSX_DATA_HANDLER_MODULE_VERSION "1.716"
 
 namespace ISSX_DataHandler
   {
@@ -62,7 +62,7 @@ namespace ISSX_DataHandler
         }
      };
 
-   static int EstimateUtf8Bytes(const string text)
+   int EstimateUtf8Bytes(const string text)
      {
       uchar bytes[];
       const int n=StringToCharArray(text,bytes,0,-1,CP_UTF8);
@@ -71,7 +71,7 @@ namespace ISSX_DataHandler
       return MathMax(0,n-1);
      }
 
-   static void JsonBuildStart(ForensicState &io_state,const string checkpoint)
+   void JsonBuildStart(ForensicState &io_state,const string checkpoint)
      {
       io_state.checkpoint=checkpoint;
       io_state.last_error="none";
@@ -79,7 +79,7 @@ namespace ISSX_DataHandler
       io_state.payload_bytes_written=0;
      }
 
-   static void JsonBuildComplete(ForensicState &io_state,const string payload,const string checkpoint)
+   void JsonBuildComplete(ForensicState &io_state,const string payload,const string checkpoint)
      {
       io_state.checkpoint=checkpoint;
       io_state.payload_bytes_attempted=EstimateUtf8Bytes(payload);
@@ -87,21 +87,21 @@ namespace ISSX_DataHandler
       io_state.last_error="none";
      }
 
-   static void JsonSymbolSerializeStart(ForensicState &io_state,const string symbol)
+   void JsonSymbolSerializeStart(ForensicState &io_state,const string symbol)
      {
       io_state.checkpoint="json_symbol_serialize_start";
       io_state.symbol=symbol;
       io_state.last_serialized_symbol=symbol;
      }
 
-   static void JsonSymbolSerializeComplete(ForensicState &io_state,const string symbol)
+   void JsonSymbolSerializeComplete(ForensicState &io_state,const string symbol)
      {
       io_state.checkpoint="json_symbol_serialize_complete";
       io_state.symbol=symbol;
       io_state.last_successful_symbol=symbol;
      }
 
-   static void JsonFail(ForensicState &io_state,const string checkpoint,const string reason,const int err)
+   void JsonFail(ForensicState &io_state,const string checkpoint,const string reason,const int err)
      {
       io_state.checkpoint=checkpoint;
       io_state.last_error=reason;
@@ -109,33 +109,33 @@ namespace ISSX_DataHandler
          io_state.write_error=err;
      }
 
-   static string EscapeJson(const string s,bool &out_ok)
+   string EscapeJson(const string s,bool &out_ok)
      {
       out_ok=true;
       return ISSX_Util::EscapeJson(s);
      }
 
-   static string JsonStringField(const string name,const string value)
+   string JsonStringField(const string name,const string value)
      {
       return ISSX_JsonWriter::NameStringKV(name,value);
      }
 
-   static string JsonLongField(const string name,const long value)
+   string JsonLongField(const string name,const long value)
      {
       return ISSX_JsonWriter::NameLongKV(name,value);
      }
 
-   static string JsonDoubleField(const string name,const double value,const int digits=ISSX_JSON_DOUBLE_DIGITS_DEFAULT)
+   string JsonDoubleField(const string name,const double value,const int digits=ISSX_JSON_DOUBLE_DIGITS_DEFAULT)
      {
       return ISSX_JsonWriter::NameDoubleKV(name,value,digits);
      }
 
-   static string JsonBoolField(const string name,const bool value)
+   string JsonBoolField(const string name,const bool value)
      {
       return ISSX_JsonWriter::NameBoolKV(name,value);
      }
 
-   static bool WritePayloadAtomic(const string relative_path,
+   bool WritePayloadAtomic(const string relative_path,
                                   const string payload,
                                   ForensicState &io_state,
                                   const bool allow_copy_fallback=true)
@@ -215,7 +215,7 @@ namespace ISSX_DataHandler
       return true;
      }
 
-   static bool CopyProjection(const string src_path,const string dst_path,ForensicState &io_state)
+   bool CopyProjection(const string src_path,const string dst_path,ForensicState &io_state)
      {
       io_state.checkpoint="json_copy_projection_start";
       io_state.temp_path=src_path;
@@ -235,7 +235,7 @@ namespace ISSX_DataHandler
       return true;
      }
 
-   static bool SerializeStagePayload(const string stage_name,const string payload,string &out_json)
+   bool SerializeStagePayload(const string stage_name,const string payload,string &out_json)
      {
       out_json="{";
       out_json+=JsonStringField("stage_name",stage_name)+",";
@@ -245,7 +245,7 @@ namespace ISSX_DataHandler
       return (StringLen(out_json)>2);
      }
 
-   static bool ParseStagePayload(const string json,Envelope &out_envelope)
+   bool ParseStagePayload(const string json,Envelope &out_envelope)
      {
       out_envelope.Reset();
       if(StringLen(json)<=2)
@@ -255,14 +255,14 @@ namespace ISSX_DataHandler
       return true;
      }
 
-   static bool SaveStagePayload(const string relative_path,const string payload)
+   bool SaveStagePayload(const string relative_path,const string payload)
      {
       ForensicState fs;
       fs.Reset();
       return WritePayloadAtomic(relative_path,payload,fs,true);
      }
 
-   static bool LoadStagePayload(const string relative_path,string &payload)
+   bool LoadStagePayload(const string relative_path,string &payload)
      {
       payload="";
       ResetLastError();
@@ -281,7 +281,7 @@ namespace ISSX_DataHandler
       return (err==0);
      }
 
-   static bool ValidateExchangeCompatibility(const string producer_stage,
+   bool ValidateExchangeCompatibility(const string producer_stage,
                                              const string consumer_stage,
                                              string &reason)
      {
