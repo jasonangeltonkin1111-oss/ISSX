@@ -7,7 +7,7 @@
 #include <ISSX/issx_persistence.mqh>
 
 // ============================================================================
-// ISSX MARKET ENGINE v1.705
+// ISSX MARKET ENGINE v1.706
 // EA1 shared engine for MarketStateCore.
 //
 // HARDENING NOTES
@@ -24,7 +24,7 @@
 //   owner runtime/persistence layer
 // ============================================================================
 
-#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.705"
+#define ISSX_MARKET_ENGINE_MODULE_VERSION "1.706"
 
 // ============================================================================
 // SECTION 01: EA1 PHASE IDS
@@ -75,7 +75,7 @@ enum ISSX_EA1_SessionPhase
    issx_ea1_session_rollover
   };
 
-// Legacy owner-side bridge for pre-v1.705 EA1 session labels.
+// Legacy owner-side bridge for pre-v1.706 EA1 session labels.
 #define issx_ea1_session_preopen    issx_ea1_session_pre_open
 #define issx_ea1_session_transition issx_ea1_session_rollover
 
@@ -2446,10 +2446,10 @@ public:
       UpdateGlobalStateFlags(io_state);
      }
 
-   static void RefreshDiscoveryOnly(ISSX_EA1_State &io_state)
+   static bool RefreshDiscoveryOnly(ISSX_EA1_State &io_state)
      {
       io_state.scheduler.phase_id=ISSX_EA1_MapToRuntimePhase(issx_ea1_phase_discover_symbols);
-      DiscoverUniverse(io_state,false,0);
+      return DiscoverUniverse(io_state,false,0);
      }
 
    static void AdvanceOneCycle(ISSX_EA1_State &io_state)
@@ -2518,25 +2518,57 @@ public:
                           const string writer_nonce,
                           const int max_symbols=0)
      {
+      io_state.discovery_attempted=false;
+      io_state.discovery_skipped=false;
+      io_state.discovery_success=false;
+      io_state.discovery_no_change=false;
+      io_state.discovery_elapsed_ms=0;
+      io_state.discovery_status_reason="none";
+
       int current_minute=(int)(TimeCurrent()/60);
       io_state.minute_id=current_minute;
 
       const bool discovery_due=(io_state.sequence_no<=0 || io_state.discovery_minute_id!=current_minute);
       if(discovery_due)
         {
-         if(g_ea1_last_skip_log_minute!=current_minute)
+         io_state.discovery_attempted=true;
+         const int symbols_before=ArraySize(io_state.symbols);
+         const ulong t0=GetTickCount();
+         const bool discovery_ok=RefreshDiscoveryOnly(io_state);
+         io_state.discovery_elapsed_ms=(int)(GetTickCount()-t0);
+         io_state.discovery_minute_id=current_minute;
+         io_state.discovery_success=discovery_ok;
+         io_state.discovery_no_change=(ArraySize(io_state.symbols)==symbols_before);
+         io_state.discovery_skip_streak=0;
+
+         g_ea1_last_discovery_attempted=true;
+         g_ea1_last_discovery_skipped=false;
+         g_ea1_last_discovery_no_change=io_state.discovery_no_change;
+         g_ea1_last_discovery_symbols=ArraySize(io_state.symbols);
+         g_ea1_last_discovery_elapsed_ms=(long)io_state.discovery_elapsed_ms;
+
+         if(discovery_ok)
            {
-            g_ea1_last_discovery_skipped=true;
-            g_ea1_last_skip_log_minute=current_minute;
+            io_state.discovery_status_reason="success";
+            g_ea1_last_discovery_error="";
+           }
+         else
+           {
+            io_state.discovery_status_reason="empty_discovery";
+            g_ea1_last_discovery_error=io_state.discovery_status_reason;
            }
         }
       else
         {
-         g_ea1_last_discovery_attempted=true;
-         int symbols_before=ArraySize(io_state.symbols);
-         ulong t0=GetTickCount();
-         RefreshDiscoveryOnly(io_state);
-         io_state.discovery_minute_id=current_minute;
+         io_state.discovery_skipped=true;
+         io_state.discovery_skip_streak++;
+         io_state.discovery_status_reason="cadence_same_minute";
+
+         g_ea1_last_discovery_attempted=false;
+         g_ea1_last_discovery_skipped=true;
+         g_ea1_last_discovery_no_change=false;
+         g_ea1_last_discovery_elapsed_ms=0;
+         g_ea1_last_skip_log_minute=current_minute;
         }
 
       if(max_symbols>0 && ArraySize(io_state.symbols)>max_symbols)
