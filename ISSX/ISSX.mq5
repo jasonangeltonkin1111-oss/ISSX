@@ -854,12 +854,12 @@ void OnTimer()
      }
 
    if((g_timer_pulse_count%15)==1 || !ok)
-      g_debug.Write("INFO","timer","kernel_result",(ok?"ok":"degraded")+" elapsed_ms="+IntegerToString((int)kernel_elapsed_ms));
+      g_debug.Write("INFO","timer","kernel_result",(ok?"ok":"degraded"));
 
    g_first_cycle_done=true;
    g_kernel_busy=false;
 
-   string status=(ok ? "ISSX minimal-debug | firm="+g_firm_id : "ISSX degraded | firm="+g_firm_id);
+   string status=(ok ? "ISSX running | firm="+g_firm_id : "ISSX degraded | firm="+g_firm_id);
    if(status!=g_last_status_comment || (g_timer_pulse_count-g_last_comment_pulse)>=15)
      {
       Comment(status);
