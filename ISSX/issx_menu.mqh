@@ -3,7 +3,7 @@
 
 #define ISSX_MENU_ROWS 5
 
-// ISSX MENU ENGINE v1.708
+// ISSX MENU ENGINE v1.709
 
 class ISSX_MenuEngine
   {
@@ -82,6 +82,17 @@ public:
       return true;
      }
 
+   bool IsOwnedObject(const string object_name) const
+     {
+      if(StringLen(m_prefix)==0)
+         return false;
+      string owned_prefix=m_prefix+"_";
+      int owned_prefix_len=StringLen(owned_prefix);
+      if(StringLen(object_name)<=owned_prefix_len)
+         return false;
+      return (StringSubstr(object_name,0,owned_prefix_len)==owned_prefix);
+     }
+
    bool HandleClick(const string object_name,bool &enabled[],const bool allow_toggle=true)
      {
       m_last_error="";
@@ -121,6 +132,12 @@ public:
         }
 
       int idx=row-1;
+      if(idx==0)
+        {
+         m_last_error="ea1_foundation_lock";
+         return false;
+        }
+
       enabled[idx]=!enabled[idx];
       return true;
      }
