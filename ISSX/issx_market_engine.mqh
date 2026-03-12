@@ -985,14 +985,14 @@ public:
 // SECTION 05: MARKET ENGINE
 // ============================================================================
 
-int g_ea1_last_discovery_minute=-1;
-int g_ea1_last_skip_log_minute=-1;
-bool g_ea1_last_discovery_attempted=false;
-bool g_ea1_last_discovery_skipped=false;
-bool g_ea1_last_discovery_no_change=false;
-int g_ea1_last_discovery_symbols=0;
-long g_ea1_last_discovery_elapsed_ms=0;
-string g_ea1_last_discovery_error="";
+int g_ea1_last_discovery_minute;
+int g_ea1_last_skip_log_minute;
+bool g_ea1_last_discovery_attempted;
+bool g_ea1_last_discovery_skipped;
+bool g_ea1_last_discovery_no_change;
+int g_ea1_last_discovery_symbols;
+long g_ea1_last_discovery_elapsed_ms;
+string g_ea1_last_discovery_error;
 
 class ISSX_MarketEngine
   {
