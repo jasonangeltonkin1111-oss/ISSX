@@ -47,11 +47,11 @@ input bool   InpSafeMode                = false; // true = attach + timer only, 
 input bool   InpRunFirstCycleInOnInit   = false; // keep false
 input bool   InpBypassLocks             = true;  // keep true until lock logic is fixed
 input bool   InpEnableEA1               = true;
-input bool   InpEnableEA2               = false;
-input bool   InpEnableEA3               = false;
-input bool   InpEnableEA4               = false;
-input bool   InpEnableEA5               = false;
-input bool   InpIsolationMode            = true;  // force EA1-only during forensic pass
+input bool   InpEnableEA2               = true;
+input bool   InpEnableEA3               = true;
+input bool   InpEnableEA4               = true;
+input bool   InpEnableEA5               = true;
+input bool   InpIsolationMode            = false; // allow EA1-EA5 to run together by default
 
 input bool   InpMinimalDebugMode              = false; // default: full EA1 foundation active
 input bool   InpGateRuntimeScheduler          = true;  // enables runtime init + kernel pulse
