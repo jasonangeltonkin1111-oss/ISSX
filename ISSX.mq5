@@ -53,15 +53,15 @@ input bool   InpEnableEA4               = false;
 input bool   InpEnableEA5               = false;
 input bool   InpIsolationMode            = true;  // force EA1-only during forensic pass
 
-input bool   InpMinimalDebugMode        = false; // default: full EA1 foundation active
-input bool   InpGateRuntimeScheduler    = true;  // enables runtime init + kernel pulse
-input bool   InpGateTimerHeavyWork      = true;  // foundation default: enables ISSX_RunKernelCycle from timer
-input bool   InpGateMenuEngine          = false;
-input bool   InpGateChartUiUpdates      = false;
-input bool   InpGateTickHeavyWork       = true;  // enables any non-trivial tick path
-input bool   InpGateUiProjection        = true;  // foundation default: enable HUD projection
-input bool   InpEnableRuntimeSchedulerLayer = false;
-input int    InpSchedulerCycleBudgetMs  = 25;
+input bool   InpMinimalDebugMode              = false; // default: full EA1 foundation active
+input bool   InpGateRuntimeScheduler          = true;  // enables runtime init + kernel pulse
+input bool   InpGateTimerHeavyWork            = true;  // foundation default: enables ISSX_RunKernelCycle from timer
+input bool   InpGateMenuEngine                = false;
+input bool   InpGateChartUiUpdates            = false;
+input bool   InpGateTickHeavyWork             = true;  // enables any non-trivial tick path
+input bool   InpGateUiProjection              = true;  // foundation default: enable HUD projection
+input bool   InpEnableRuntimeSchedulerLayer   = false;
+input int    InpSchedulerCycleBudgetMs        = 25;
 
 ISSX_MemoryGuard   g_memory_guard;
 ISSX_RegistryBundle   g_registry;
@@ -95,7 +95,7 @@ ISSX_TelemetryEngine g_telemetry;
 ISSX_MetricsBook    g_metrics;
 ISSX_InfraStageRegistry g_stage_registry_infra;
 string              g_last_system_snapshot = "";
-bool                g_ea_enabled[5]={true,false,false,false,false};
+bool                g_ea_enabled[5];
 string              g_last_checkpoint           = "boot";
 bool                g_first_tick_logged         = false;
 bool                g_first_timer_logged        = false;
@@ -112,9 +112,11 @@ string              g_last_feature_runtime_scheduler = "";
 string              g_last_feature_timer_heavy       = "";
 string              g_last_feature_init_runtime_scheduler = "";
 string              g_last_feature_run_tick_heavy         = "";
-string              g_last_kernel_result             = "unknown";
-string              g_last_kernel_reason             = "none";
-long                g_last_kernel_elapsed_ms         = 0;
+string              g_startup_profile                     = "unknown";
+datetime            g_ea1_last_publish_attempt_time      = 0;
+string              g_last_kernel_result                 = "unknown";
+string              g_last_kernel_reason                 = "none";
+long                g_last_kernel_elapsed_ms             = 0;
 string              g_last_ea1_stage_run             = "skipped";
 string              g_last_ea1_stage_reason          = "none";
 long                g_last_ea1_stage_elapsed_ms      = 0;
@@ -155,12 +157,10 @@ string              g_market_log_relative_path     = "";
 string              g_operator_root_relative       = "ISSX";
 string              g_market_rolling_json_relative_path = "";
 datetime            g_ea1_rolling_last_write_time = 0;
-long                g_ea1_rolling_last_minute_id  = -1;
 int                 g_ea1_rolling_cursor          = 0;
+string              g_ea1_rolling_universe_fingerprint = "";
 string              g_ea1_recent_snapshots[];
 int                 g_ea1_recent_snapshots_count  = 0;
-datetime            g_ea1_last_publish_attempt_time = 0;
-string              g_startup_profile           = "unknown";
 
 string ISSX_LongIdPart(const long value)
   {
@@ -583,22 +583,156 @@ string ISSX_JsonQ(const string s)
 
 string ISSX_EA1RollingSymbolJson(const ISSX_EA1_SymbolState &sym)
   {
+   const double bid=sym.raw_broker_observation.quote_tick_snapshot.bid;
+   const double ask=sym.raw_broker_observation.quote_tick_snapshot.ask;
+   const double last=sym.raw_broker_observation.quote_tick_snapshot.last;
+
+   const bool has_live_quote=(bid>0.0 && ask>0.0);
+   const bool rankable=(sym.rankability_gate.rankable_flag && has_live_quote);
+
    string j="{";
+
+   // identity
    j+="\"symbol\":"+ISSX_JsonQ(sym.normalized_identity.symbol_norm)+",";
+   j+="\"symbol_raw\":"+ISSX_JsonQ(sym.raw_broker_observation.symbol_raw)+",";
    j+="\"family\":"+ISSX_JsonQ(sym.normalized_identity.alias_family_id)+",";
+   j+="\"description\":"+ISSX_JsonQ(sym.raw_broker_observation.description)+",";
+   j+="\"path\":"+ISSX_JsonQ(sym.raw_broker_observation.path)+",";
+
+   // classification
+   j+="\"asset_class\":"+ISSX_JsonQ(sym.classification_truth.asset_class)+",";
+   j+="\"instrument_family\":"+ISSX_JsonQ(sym.classification_truth.instrument_family)+",";
+   j+="\"theme_bucket\":"+ISSX_JsonQ(sym.classification_truth.theme_bucket)+",";
+   j+="\"equity_sector\":"+ISSX_JsonQ(sym.classification_truth.equity_sector)+",";
+   j+="\"native_sector\":"+ISSX_JsonQ(sym.classification_truth.native_sector)+",";
+   j+="\"native_industry\":"+ISSX_JsonQ(sym.classification_truth.native_industry)+",";
+   j+="\"derived_sector\":"+ISSX_JsonQ(sym.classification_truth.derived_sector)+",";
+   j+="\"derived_industry\":"+ISSX_JsonQ(sym.classification_truth.derived_industry)+",";
+   j+="\"final_sector\":"+ISSX_JsonQ(sym.classification_truth.final_sector)+",";
+   j+="\"final_industry\":"+ISSX_JsonQ(sym.classification_truth.final_industry)+",";
+   j+="\"final_subsector\":"+ISSX_JsonQ(sym.classification_truth.final_subsector)+",";
+   j+="\"classification_source\":"+ISSX_JsonQ(sym.classification_truth.classification_source)+",";
+   j+="\"classification_confidence\":"+ISSX_Util::DoubleToStringX(sym.classification_truth.classification_confidence,4)+",";
+   j+="\"classification_reliability_score\":"+ISSX_Util::DoubleToStringX(sym.classification_truth.classification_reliability_score,4)+",";
+   j+="\"bucket_publishable\":"+(sym.classification_truth.bucket_publishable?"true":"false")+",";
+
+   // live market state
    j+="\"state\":"+ISSX_JsonQ(ISSX_MarketEngine::PracticalMarketStateText(sym.validated_runtime_truth.practical_market_state))+",";
-   j+="\"bid\":"+ISSX_Util::DoubleToStringX(sym.raw_broker_observation.quote_tick_snapshot.bid,6)+",";
-   j+="\"ask\":"+ISSX_Util::DoubleToStringX(sym.raw_broker_observation.quote_tick_snapshot.ask,6)+",";
+   j+="\"readability_state\":"+ISSX_JsonQ(sym.raw_broker_observation.metadata_readable?"full":"unreadable")+",";
+   j+="\"quote_recent\":"+(sym.validated_runtime_truth.quote_recent_flag?"true":"false")+",";
+   j+="\"trade_permitted_now\":"+(sym.validated_runtime_truth.trade_permitted_now?"true":"false")+",";
+   j+="\"observed_quote_liveness\":"+(sym.validated_runtime_truth.observed_quote_liveness?"true":"false")+",";
+   j+="\"session_phase\":"+ISSX_JsonQ(ISSX_EA1SessionPhaseToText(sym.validated_runtime_truth.session_phase_class))+",";
+   j+="\"session_truth_confidence\":"+ISSX_Util::DoubleToStringX(sym.validated_runtime_truth.session_truth_confidence,4)+",";
+   j+="\"runtime_truth_score\":"+ISSX_Util::DoubleToStringX(sym.validated_runtime_truth.runtime_truth_score,4)+",";
+   j+="\"current_friction_state\":"+ISSX_JsonQ(sym.validated_runtime_truth.current_friction_state)+",";
+   j+="\"spread_state_vs_baseline\":"+ISSX_JsonQ(sym.validated_runtime_truth.spread_state_vs_baseline)+",";
+
+   // quote
+   j+="\"bid\":"+ISSX_Util::DoubleToStringX(bid,6)+",";
+   j+="\"ask\":"+ISSX_Util::DoubleToStringX(ask,6)+",";
+   j+="\"last\":"+ISSX_Util::DoubleToStringX(last,6)+",";
    j+="\"spread_points\":"+ISSX_Util::DoubleToStringX(sym.validated_runtime_truth.current_spread_points,2)+",";
-   j+="\"rankable\":"+(sym.rankability_gate.rankable_flag?"true":"false");
+   j+="\"spread_money_per_lot\":"+ISSX_Util::DoubleToStringX(sym.validated_runtime_truth.current_spread_money_per_lot,4)+",";
+
+   // instrument specification
+   j+="\"digits\":"+IntegerToString(sym.raw_broker_observation.digits)+",";
+   j+="\"point\":"+ISSX_Util::DoubleToStringX(sym.raw_broker_observation.point,8)+",";
+   j+="\"tick_size\":"+ISSX_Util::DoubleToStringX(sym.raw_broker_observation.tick_size,8)+",";
+   j+="\"tick_value\":"+ISSX_Util::DoubleToStringX(sym.raw_broker_observation.tick_value,4)+",";
+   j+="\"tick_value_profit\":"+ISSX_Util::DoubleToStringX(sym.raw_broker_observation.tick_value_profit,4)+",";
+   j+="\"tick_value_loss\":"+ISSX_Util::DoubleToStringX(sym.raw_broker_observation.tick_value_loss,4)+",";
+   j+="\"contract_size\":"+ISSX_Util::DoubleToStringX(sym.raw_broker_observation.contract_size,4)+",";
+   j+="\"volume_min\":"+ISSX_Util::DoubleToStringX(sym.raw_broker_observation.volume_min,4)+",";
+   j+="\"volume_step\":"+ISSX_Util::DoubleToStringX(sym.raw_broker_observation.volume_step,4)+",";
+   j+="\"volume_max\":"+ISSX_Util::DoubleToStringX(sym.raw_broker_observation.volume_max,4)+",";
+   j+="\"stops_level\":"+IntegerToString(sym.raw_broker_observation.stops_level)+",";
+   j+="\"freeze_level\":"+IntegerToString(sym.raw_broker_observation.freeze_level)+",";
+
+   // currency / venue
+   j+="\"base_currency\":"+ISSX_JsonQ(sym.raw_broker_observation.base_currency)+",";
+   j+="\"quote_currency\":"+ISSX_JsonQ(sym.raw_broker_observation.quote_currency)+",";
+   j+="\"margin_currency\":"+ISSX_JsonQ(sym.raw_broker_observation.margin_currency)+",";
+   j+="\"profit_currency\":"+ISSX_JsonQ(sym.raw_broker_observation.profit_currency)+",";
+   j+="\"exchange\":"+ISSX_JsonQ(sym.raw_broker_observation.exchange)+",";
+
+   // tradeability
+   j+="\"tradeability_class\":"+ISSX_JsonQ(ISSX_EA1TradeabilityClassToText(sym.tradeability_baseline.tradeability_class))+",";
+   j+="\"spread_cost_points\":"+ISSX_Util::DoubleToStringX(sym.tradeability_baseline.spread_cost_points,2)+",";
+   j+="\"roundtrip_cost_points\":"+ISSX_Util::DoubleToStringX(sym.tradeability_baseline.roundtrip_cost_points,2)+",";
+   j+="\"commission_cost_money_per_lot\":"+ISSX_Util::DoubleToStringX(sym.tradeability_baseline.commission_cost_money_per_lot,4)+",";
+   j+="\"minimum_ticket_money\":"+ISSX_Util::DoubleToStringX(sym.tradeability_baseline.minimum_ticket_money,4)+",";
+   j+="\"notional_tick_value_money\":"+ISSX_Util::DoubleToStringX(sym.tradeability_baseline.notional_tick_value_money,4)+",";
+   j+="\"cost_complete\":"+(sym.tradeability_baseline.cost_complete?"true":"false")+",";
+   j+="\"blocked_for_trading\":"+(sym.tradeability_baseline.blocked_for_trading?"true":"false")+",";
+   j+="\"blocked_for_ranking\":"+(sym.tradeability_baseline.blocked_for_ranking?"true":"false")+",";
+   j+="\"tradeability_reason_codes\":"+ISSX_JsonQ(sym.tradeability_baseline.tradeability_reason_codes)+",";
+
+   // rankability
+   j+="\"rankable\":"+(rankable?"true":"false")+",";
+   j+="\"rankable_raw\":"+(sym.rankability_gate.rankable_flag?"true":"false")+",";
+   j+="\"eligible\":"+(sym.rankability_gate.eligible_flag?"true":"false")+",";
+   j+="\"active\":"+(sym.rankability_gate.active_flag?"true":"false")+",";
+   j+="\"publishable\":"+(sym.rankability_gate.publishable_flag?"true":"false")+",";
+   j+="\"hard_block\":"+(sym.rankability_gate.hard_block_flag?"true":"false")+",";
+   j+="\"exploratory_only\":"+(sym.rankability_gate.exploratory_only_flag?"true":"false")+",";
+   j+="\"acceptance_decision\":"+ISSX_JsonQ(ISSX_EA1AcceptanceDecisionToText(sym.rankability_gate.acceptance_decision))+",";
+   j+="\"gate_reason_codes\":"+ISSX_JsonQ(sym.rankability_gate.gate_reason_codes)+",";
+   j+="\"dependency_block_reason\":"+ISSX_JsonQ(sym.rankability_gate.dependency_block_reason)+",";
+
+   // quality guard
+   j+="\"has_live_quote\":"+(has_live_quote?"true":"false");
+
    j+="}";
    return j;
   }
 
+string ISSX_EA1SessionPhaseToText(const ISSX_EA1_SessionPhase phase)
+  {
+   switch(phase)
+     {
+      case issx_ea1_session_closed:   return "closed";
+      case issx_ea1_session_pre_open: return "pre_open";
+      case issx_ea1_session_open:     return "open";
+      case issx_ea1_session_mid:      return "mid";
+      case issx_ea1_session_late:     return "late";
+      case issx_ea1_session_rollover: return "rollover";
+      default:                        return "unknown";
+     }
+  }
+
+string ISSX_EA1TradeabilityClassToText(const ISSX_TradeabilityClass v)
+  {
+   switch(v)
+     {
+      case issx_tradeability_very_cheap: return "very_cheap";
+      case issx_tradeability_cheap:      return "cheap";
+      case issx_tradeability_moderate:   return "moderate";
+      case issx_tradeability_expensive:  return "expensive";
+      case issx_tradeability_blocked:    return "blocked";
+      default:                           return "unknown";
+     }
+  }
+
+string ISSX_EA1AcceptanceDecisionToText(const int v)
+  {
+   switch(v)
+     {
+      case issx_acceptance_accepted_for_pipeline:     return "accepted_for_pipeline";
+      case issx_acceptance_accepted_for_ranking:      return "accepted_for_ranking";
+      case issx_acceptance_accepted_for_intelligence: return "accepted_for_intelligence";
+      case issx_acceptance_accepted_for_gpt_export:   return "accepted_for_gpt_export";
+      case issx_acceptance_accepted_degraded:         return "accepted_degraded";
+      case issx_acceptance_rejected:                  return "rejected";
+      default:                                        return "unknown";
+     }
+  }
+  
 void ISSX_EA1RollingAppendSnapshot(const string snapshot_json)
   {
    int pruned=0;
-   int keep=MathMax(1,InpEA1RollingMaxSnapshots);
+   const int keep=ISSX_EA1RollingMaxSnapshots();
+
    if(g_ea1_recent_snapshots_count<0)
       g_ea1_recent_snapshots_count=0;
 
@@ -630,25 +764,35 @@ bool ISSX_MaybePersistEA1RollingJson()
    if(now<=0)
       return false;
 
-   const int cadence=MathMax(1,InpEA1RollingCadenceSec);
+   const int cadence=ISSX_EA1RollingCadenceSec();
    if(g_ea1_rolling_last_write_time>0 && (int)(now-g_ea1_rolling_last_write_time)<cadence)
       return false;
 
    const int total=ArraySize(g_ea1.symbols);
-   const long minute_id=(long)(now/60);
-   if(g_ea1_rolling_last_minute_id!=minute_id)
-     {
-      g_ea1_rolling_last_minute_id=minute_id;
-      g_ea1_rolling_cursor=0;
-     }
-
-   const int rolling_batch_size=MathMax(1,InpEA1RollingBatchSize);
+   const int rolling_batch_size=ISSX_EA1RollingBatchSize();
    const int batch_size=MathMax(1,MathMin(50,rolling_batch_size));
+
+   const string current_universe_fingerprint=
+      (StringLen(g_ea1.universe.broker_universe_fingerprint)>0
+       ? g_ea1.universe.broker_universe_fingerprint
+       : g_ea1.universe.rankable_universe_fingerprint);
+
+   const bool universe_changed=
+      (StringLen(g_ea1_rolling_universe_fingerprint)>0 &&
+       g_ea1_rolling_universe_fingerprint!=current_universe_fingerprint);
+
+   if(universe_changed)
+      g_ea1_rolling_cursor=0;
+
+   g_ea1_rolling_universe_fingerprint=current_universe_fingerprint;
+
+   if(g_ea1_rolling_cursor<0)
+      g_ea1_rolling_cursor=0;
    if(g_ea1_rolling_cursor>=total)
       g_ea1_rolling_cursor=0;
 
-   const int batch_start=(total>0?g_ea1_rolling_cursor:0);
-   const int batch_count=(total>0?MathMin(batch_size,total-batch_start):0);
+   const int batch_start=(total>0 ? g_ea1_rolling_cursor : 0);
+   const int batch_count=(total>0 ? MathMin(batch_size,total-batch_start) : 0);
 
    if(batch_count>0)
      {
@@ -658,9 +802,16 @@ bool ISSX_MaybePersistEA1RollingJson()
      }
 
    const int hydration_remaining=MathMax(0,g_ea1.hydration_total-g_ea1.hydration_processed);
-   const double hydration_progress=(g_ea1.hydration_total>0)?((double)g_ea1.hydration_processed/(double)g_ea1.hydration_total):(g_ea1.hydration_complete?1.0:0.0);
-   const string hydration_state=(g_ea1.hydration_complete?"complete":((g_ea1.hydration_processed>0||g_ea1.hydration_total>0)?"in_progress":"not_started"));
+   const double hydration_progress=(g_ea1.hydration_total>0)
+                                   ? ((double)g_ea1.hydration_processed/(double)g_ea1.hydration_total)
+                                   : (g_ea1.hydration_complete?1.0:0.0);
+   const string hydration_state=(g_ea1.hydration_complete
+                                 ? "complete"
+                                 : ((g_ea1.hydration_processed>0 || g_ea1.hydration_total>0)
+                                    ? "in_progress"
+                                    : "not_started"));
    const string server_time=TimeToString(now,TIME_DATE|TIME_SECONDS);
+   const long minute_id=(long)(now/60);
 
    ISSX_JsonWriter snap;
    snap.Reset();
@@ -674,68 +825,65 @@ bool ISSX_MaybePersistEA1RollingJson()
    snap.NameString("ea1_state",ISSX_MarketEngine::RuntimeStateText(g_ea1.runtime_state));
    snap.NameString("hydration_state",hydration_state);
    snap.NameDouble("hydration_progress",hydration_progress,4);
+   snap.NameString("universe_fingerprint",current_universe_fingerprint);
    snap.EndObject();
    ISSX_EA1RollingAppendSnapshot(snap.ToString());
 
-   ISSX_JsonWriter payload_w;
-   payload_w.Reset();
-   payload_w.BeginObject();
-   payload_w.NameString("schema","issx.ea1.market");
-   payload_w.NameString("version",ISSX_ENGINE_VERSION);
-   payload_w.NameString("broker",g_operator_broker_name);
-   payload_w.NameString("server",g_operator_server_name);
-   payload_w.NameLong("login",g_operator_login_id);
-   payload_w.NameString("firm_id",g_firm_id);
-   payload_w.NameString("instance_id",g_boot_id);
-   payload_w.NameString("server_time",server_time);
-   payload_w.NameString("ea1_state",ISSX_MarketEngine::RuntimeStateText(g_ea1.runtime_state));
-   payload_w.NameString("stage_state",g_last_ea1_stage_run);
-   payload_w.NameString("stage_reason",g_last_ea1_stage_reason);
-   payload_w.NameInt("symbol_total",total);
-   payload_w.NameInt("hydration_processed",g_ea1.hydration_processed);
-   payload_w.NameInt("hydration_total",g_ea1.hydration_total);
-   payload_w.NameInt("hydration_remaining",hydration_remaining);
-   payload_w.NameString("hydration_state",hydration_state);
-   payload_w.NameDouble("hydration_progress",hydration_progress,4);
+   string payload="{";
+   payload+="\"schema\":\"issx.ea1.market\",";
+   payload+="\"version\":"+ISSX_JsonQ(ISSX_ENGINE_VERSION)+",";
+   payload+="\"broker\":"+ISSX_JsonQ(g_operator_broker_name)+",";
+   payload+="\"server\":"+ISSX_JsonQ(g_operator_server_name)+",";
+   payload+="\"login\":"+IntegerToString((int)g_operator_login_id)+",";
+   payload+="\"firm_id\":"+ISSX_JsonQ(g_firm_id)+",";
+   payload+="\"instance_id\":"+ISSX_JsonQ(g_boot_id)+",";
+   payload+="\"server_time\":"+ISSX_JsonQ(server_time)+",";
+   payload+="\"minute_id\":"+IntegerToString((int)minute_id)+",";
+   payload+="\"ea1_state\":"+ISSX_JsonQ(ISSX_MarketEngine::RuntimeStateText(g_ea1.runtime_state))+",";
+   payload+="\"stage_state\":"+ISSX_JsonQ(g_last_ea1_stage_run)+",";
+   payload+="\"stage_reason\":"+ISSX_JsonQ(g_last_ea1_stage_reason)+",";
+   payload+="\"symbol_total\":"+IntegerToString(total)+",";
+   payload+="\"universe_fingerprint\":"+ISSX_JsonQ(current_universe_fingerprint)+",";
+   payload+="\"hydration_processed\":"+IntegerToString(g_ea1.hydration_processed)+",";
+   payload+="\"hydration_total\":"+IntegerToString(g_ea1.hydration_total)+",";
+   payload+="\"hydration_remaining\":"+IntegerToString(hydration_remaining)+",";
+   payload+="\"hydration_state\":"+ISSX_JsonQ(hydration_state)+",";
+   payload+="\"hydration_progress\":"+ISSX_Util::DoubleToStringX(hydration_progress,4)+",";
 
-   payload_w.BeginNamedObject("batch");
-   payload_w.NameInt("size",batch_size);
-   payload_w.NameInt("start",batch_start);
-   payload_w.NameInt("count",batch_count);
-   payload_w.NameInt("total",total);
-   payload_w.NameInt("cursor_next",g_ea1_rolling_cursor);
-   payload_w.EndObject();
+   payload+="\"batch\":{";
+   payload+="\"size\":"+IntegerToString(batch_size)+",";
+   payload+="\"start\":"+IntegerToString(batch_start)+",";
+   payload+="\"count\":"+IntegerToString(batch_count)+",";
+   payload+="\"total\":"+IntegerToString(total)+",";
+   payload+="\"cursor_next\":"+IntegerToString(g_ea1_rolling_cursor);
+   payload+="},";
 
-   payload_w.BeginNamedArray("symbols");
+   payload+="\"symbols\":[";
    for(int i=0;i<batch_count;i++)
      {
-      const ISSX_EA1_SymbolState &sym=g_ea1.symbols[batch_start+i];
-      payload_w.BeginObject();
-      payload_w.NameString("symbol",sym.normalized_identity.symbol_norm);
-      payload_w.NameString("family",sym.normalized_identity.alias_family_id);
-      payload_w.NameString("state",ISSX_MarketEngine::PracticalMarketStateText(sym.validated_runtime_truth.practical_market_state));
-      payload_w.NameDouble("bid",sym.raw_broker_observation.quote_tick_snapshot.bid,6);
-      payload_w.NameDouble("ask",sym.raw_broker_observation.quote_tick_snapshot.ask,6);
-      payload_w.NameDouble("spread_points",sym.validated_runtime_truth.current_spread_points,2);
-      payload_w.NameBool("rankable",sym.rankability_gate.rankable_flag);
-      payload_w.EndObject();
+      if(i>0)
+         payload+=",";
+      payload+=ISSX_EA1RollingSymbolJson(g_ea1.symbols[batch_start+i]);
      }
-   payload_w.EndArray();
+   payload+="],";
 
-   payload_w.BeginNamedObject("downstream");
-   payload_w.BeginNamedObject("ea2"); payload_w.NameString("run",g_last_ea2_stage_run); payload_w.NameString("reason",g_last_ea2_stage_reason); payload_w.EndObject();
-   payload_w.BeginNamedObject("ea3"); payload_w.NameString("run",g_last_ea3_stage_run); payload_w.NameString("reason",g_last_ea3_stage_reason); payload_w.EndObject();
-   payload_w.BeginNamedObject("ea4"); payload_w.NameString("run",g_last_ea4_stage_run); payload_w.NameString("reason",g_last_ea4_stage_reason); payload_w.EndObject();
-   payload_w.BeginNamedObject("ea5"); payload_w.NameString("run",g_last_ea5_stage_run); payload_w.NameString("reason",g_last_ea5_stage_reason); payload_w.EndObject();
-   payload_w.EndObject();
+   payload+="\"downstream\":{";
+   payload+="\"ea2\":{\"run\":"+ISSX_JsonQ(g_last_ea2_stage_run)+",\"reason\":"+ISSX_JsonQ(g_last_ea2_stage_reason)+"},";
+   payload+="\"ea3\":{\"run\":"+ISSX_JsonQ(g_last_ea3_stage_run)+",\"reason\":"+ISSX_JsonQ(g_last_ea3_stage_reason)+"},";
+   payload+="\"ea4\":{\"run\":"+ISSX_JsonQ(g_last_ea4_stage_run)+",\"reason\":"+ISSX_JsonQ(g_last_ea4_stage_reason)+"},";
+   payload+="\"ea5\":{\"run\":"+ISSX_JsonQ(g_last_ea5_stage_run)+",\"reason\":"+ISSX_JsonQ(g_last_ea5_stage_reason)+"}";
+   payload+="},";
 
-   payload_w.BeginNamedArray("recent_snapshots");
+   payload+="\"recent_snapshots\":[";
    for(int r=0;r<g_ea1_recent_snapshots_count;r++)
-      payload_w.ValueString(g_ea1_recent_snapshots[r]);
-   payload_w.EndArray();
-   payload_w.EndObject();
+     {
+      if(r>0)
+         payload+=",";
+      payload+=g_ea1_recent_snapshots[r];
+     }
+   payload+="]";
 
-   const string payload=payload_w.ToString();
+   payload+="}";
 
    g_debug.Write("INFO","ea1_publish","json_build_success",
                  "path="+g_market_rolling_json_relative_path+
@@ -743,7 +891,9 @@ bool ISSX_MaybePersistEA1RollingJson()
                  " batch_count="+IntegerToString(batch_count)+
                  " total="+IntegerToString(total)+
                  " bytes="+IntegerToString(ISSX_DataHandler::EstimateUtf8Bytes(payload)));
-
+                 
+string rolling_snapshot_reason="ok";
+ISSX_RegisterRuntimeSnapshot("ea1_rolling_json",payload,now,rolling_snapshot_reason);
    const bool write_ok=ISSX_FileIO::WriteTextAtomic(g_market_rolling_json_relative_path,payload);
    g_ea1_rolling_last_write_time=now;
 
@@ -751,7 +901,9 @@ bool ISSX_MaybePersistEA1RollingJson()
                  (write_ok?"json_write_success":"json_write_fail"),
                  "path="+g_market_rolling_json_relative_path+
                  " cursor_next="+IntegerToString(g_ea1_rolling_cursor)+
-                 " snapshots="+IntegerToString(g_ea1_recent_snapshots_count));
+                 " snapshots="+IntegerToString(g_ea1_recent_snapshots_count)+
+                 " fingerprint="+current_universe_fingerprint);
+
    return write_ok;
   }
 
@@ -801,6 +953,17 @@ bool ISSX_ProjectEA1(const string stage_json,
    g_debug.Write("INFO","ea1_publish","publish_persistence_handoff_start","checkpoint=publish_persistence_handoff_start owner=persistence stage=ea1");
 
    g_debug.Write("INFO","ea1_publish","publish_stage_write_start","path="+ISSX_PersistencePath::PayloadCurrent(g_firm_id,issx_stage_ea1)+" bytes="+IntegerToString(StringLen(stage_json)));
+   string ea1_stage_snapshot_reason="ok";
+ISSX_RegisterRuntimeSnapshot("ea1_stage_json",stage_json,TimeCurrent(),ea1_stage_snapshot_reason);
+
+string ea1_debug_snapshot_reason="ok";
+ISSX_RegisterRuntimeSnapshot("ea1_debug_json",debug_snapshot_json,TimeCurrent(),ea1_debug_snapshot_reason);
+
+if(StringLen(broker_dump_json)>2)
+  {
+   string ea1_universe_snapshot_reason="ok";
+   ISSX_RegisterRuntimeSnapshot("ea1_universe_json",broker_dump_json,TimeCurrent(),ea1_universe_snapshot_reason);
+  }
    const bool stage_write_ok=ISSX_PersistStageJson(issx_stage_ea1,header,manifest,stage_json);
    g_debug.Write((stage_write_ok?"INFO":"ERROR"),"ea1_publish",(stage_write_ok?"publish_persistence_handoff_success":"publish_persistence_handoff_fail"),"checkpoint="+(stage_write_ok?"publish_persistence_handoff_success":"publish_persistence_handoff_fail")+" stage=ea1");
    g_last_ea1_stage_write_state=(stage_write_ok?"success":"failed");
@@ -888,7 +1051,11 @@ void ISSX_ProjectEA2(const string stage_json,
    g_ea2.header.policy_fingerprint=g_registry.SchemaFingerprintHex();
    g_ea2.manifest.taxonomy_hash=g_ea1.taxonomy_hash;
    g_ea2.manifest.comparator_registry_hash=g_ea1.comparator_registry_hash;
+string ea2_stage_snapshot_reason="ok";
+ISSX_RegisterRuntimeSnapshot("ea2_stage_json",stage_json,TimeCurrent(),ea2_stage_snapshot_reason);
 
+string ea2_debug_snapshot_reason="ok";
+ISSX_RegisterRuntimeSnapshot("ea2_debug_json",debug_snapshot_json,TimeCurrent(),ea2_debug_snapshot_reason);
    ISSX_PersistStageJson(issx_stage_ea2,g_ea2.header,g_ea2.manifest,stage_json);
 
    if(Config.GetBool("project_debug_snapshots"))
@@ -908,7 +1075,11 @@ void ISSX_ProjectEA3(const string stage_json,
       g_ea3.header.trio_generation_id=ISSX_MakeTrioGenerationId(g_ea3.header.writer_generation,g_ea3.header.sequence_no);
 
    g_ea3.header.policy_fingerprint=g_registry.SchemaFingerprintHex();
+string ea3_stage_snapshot_reason="ok";
+ISSX_RegisterRuntimeSnapshot("ea3_stage_json",stage_json,TimeCurrent(),ea3_stage_snapshot_reason);
 
+string ea3_debug_snapshot_reason="ok";
+ISSX_RegisterRuntimeSnapshot("ea3_debug_json",debug_snapshot_json,TimeCurrent(),ea3_debug_snapshot_reason);
    ISSX_PersistStageJson(issx_stage_ea3,g_ea3.header,g_ea3.manifest,stage_json);
 
    if(Config.GetBool("project_debug_snapshots"))
@@ -928,6 +1099,11 @@ void ISSX_ProjectEA4(const string stage_json,
       g_ea4.header.trio_generation_id=ISSX_MakeTrioGenerationId(g_ea4.header.writer_generation,g_ea4.header.sequence_no);
 
    g_ea4.header.policy_fingerprint=g_registry.SchemaFingerprintHex();
+string ea4_stage_snapshot_reason="ok";
+ISSX_RegisterRuntimeSnapshot("ea4_stage_json",stage_json,TimeCurrent(),ea4_stage_snapshot_reason);
+
+string ea4_debug_snapshot_reason="ok";
+ISSX_RegisterRuntimeSnapshot("ea4_debug_json",debug_snapshot_json,TimeCurrent(),ea4_debug_snapshot_reason);
 
    ISSX_PersistStageJson(issx_stage_ea4,g_ea4.header,g_ea4.manifest,stage_json);
 
@@ -948,7 +1124,11 @@ void ISSX_ProjectEA5(const string export_json,
       g_ea5.header.trio_generation_id=ISSX_MakeTrioGenerationId(g_ea5.header.writer_generation,g_ea5.header.sequence_no);
 
    g_ea5.header.policy_fingerprint=g_registry.SchemaFingerprintHex();
+string ea5_export_snapshot_reason="ok";
+ISSX_RegisterRuntimeSnapshot("ea5_export_json",export_json,TimeCurrent(),ea5_export_snapshot_reason);
 
+string ea5_debug_snapshot_reason="ok";
+ISSX_RegisterRuntimeSnapshot("ea5_debug_json",debug_json,TimeCurrent(),ea5_debug_snapshot_reason);
    ISSX_PersistStageJson(issx_stage_ea5,g_ea5.header,g_ea5.manifest,export_json);
    ISSX_FileIO::WriteTextAtomic(ISSX_PersistencePath::RootExport(g_firm_id),export_json);
 
@@ -1031,6 +1211,41 @@ ISSX_InfraStageState ISSX_EA1InfraStateFromRun(const string stage_run)
    return issx_infra_stage_booting;
   }
 
+string ISSX_InstanceTag()
+  {
+   return Config.GetString("instance_tag");
+  }
+
+int ISSX_EA1RollingBatchSize()
+  {
+   return Config.EffectiveRollingBatchSize();
+  }
+
+bool ISSX_RuntimeSchedulerLayerEnabled()
+  {
+   return Config.GetBool("runtime_scheduler_layer_enabled");
+  }
+
+int ISSX_SchedulerCycleBudgetMs()
+  {
+   return Config.EffectiveSchedulerCycleBudgetMs();
+  }
+  
+int ISSX_EA1RollingCadenceSec()
+  {
+   return MathMax(1,Config.GetInt("ea1_rolling_cadence_sec"));
+  }
+
+int ISSX_EA1RollingMaxSnapshots()
+  {
+   return Config.EffectiveSnapshotRetention();
+  }
+
+int ISSX_EA1PublishCadenceSec()
+  {
+   return Config.EffectivePublishCadenceSec();
+  }
+
 void ISSX_LogGateSnapshot()
   {
    const bool gate_runtime_scheduler=Config.GetBool("runtime_scheduler_enabled");
@@ -1084,13 +1299,83 @@ string ISSX_FormatHudTime(const datetime t)
    return TimeToString(t,TIME_DATE|TIME_SECONDS);
   }
 
+bool ISSX_RegisterRuntimeSnapshot(const string snapshot_name,
+                                  const string payload,
+                                  const datetime ts,
+                                  string &reason)
+  {
+   reason="ok";
+
+   if(ts<=0)
+     {
+      reason="invalid_snapshot_time";
+      g_debug.Write("ERROR","memory_guard","snapshot_rejected",
+                    "name="+snapshot_name+" reason="+reason);
+      return false;
+     }
+
+   if(StringLen(payload)<=0)
+     {
+      reason="empty_snapshot_payload";
+      g_debug.Write("ERROR","memory_guard","snapshot_rejected",
+                    "name="+snapshot_name+" reason="+reason);
+      return false;
+     }
+
+   const int bytes=ISSX_DataHandler::EstimateUtf8Bytes(payload);
+   if(bytes<0)
+     {
+      reason="invalid_snapshot_bytes";
+      g_debug.Write("ERROR","memory_guard","snapshot_rejected",
+                    "name="+snapshot_name+" reason="+reason);
+      return false;
+     }
+
+   const string fingerprint=
+   snapshot_name+"|"+
+   IntegerToString(StringLen(payload))+"|"+
+   IntegerToString(bytes)+"|"+
+   IntegerToString(StringGetCharacter(payload,0))+"|"+
+   IntegerToString(StringGetCharacter(payload,StringLen(payload)-1));
+   if(StringLen(fingerprint)<=0)
+     {
+      reason="snapshot_fingerprint_empty";
+      g_debug.Write("ERROR","memory_guard","snapshot_rejected",
+                    "name="+snapshot_name+" reason="+reason);
+      return false;
+     }
+
+   g_memory_guard.EstimatePayload(snapshot_name,bytes);
+   g_memory_guard.WarnIfLargeAllocation(snapshot_name,bytes);
+
+   if(!g_memory_guard.AddSnapshot(ts,fingerprint,bytes))
+     {
+      reason="snapshot_add_rejected";
+      g_debug.Write("WARN","memory_guard","snapshot_blocked",
+                    "name="+snapshot_name+
+                    " reason="+reason+
+                    " active="+IntegerToString(g_memory_guard.ActiveSnapshots())+
+                    " duplicate_blocked="+IntegerToString(g_memory_guard.DuplicateSnapshotsBlocked())+
+                    " invalid_purged="+IntegerToString(g_memory_guard.InvalidSnapshotsPurged()));
+      return false;
+     }
+
+   g_debug.Write("INFO","memory_guard","snapshot_added",
+                 "name="+snapshot_name+
+                 " bytes="+IntegerToString(bytes)+
+                 " active="+IntegerToString(g_memory_guard.ActiveSnapshots())+
+                 " dropped="+IntegerToString(g_memory_guard.DroppedSnapshots()));
+
+   return true;
+  }
+  
 bool ISSX_RunUiProjectionSafe()
   {
    ISSX_SetCheckpoint("ui_projection_enter");
 
    if(!ISSX_IsUiProjectionOn())
      {
-      g_debug.Write("INFO","ui","projection_skipped","disabled_by_gate");
+      g_debug.Write("INFO","ui","projection_skipped","runtime_projection_disabled_effective");
       return true;
      }
 
@@ -1140,14 +1425,27 @@ void ISSX_RenderMenu()
       g_debug.Write("INFO","menu","init","prefix=ISSX_MENU");
      }
 
+   const string instance_tag=ISSX_InstanceTag();
+   const string effective_instance_tag=(instance_tag=="" ? g_boot_id : instance_tag);
+
    if(!g_menu.Build(g_ea_enabled,
-                   g_operator_broker_name,g_operator_server_name,g_operator_login_id,
-                   (InpInstanceTag==""?g_boot_id:InpInstanceTag),
-                   g_last_kernel_result+"/"+g_last_kernel_reason,
-                   InpEA1MaxSymbols,InpEA1HydrationBatchSize,InpEA1RollingBatchSize,InpEA1RollingCadenceSec,InpEA1PublishCadenceSec,
-                   Config.GetBool("project_stage_status_root"),Config.GetBool("project_universe_snapshot"),Config.GetBool("project_debug_snapshots"),
-                   Config.GetBool("chart_ui_updates_enabled"),Config.GetBool("gate_ui_projection_requested"),
-                   Config.GetBool("runtime_scheduler_enabled"),InpSchedulerCycleBudgetMs,Config.GetBool("tick_heavy_work_enabled"),Config.GetBool("isolation_mode")))
+                    g_operator_broker_name,g_operator_server_name,g_operator_login_id,
+                    effective_instance_tag,
+                    g_last_kernel_result+"/"+g_last_kernel_reason,
+                    Config.GetInt("ea1_max_symbols"),
+                    Config.GetInt("ea1_hydration_batch"),
+                    ISSX_EA1RollingBatchSize(),
+                    ISSX_EA1RollingCadenceSec(),
+                    ISSX_EA1PublishCadenceSec(),
+                    Config.GetBool("project_stage_status_root"),
+                    Config.GetBool("project_universe_snapshot"),
+                    Config.GetBool("project_debug_snapshots"),
+                    Config.GetBool("chart_ui_updates_enabled"),
+                    Config.GetBool("ui_projection_enabled"),
+                    Config.GetBool("runtime_scheduler_enabled"),
+                    ISSX_SchedulerCycleBudgetMs(),
+                    Config.GetBool("tick_heavy_work_enabled"),
+                    Config.GetBool("isolation_mode")))
       g_debug.Write("WARN","menu","build_failed",g_menu.LastError());
   }
 
@@ -1176,6 +1474,36 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
    string stage_json="";
    string broker_dump_json="";
    string debug_json="";
+
+   ISSX_DataHandler::MarketSnapshot wrapper_snapshot;
+   wrapper_snapshot.Reset();
+   if(!ISSX_ValidateWrapperExecutionReadiness(g_last_kernel_reason,wrapper_snapshot))
+     {
+      ea1_stage_ran=false;
+      ea1_stage_result="skipped";
+      ea1_stage_reason=g_last_kernel_reason;
+      g_debug.Write("WARN","kernel","readiness_block","reason="+g_last_kernel_reason);
+      ISSX_SyncEA1StageRegistry("skipped",g_last_kernel_reason,0,true);
+      g_scheduler.EndCycle();
+      return false;
+     }
+
+   g_debug.Write("INFO","kernel","market_snapshot_valid",
+                 "symbol="+wrapper_snapshot.symbol+
+                 " timeframe="+IntegerToString((int)wrapper_snapshot.timeframe)+
+                 " has_live_tick="+ISSX_OnOff(wrapper_snapshot.has_live_tick)+
+                 " has_recent_tick="+ISSX_OnOff(wrapper_snapshot.has_recent_tick)+
+                 " has_rates="+ISSX_OnOff(wrapper_snapshot.has_rates)+
+                 " history_complete="+ISSX_OnOff(wrapper_snapshot.history_complete)+
+                 " is_valid_for_analysis="+ISSX_OnOff(wrapper_snapshot.is_valid_for_analysis));
+
+   string downstream_gate_reason="ok";
+   const bool downstream_analysis_ready=ISSX_ValidateAnalysisStageGate(wrapper_snapshot,downstream_gate_reason);
+   if(!downstream_analysis_ready)
+      g_debug.Write("WARN","kernel","analysis_gate_block",
+                    "reason="+downstream_gate_reason+
+                    " readiness_reason="+wrapper_snapshot.readiness_reason+
+                    " source_reason="+wrapper_snapshot.source_reason);
 
    if(g_ea_enabled[0] && !g_bootstrapped)
      {
@@ -1217,7 +1545,12 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
    g_telemetry.StageStart(issx_telemetry_stage_ea1_market);
    g_debug.Write("INFO","ea1","stage_slice","enter");
    g_ea1.hydration_batch_size=MathMax(1,Config.GetInt("ea1_hydration_batch"));
-   if(!g_scheduler.RunStage("ea1_market",10))
+   if(!g_scheduler.RunStageEx("ea1_market",
+                           10,
+                           issx_sched_prio_critical,
+                           true,
+                           issx_sched_cadence_every_cycle,
+                           0))
      {
       g_debug.Write("INFO","stage_run","ea1_market","skipped");
       g_debug.Write("INFO","stage_reason","ea1_market","scheduler_budget_or_quota");
@@ -1229,7 +1562,13 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
      }
    const ulong ea1_stage_start_us=(ulong)GetMicrosecondCount();
    ea1_stage_ran=true;
-   if(!ISSX_MarketEngine::StageSlice(g_ea1,g_firm_id,g_boot_id,g_writer_nonce,Config.GetInt("ea1_max_symbols")))
+   if(!ISSX_MarketEngine::StageSlice(g_ea1,
+                              g_firm_id,
+                              g_boot_id,
+                              g_writer_nonce,
+                              Config.GetInt("ea1_max_symbols"),
+                              Config.GetBool("include_custom_symbols"))
+                              )
      {
       g_debug.Write("INFO","stage_run","ea1_market","failed");
       g_debug.Write("INFO","stage_reason","ea1_market","stage_slice_returned_false");
@@ -1327,6 +1666,14 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
    g_last_ea1_stage_run=ea1_stage_result;
    g_last_ea1_stage_reason=ea1_stage_reason;
    g_last_ea1_stage_elapsed_ms=ea1_stage_elapsed_ms;
+   if(g_last_ea1_stage_run=="failed")
+   g_scheduler.MarkStageResult("ea1_market",issx_sched_result_failed,g_last_ea1_stage_reason,(long)(ea1_stage_elapsed_ms*1000));
+else if(g_last_ea1_stage_run=="degraded")
+   g_scheduler.MarkStageResult("ea1_market",issx_sched_result_success,g_last_ea1_stage_reason,(long)(ea1_stage_elapsed_ms*1000));
+else if(g_last_ea1_stage_run=="skipped")
+   g_scheduler.MarkStageSkipped("ea1_market",g_last_ea1_stage_reason);
+else
+   g_scheduler.MarkStageResult("ea1_market",issx_sched_result_success,g_last_ea1_stage_reason,(long)(ea1_stage_elapsed_ms*1000));
    ISSX_SyncEA1StageRegistry(g_last_ea1_stage_run,g_last_ea1_stage_reason,g_last_ea1_stage_elapsed_ms,true);
 
    string ea1_stage_status_detail=ea1_stage_result;
@@ -1385,7 +1732,7 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
      }
    else
      {
-      const int publish_cadence=MathMax(1,InpEA1PublishCadenceSec);
+      const int publish_cadence=ISSX_EA1PublishCadenceSec();
       datetime publish_now=TimeTradeServer();
       if(publish_now<=0)
          publish_now=TimeCurrent();
@@ -1499,24 +1846,52 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       g_telemetry.StageStart(issx_telemetry_stage_ea2_history);
       ISSX_SetCheckpoint("ea2_stage_slice_start");
       g_debug.Write("INFO","ea2","stage_slice","start");
+
       const int ea2_batch_limit=g_scheduler.LastBatchLimit("ea2_history",Config.GetInt("ea2_max_symbols_per_slice"));
-      if(g_scheduler.RunBatch("ea2_history",ea2_batch_limit) && g_scheduler.RunStage("ea2_history",12))
+      if(g_scheduler.RunBatchEx("ea2_history",
+                                ea2_batch_limit,
+                                issx_sched_prio_high,
+                                true,
+                                issx_sched_cadence_every_cycle,
+                                0)
+         &&
+         g_scheduler.RunStageEx("ea2_history",
+                                12,
+                                issx_sched_prio_high,
+                                true,
+                                issx_sched_cadence_every_cycle,
+                                0))
         {
          const ulong ea2_stage_start_us=(ulong)GetMicrosecondCount();
          ISSX_HistoryEngine::StageSlice(g_ea2,ea1_symbols,Config.GetBool("ea2_deep_profile_default"),ea2_batch_limit);
+         g_last_ea2_stage_elapsed_ms=(long)(((ulong)GetMicrosecondCount()-ea2_stage_start_us)/1000);
          g_scheduler.RecordStageTime("ea2_history",(long)((ulong)GetMicrosecondCount()-ea2_stage_start_us));
          g_telemetry.RecordSymbolProcessed("ea2_history",g_ea2.forensic.batch_symbols_done);
          g_telemetry.RecordCopyRates(g_ea2.forensic.max_rates_returned);
+
+         stage_json=ISSX_HistoryEngine::StagePublish(g_ea2);
+         debug_json=ISSX_HistoryEngine::BuildDebugSnapshot(g_ea2);
+         ISSX_ProjectEA2(stage_json,debug_json);
+
+                  g_last_ea2_stage_run=(g_ea2.stage_minimum_ready_flag ? (g_ea2.degraded_flag?"degraded":"success") : "blocked");
+         if(g_last_ea2_stage_run=="blocked")
+            g_last_ea2_stage_reason=(g_ea2.dependency_block_reason=="" ? "history_not_ready" : g_ea2.dependency_block_reason);
+         else
+            g_last_ea2_stage_reason=(g_ea2.dependency_block_reason=="" ? "ok" : g_ea2.dependency_block_reason);
         }
+        
       else
-         g_debug.Write("INFO","stage_run","ea2_history","skipped reason=scheduler_budget_or_quota");
-      stage_json=ISSX_HistoryEngine::StagePublish(g_ea2);
-      debug_json=ISSX_HistoryEngine::BuildDebugSnapshot(g_ea2);
-      ISSX_ProjectEA2(stage_json,debug_json);
-      g_last_ea2_stage_run=(g_ea2.stage_minimum_ready_flag ? (g_ea2.degraded_flag?"degraded":"success") : "blocked");
-      g_last_ea2_stage_reason=g_ea2.dependency_block_reason;
-      g_last_ea2_stage_elapsed_ms=0;
-      g_telemetry.EndStage("ea2_history",(g_ea2.stage_minimum_ready_flag ? (g_ea2.degraded_flag?"DEGRADED":"READY") : "BLOCKED"));
+        {
+         g_last_ea2_stage_run="deferred";
+         g_last_ea2_stage_reason="scheduler_budget_exceeded";
+         g_last_ea2_stage_elapsed_ms=0;
+         g_debug.Write("WARN","ea2","stage_deferred","reason=scheduler_budget_exceeded");
+        }
+
+      g_telemetry.EndStage("ea2_history",
+                           (g_last_ea2_stage_run=="success"?"READY":
+                           (g_last_ea2_stage_run=="degraded"?"DEGRADED":
+                           (g_last_ea2_stage_run=="blocked"?"BLOCKED":"DEFERRED"))));
      }
    else
      {
@@ -1525,8 +1900,17 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       g_last_ea2_stage_reason="disabled";
       g_last_ea2_stage_elapsed_ms=0;
      }
-
+     
+   if(g_last_ea2_stage_run=="blocked")
+      g_scheduler.MarkStageInvalidData("ea2_history",g_last_ea2_stage_reason);
+   else if(g_last_ea2_stage_run=="deferred")
+      g_scheduler.MarkStageResult("ea2_history",issx_sched_result_deferred,g_last_ea2_stage_reason,0);
+   else if(g_last_ea2_stage_run=="skipped")
+      g_scheduler.MarkStageSkipped("ea2_history",g_last_ea2_stage_reason);
+   else
+      g_scheduler.MarkStageResult("ea2_history",issx_sched_result_success,g_last_ea2_stage_reason,(long)(g_last_ea2_stage_elapsed_ms*1000));
    if(g_ea_enabled[2] && !g_bootstrapped)
+   
      {
       g_debug.Write("INFO","ea3","stage_boot","start");
       ISSX_SelectionEngine::StageBoot(g_firm_id,g_ea1,g_ea2,g_ea3);
@@ -1537,15 +1921,47 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       g_telemetry.StageStart(issx_telemetry_stage_ea3_selection);
       ISSX_SetCheckpoint("ea3_stage_slice_start");
       g_debug.Write("INFO","ea3","stage_slice","start");
-      ISSX_SelectionEngine::StageSlice(g_firm_id,g_ea1,g_ea2,g_ea3);
-      g_telemetry.RecordSymbolProcessed("ea3_selection",ArraySize(g_ea3.frontier));
-      string ea3_debug="";
-      ISSX_SelectionEngine::StagePublish(g_ea3,stage_json,ea3_debug);
-      ISSX_ProjectEA3(stage_json,ea3_debug);
-      g_last_ea3_stage_run="success";
-      g_last_ea3_stage_reason=g_ea3.dependency_block_reason;
-      g_last_ea3_stage_elapsed_ms=0;
-      g_telemetry.EndStage("ea3_selection",(g_last_ea3_stage_run=="success"?"READY":"DEGRADED"));
+
+      if(!downstream_analysis_ready)
+        {
+         g_last_ea3_stage_run="blocked";
+         g_last_ea3_stage_reason=downstream_gate_reason;
+         g_last_ea3_stage_elapsed_ms=0;
+         g_debug.Write("WARN","ea3","stage_blocked","reason="+downstream_gate_reason);
+         g_scheduler.MarkStageInvalidData("ea3_selection",downstream_gate_reason);
+        }
+      else if(g_scheduler.RunStageEx("ea3_selection",
+                                     8,
+                                     issx_sched_prio_normal,
+                                     false,
+                                     issx_sched_cadence_every_cycle,
+                                     0))
+        {
+         const ulong ea3_stage_start_us=(ulong)GetMicrosecondCount();
+         ISSX_SelectionEngine::StageSlice(g_firm_id,g_ea1,g_ea2,g_ea3);
+         g_last_ea3_stage_elapsed_ms=(long)(((ulong)GetMicrosecondCount()-ea3_stage_start_us)/1000);
+         g_scheduler.RecordStageTime("ea3_selection",(long)((ulong)GetMicrosecondCount()-ea3_stage_start_us));
+         g_telemetry.RecordSymbolProcessed("ea3_selection",ArraySize(g_ea3.frontier));
+
+         string ea3_debug="";
+         ISSX_SelectionEngine::StagePublish(g_ea3,stage_json,ea3_debug);
+         ISSX_ProjectEA3(stage_json,ea3_debug);
+
+         g_last_ea3_stage_run=(g_ea3.stage_minimum_ready_flag ? (g_ea3.degraded_flag?"degraded":"success") : "blocked");
+         g_last_ea3_stage_reason=(g_ea3.dependency_block_reason=="" ? "ok" : g_ea3.dependency_block_reason);
+        }
+      else
+        {
+         g_last_ea3_stage_run="deferred";
+         g_last_ea3_stage_reason="scheduler_budget_exceeded";
+         g_last_ea3_stage_elapsed_ms=0;
+         g_debug.Write("WARN","ea3","stage_deferred","reason=scheduler_budget_exceeded");
+        }
+
+      g_telemetry.EndStage("ea3_selection",
+                           (g_last_ea3_stage_run=="success"?"READY":
+                           (g_last_ea3_stage_run=="degraded"?"DEGRADED":
+                           (g_last_ea3_stage_run=="blocked"?"BLOCKED":"DEFERRED"))));
      }
    else
      {
@@ -1555,6 +1971,17 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       g_last_ea3_stage_elapsed_ms=0;
      }
 
+   if(g_last_ea3_stage_run=="blocked")
+      g_scheduler.MarkStageInvalidData("ea3_selection",g_last_ea3_stage_reason);
+   else if(g_last_ea3_stage_run=="deferred")
+      g_scheduler.MarkStageResult("ea3_selection",issx_sched_result_deferred,g_last_ea3_stage_reason,0);
+   else if(g_last_ea3_stage_run=="skipped")
+      g_scheduler.MarkStageSkipped("ea3_selection",g_last_ea3_stage_reason);
+   else if(g_last_ea3_stage_run=="failed")
+      g_scheduler.MarkStageResult("ea3_selection",issx_sched_result_failed,g_last_ea3_stage_reason,(long)(g_last_ea3_stage_elapsed_ms*1000));
+   else
+      g_scheduler.MarkStageResult("ea3_selection",issx_sched_result_success,g_last_ea3_stage_reason,(long)(g_last_ea3_stage_elapsed_ms*1000));
+      
    if(g_ea_enabled[3] && !g_bootstrapped)
      {
       g_debug.Write("INFO","ea4","stage_boot","start");
@@ -1566,15 +1993,46 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       g_telemetry.StageStart(issx_telemetry_stage_ea4_correlation);
       ISSX_SetCheckpoint("ea4_stage_slice_start");
       g_debug.Write("INFO","ea4","stage_slice","start");
-      ISSX_CorrelationEngine::StageSlice(g_ea4,g_firm_id,g_ea1,g_ea3,ISSX_CurrentKernelMinuteId());
-      g_telemetry.RecordSymbolProcessed("ea4_correlation",ArraySize(g_ea4.symbols));
-      string ea4_debug="";
-      ISSX_CorrelationEngine::StagePublish(g_ea4,stage_json,ea4_debug);
-      ISSX_ProjectEA4(stage_json,ea4_debug);
-      g_last_ea4_stage_run=(g_ea4.stage_minimum_ready_flag ? (g_ea4.degraded_flag?"degraded":"success") : "blocked");
-      g_last_ea4_stage_reason=g_ea4.dependency_block_reason;
-      g_last_ea4_stage_elapsed_ms=0;
-      g_telemetry.EndStage("ea4_correlation",(g_ea4.stage_minimum_ready_flag ? (g_ea4.degraded_flag?"DEGRADED":"READY") : "BLOCKED"));
+
+      if(!downstream_analysis_ready)
+        {
+         g_last_ea4_stage_run="blocked";
+         g_last_ea4_stage_reason=downstream_gate_reason;
+         g_last_ea4_stage_elapsed_ms=0;
+         g_debug.Write("WARN","ea4","stage_blocked","reason="+downstream_gate_reason);
+         g_scheduler.MarkStageInvalidData("ea4_correlation",downstream_gate_reason);
+        }
+      else if(g_scheduler.RunStageEx("ea4_correlation",
+                                     8,
+                                     issx_sched_prio_normal,
+                                     false,
+                                     issx_sched_cadence_every_cycle,
+                                     0))
+        {
+         const ulong ea4_stage_start_us=(ulong)GetMicrosecondCount();
+         ISSX_CorrelationEngine::StageSlice(g_ea4,g_firm_id,g_ea1,g_ea3,(long)g_ea1.minute_id);
+         g_last_ea4_stage_elapsed_ms=(long)(((ulong)GetMicrosecondCount()-ea4_stage_start_us)/1000);
+         g_scheduler.RecordStageTime("ea4_correlation",(long)((ulong)GetMicrosecondCount()-ea4_stage_start_us));
+
+         string ea4_debug="";
+         ISSX_CorrelationEngine::StagePublish(g_ea4,stage_json,ea4_debug);
+         ISSX_ProjectEA4(stage_json,ea4_debug);
+
+         g_last_ea4_stage_run=(g_ea4.stage_minimum_ready_flag ? (g_ea4.degraded_flag?"degraded":"success") : "blocked");
+         g_last_ea4_stage_reason=(g_ea4.dependency_block_reason=="" ? "ok" : g_ea4.dependency_block_reason);
+        }
+      else
+        {
+         g_last_ea4_stage_run="deferred";
+         g_last_ea4_stage_reason="scheduler_budget_exceeded";
+         g_last_ea4_stage_elapsed_ms=0;
+         g_debug.Write("WARN","ea4","stage_deferred","reason=scheduler_budget_exceeded");
+        }
+
+      g_telemetry.EndStage("ea4_correlation",
+                           (g_last_ea4_stage_run=="success"?"READY":
+                           (g_last_ea4_stage_run=="degraded"?"DEGRADED":
+                           (g_last_ea4_stage_run=="blocked"?"BLOCKED":"DEFERRED"))));
      }
    else
      {
@@ -1584,6 +2042,17 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       g_last_ea4_stage_elapsed_ms=0;
      }
 
+   if(g_last_ea4_stage_run=="blocked")
+      g_scheduler.MarkStageInvalidData("ea4_correlation",g_last_ea4_stage_reason);
+   else if(g_last_ea4_stage_run=="deferred")
+      g_scheduler.MarkStageResult("ea4_correlation",issx_sched_result_deferred,g_last_ea4_stage_reason,0);
+   else if(g_last_ea4_stage_run=="skipped")
+      g_scheduler.MarkStageSkipped("ea4_correlation",g_last_ea4_stage_reason);
+   else if(g_last_ea4_stage_run=="failed")
+      g_scheduler.MarkStageResult("ea4_correlation",issx_sched_result_failed,g_last_ea4_stage_reason,(long)(g_last_ea4_stage_elapsed_ms*1000));
+   else
+      g_scheduler.MarkStageResult("ea4_correlation",issx_sched_result_success,g_last_ea4_stage_reason,(long)(g_last_ea4_stage_elapsed_ms*1000));
+
    ISSX_EA4_OptionalIntelligenceExport ea4_optional_intel[];
    ISSX_EA5_OptionalIntelligence optional_intel[];
    ArrayResize(ea4_optional_intel,0);
@@ -1592,31 +2061,71 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
    if(g_ea_enabled[4])
      {
       g_telemetry.StageStart(issx_telemetry_stage_ea5_contracts);
-      ISSX_CorrelationEngine::ExportOptionalIntelligence(g_ea4,ea4_optional_intel);
-      ISSX_ConvertEA4OptionalIntelligence(ea4_optional_intel,optional_intel);
+      ISSX_SetCheckpoint("ea5_stage_slice_start");
+      g_debug.Write("INFO","ea5","stage_slice","start");
 
-      ISSX_SetCheckpoint("ea5_build_from_inputs");
-      g_debug.Write("INFO","ea5","build_from_inputs","start");
-      ISSX_Contracts::BuildFromInputs(g_ea5,g_ea1,g_ea2,g_ea3,optional_intel);
-
-      const long current_minute_id=ISSX_CurrentKernelMinuteId();
-      const bool ea5_export_due=(!g_bootstrapped || ISSX_IsEA5ExportDue(current_minute_id));
-
-      if(ea5_export_due)
+      if(!downstream_analysis_ready)
         {
-         g_debug.Write("INFO","ea5","export_due","true");
-         string export_json=ISSX_Contracts::ToStageJson(g_ea5,g_registry.fields,g_registry.enums);
-         string ea5_debug=ISSX_Contracts::ToDebugJson(g_ea5);
-         ISSX_ProjectEA5(export_json,ea5_debug);
-         g_telemetry.Payload(issx_telemetry_stage_ea5_contracts,StringLen(export_json));
-         g_telemetry.RecordPayloadBytes("export_payload",StringLen(export_json));
-         g_telemetry.EstimateMemoryUsage("ea5_export",StringLen(export_json)+StringLen(ea5_debug));
-         g_last_ea5_export_minute_id=current_minute_id;
-         g_last_ea5_stage_run="success";
-         g_last_ea5_stage_reason="export_due";
+         g_last_ea5_stage_run="blocked";
+         g_last_ea5_stage_reason=downstream_gate_reason;
          g_last_ea5_stage_elapsed_ms=0;
+         g_debug.Write("WARN","ea5","stage_blocked","reason="+downstream_gate_reason);
+         g_scheduler.MarkStageInvalidData("ea5_contracts",downstream_gate_reason);
         }
-      g_telemetry.EndStage("ea5_contracts","READY");
+      else if(g_scheduler.RunStageEx("ea5_contracts",
+                                     8,
+                                     issx_sched_prio_low,
+                                     false,
+                                     issx_sched_cadence_every_cycle,
+                                     0))
+        {
+         const ulong ea5_stage_start_us=(ulong)GetMicrosecondCount();
+
+         ISSX_CorrelationEngine::ExportOptionalIntelligence(g_ea4,ea4_optional_intel);
+         ISSX_ConvertEA4OptionalIntelligence(ea4_optional_intel,optional_intel);
+
+         ISSX_SetCheckpoint("ea5_build_from_inputs");
+         g_debug.Write("INFO","ea5","build_from_inputs","start");
+         ISSX_Contracts::BuildFromInputs(g_ea5,g_ea1,g_ea2,g_ea3,optional_intel);
+
+         const long current_minute_id=ISSX_CurrentKernelMinuteId();
+         const bool ea5_export_due=(!g_bootstrapped || ISSX_IsEA5ExportDue(current_minute_id));
+
+         if(ea5_export_due)
+           {
+            g_debug.Write("INFO","ea5","export_due","true");
+            string export_json=ISSX_Contracts::ToStageJson(g_ea5,g_registry.fields,g_registry.enums);
+            string ea5_debug=ISSX_Contracts::ToDebugJson(g_ea5);
+            ISSX_ProjectEA5(export_json,ea5_debug);
+            g_telemetry.Payload(issx_telemetry_stage_ea5_contracts,StringLen(export_json));
+            g_telemetry.RecordPayloadBytes("export_payload",StringLen(export_json));
+            g_telemetry.EstimateMemoryUsage("ea5_export",StringLen(export_json)+StringLen(ea5_debug));
+            g_last_ea5_export_minute_id=current_minute_id;
+            g_last_ea5_stage_run="success";
+            g_last_ea5_stage_reason="export_due";
+           }
+         else
+           {
+            g_last_ea5_stage_run="deferred";
+            g_last_ea5_stage_reason="export_not_due";
+            g_debug.Write("INFO","ea5","stage_deferred","reason=export_not_due");
+           }
+
+         g_last_ea5_stage_elapsed_ms=(long)(((ulong)GetMicrosecondCount()-ea5_stage_start_us)/1000);
+         g_scheduler.RecordStageTime("ea5_contracts",(long)((ulong)GetMicrosecondCount()-ea5_stage_start_us));
+        }
+      else
+        {
+         g_last_ea5_stage_run="deferred";
+         g_last_ea5_stage_reason="scheduler_budget_exceeded";
+         g_last_ea5_stage_elapsed_ms=0;
+         g_debug.Write("WARN","ea5","stage_deferred","reason=scheduler_budget_exceeded");
+        }
+
+      g_telemetry.EndStage("ea5_contracts",
+                           (g_last_ea5_stage_run=="success"?"READY":
+                           (g_last_ea5_stage_run=="blocked"?"BLOCKED":
+                           (g_last_ea5_stage_run=="deferred"?"DEFERRED":"DEGRADED"))));
      }
    else
      {
@@ -1625,6 +2134,17 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       g_last_ea5_stage_reason="disabled";
       g_last_ea5_stage_elapsed_ms=0;
      }
+
+   if(g_last_ea5_stage_run=="blocked")
+      g_scheduler.MarkStageInvalidData("ea5_contracts",g_last_ea5_stage_reason);
+   else if(g_last_ea5_stage_run=="deferred")
+      g_scheduler.MarkStageResult("ea5_contracts",issx_sched_result_deferred,g_last_ea5_stage_reason,0);
+   else if(g_last_ea5_stage_run=="skipped")
+      g_scheduler.MarkStageSkipped("ea5_contracts",g_last_ea5_stage_reason);
+   else if(g_last_ea5_stage_run=="failed")
+      g_scheduler.MarkStageResult("ea5_contracts",issx_sched_result_failed,g_last_ea5_stage_reason,(long)(g_last_ea5_stage_elapsed_ms*1000));
+   else
+      g_scheduler.MarkStageResult("ea5_contracts",issx_sched_result_success,g_last_ea5_stage_reason,(long)(g_last_ea5_stage_elapsed_ms*1000));
 
    g_telemetry.StageStart(issx_telemetry_stage_ui);
    g_debug.Write("INFO","ui","aggregate","building snapshots");
@@ -1641,28 +2161,352 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
    return true;
   }
 
+bool ISSX_ValidateSymbolAndTimeframe(string &reason)
+  {
+   reason="ok";
+
+   if(StringLen(_Symbol)<=0)
+     {
+      reason="invalid_symbol";
+      return false;
+     }
+
+   if(_Period<=0 || PeriodSeconds(_Period)<=0)
+     {
+      reason="invalid_timeframe";
+      return false;
+     }
+
+   if(!SymbolSelect(_Symbol,true))
+     {
+      reason="symbol_select_failed";
+      return false;
+     }
+
+   return true;
+  }
+bool ISSX_ValidateRatesAvailability(string &reason)
+  {
+   ISSX_DataHandler::MarketSnapshot snapshot;
+   snapshot.Reset();
+   return ISSX_DataHandler::BuildAndValidateCurrentMarketSnapshot(_Symbol,_Period,snapshot,reason);
+  }
+  
+  bool ISSX_BuildWrapperSnapshot(ISSX_DataHandler::MarketSnapshot &snapshot,string &reason)
+  {
+   reason="ok";
+   snapshot.Reset();
+
+   if(!ISSX_DataHandler::BuildAndValidateCurrentMarketSnapshot(_Symbol,_Period,snapshot,reason))
+     {
+      g_debug.Write("WARN","readiness","market_snapshot_invalid",
+                    "reason="+reason+
+                    " source_reason="+snapshot.source_reason+
+                    " validation_code="+snapshot.validation_code+
+                    " symbol="+_Symbol+
+                    " period="+IntegerToString((int)_Period));
+      return false;
+     }
+
+   return true;
+  }
+
+bool ISSX_ValidateWrapperExecutionReadiness(string &reason,
+                                            ISSX_DataHandler::MarketSnapshot &snapshot)
+  {
+   reason="ok";
+   snapshot.Reset();
+
+   if(!g_runtime_ready)
+     {
+      reason="runtime_not_ready";
+      g_debug.Write("WARN","readiness","wrapper_blocked","reason="+reason);
+      return false;
+     }
+
+   if(!Config.IsValid())
+     {
+      reason="config_mismatch";
+      g_debug.Write("WARN","readiness","wrapper_blocked","reason="+reason);
+      return false;
+     }
+
+   if(!ISSX_ValidateSchedulerConfig(reason))
+     {
+      if(reason=="ok")
+         reason="scheduler_budget_exceeded";
+      g_debug.Write("WARN","readiness","wrapper_blocked","reason="+reason);
+      return false;
+     }
+
+   if(!ISSX_ValidateStageRegistry(reason))
+     {
+      if(reason=="ok")
+         reason="stage_registry_incomplete";
+      g_debug.Write("WARN","readiness","wrapper_blocked","reason="+reason);
+      return false;
+     }
+
+   if(!ISSX_BuildWrapperSnapshot(snapshot,reason))
+     {
+      g_debug.Write("WARN","readiness","wrapper_blocked",
+                    "reason="+reason+
+                    " symbol="+_Symbol+
+                    " period="+IntegerToString((int)_Period));
+      return false;
+     }
+
+   if(!snapshot.is_valid_for_analysis)
+     {
+      reason=(snapshot.readiness_reason!="" ? snapshot.readiness_reason : "market_snapshot_invalid");
+      g_debug.Write("WARN","readiness","wrapper_blocked",
+                    "reason="+reason+
+                    " source_reason="+snapshot.source_reason);
+      return false;
+     }
+
+   return true;
+  }
+
+bool ISSX_ValidateAnalysisStageGate(const ISSX_DataHandler::MarketSnapshot &snapshot,string &reason)
+  {
+   reason="ok";
+
+   if(!g_runtime_ready)
+     {
+      reason="runtime_not_ready";
+      return false;
+     }
+
+   if(!Config.IsValid())
+     {
+      reason="config_mismatch";
+      return false;
+     }
+
+   if(!ISSX_ValidateSchedulerConfig(reason))
+     {
+      if(reason=="ok")
+         reason="scheduler_not_ready";
+      return false;
+     }
+
+   if(!ISSX_ValidateStageRegistry(reason))
+     {
+      if(reason=="ok")
+         reason="stage_registry_incomplete";
+      return false;
+     }
+
+   if(!snapshot.symbol_valid)
+     {
+      reason="symbol_invalid";
+      return false;
+     }
+
+   if(!snapshot.has_live_tick)
+     {
+      reason="live_tick_unavailable";
+      return false;
+     }
+
+   if(!snapshot.has_recent_tick)
+     {
+      reason="stale_tick_detected";
+      return false;
+     }
+
+   if(!snapshot.has_rates)
+     {
+      reason="rates_invalid";
+      return false;
+     }
+
+   if(!snapshot.history_complete)
+     {
+      reason="history_incomplete";
+      return false;
+     }
+
+   if(!snapshot.is_valid_for_analysis)
+     {
+      reason=(snapshot.readiness_reason!="" ? snapshot.readiness_reason : "market_snapshot_invalid");
+      return false;
+     }
+
+   return true;
+  }
+  
+bool ISSX_ValidateCoreManagers(string &reason)
+  {
+   reason="ok";
+
+   if(!Config.IsValid())
+     {
+      reason="config_mismatch";
+      return false;
+     }
+
+   if(Config.GetBool("runtime_scheduler_enabled"))
+     {
+      // runtime requested; by this point we expect wrapper runtime init to have occurred
+      // g_runtime_ready is not the init proof here because OnInit sets it only at the end
+     }
+
+   return true;
+  }
+
+bool ISSX_BuildStageRegistry()
+  {
+   StageRegistry.Reset();
+   g_stage_registry_infra.SeedCanonicalRequiredStages(g_ea_enabled[0],
+                                                   g_ea_enabled[1],
+                                                   g_ea_enabled[2],
+                                                   g_ea_enabled[3],
+                                                   g_ea_enabled[4]);
+
+   StageRegistry.SeedCanonicalRequiredStages(g_ea_enabled[0],
+                                             g_ea_enabled[1],
+                                             g_ea_enabled[2],
+                                             g_ea_enabled[3],
+                                             g_ea_enabled[4]);
+
+   ISSX_SyncEA1StageRegistry("init",(g_ea_enabled[0]?"oninit":"requested_off"),0,false);
+
+   g_stage_registry_infra.SetState(issx_stage_ea1,issx_infra_stage_booting);
+   g_stage_registry_infra.SetReason(issx_stage_ea1,(g_ea_enabled[0]?"oninit":"requested_off"));
+   g_stage_registry_infra.SetElapsed(issx_stage_ea1,0);
+
+   g_stage_registry_infra.SetState(issx_stage_ea2,issx_infra_stage_booting);
+   g_stage_registry_infra.SetReason(issx_stage_ea2,(g_ea_enabled[1]?"oninit":"requested_off"));
+   g_stage_registry_infra.SetElapsed(issx_stage_ea2,0);
+
+   g_stage_registry_infra.SetState(issx_stage_ea3,issx_infra_stage_booting);
+   g_stage_registry_infra.SetReason(issx_stage_ea3,(g_ea_enabled[2]?"oninit":"requested_off"));
+   g_stage_registry_infra.SetElapsed(issx_stage_ea3,0);
+
+   g_stage_registry_infra.SetState(issx_stage_ea4,issx_infra_stage_booting);
+   g_stage_registry_infra.SetReason(issx_stage_ea4,(g_ea_enabled[3]?"oninit":"requested_off"));
+   g_stage_registry_infra.SetElapsed(issx_stage_ea4,0);
+
+   g_stage_registry_infra.SetState(issx_stage_ea5,issx_infra_stage_booting);
+   g_stage_registry_infra.SetReason(issx_stage_ea5,(g_ea_enabled[4]?"oninit":"requested_off"));
+   g_stage_registry_infra.SetElapsed(issx_stage_ea5,0);
+
+   g_stage_registry_infra.DumpSummary();
+   return true;
+  }
+
+bool ISSX_ValidateStageRegistry(string &reason)
+  {
+   reason="ok";
+
+   if(!g_stage_registry_infra.ValidateRequiredStages(reason))
+      return false;
+
+   if(StageRegistry.GetState("ea1_market")==STAGE_OFF &&
+      StageRegistry.GetReason("ea1_market")=="")
+     {
+      reason="ea1_market_state_missing";
+      return false;
+     }
+
+   return true;
+  }
+
+bool ISSX_ValidateSchedulerConfig(string &reason)
+  {
+   reason="ok";
+
+   if(ISSX_SchedulerCycleBudgetMs()<=0)
+     {
+      reason="scheduler_init_failed";
+      return false;
+     }
+
+   return true;
+  }
+
+bool ISSX_FinalReadinessCheck(string &reason)
+  {
+   reason="ok";
+
+   if(!ISSX_ValidateCoreManagers(reason))
+      return false;
+
+   if(!ISSX_ValidateSymbolAndTimeframe(reason))
+      return false;
+
+   if(!ISSX_ValidateSchedulerConfig(reason))
+      return false;
+
+   if(!ISSX_ValidateStageRegistry(reason))
+     {
+      if(reason=="ok")
+         reason="stage_registry_incomplete";
+      return false;
+     }
+
+   ISSX_DataHandler::MarketSnapshot snapshot;
+   if(!ISSX_BuildWrapperSnapshot(snapshot,reason))
+      return false;
+
+   if(!snapshot.is_valid_for_analysis)
+     {
+      reason=(snapshot.readiness_reason!="" ? snapshot.readiness_reason : "market_snapshot_invalid");
+      return false;
+     }
+
+   return true;
+  }
+
+bool ISSX_CanRunScheduler(string &reason)
+  {
+   reason="ok";
+
+   ISSX_DataHandler::MarketSnapshot snapshot;
+   if(!ISSX_ValidateWrapperExecutionReadiness(reason,snapshot))
+      return false;
+
+   return true;
+  }
+
 int OnInit()
   {
+   g_runtime_ready=false;
+   g_bootstrapped=false;
+   g_first_cycle_done=false;
+   g_kernel_busy=false;
+   g_timer_pulse_count=0;
+   g_timer_skip_runtime_not_ready_count=0;
+   g_timer_skip_kernel_busy_count=0;
+
    ISSX_ResolveOperatorContext();
+
    if(!g_debug.BeginSession(g_market_log_relative_path,_Symbol,_Period,g_operator_server_name,g_operator_broker_name,g_operator_login_id))
       Print("ISSX: debug session failed to open");
+
    ISSX_SetCheckpoint("oninit_enter");
    g_telemetry.Init();
    g_telemetry.Event("system_boot","system_boot");
    g_debug.Write("INFO","lifecycle","oninit_start","build="+IntegerToString((int)__MQLBUILD__));
    g_debug.Write("INFO","debug","sink","mode="+g_debug.ActiveMode()+" path="+g_debug.ActivePath());
 
+   // 1) config init
    Config.Init();
+   if(!Config.IsValid())
+     {
+      g_debug.Write("ERROR","startup","config_invalid","config_validation_failed");
+      g_debug.Write("ERROR","lifecycle","oninit_end","result=INIT_FAILED reason=config_validation_failed");
+      return INIT_FAILED;
+     }
 
    MathSrand((uint)TimeLocal());
 
-   g_scheduler.Reset();
-   g_scheduler.Configure(InpEnableRuntimeSchedulerLayer,InpSchedulerCycleBudgetMs,15);
-
-   g_boot_id        = ISSX_WrapperBootId();
-   g_instance_guid  = ISSX_WrapperInstanceGuid();
-   g_writer_nonce   = ISSX_WrapperNonce();
-   g_firm_id        = ISSX_ResolveFirmId();
+   g_boot_id       = ISSX_WrapperBootId();
+   g_instance_guid = ISSX_WrapperInstanceGuid();
+   g_writer_nonce  = ISSX_WrapperNonce();
+   g_firm_id       = ISSX_ResolveFirmId();
 
    g_debug.Write("INFO","context","identity","boot_id="+g_boot_id+" instance="+g_instance_guid+" nonce="+g_writer_nonce+" firm_id="+g_firm_id);
    g_debug.Write("INFO","context","terminal","company="+TerminalInfoString(TERMINAL_COMPANY)+" name="+TerminalInfoString(TERMINAL_NAME));
@@ -1673,21 +2517,23 @@ int OnInit()
    g_ea_enabled[2]=Config.IsEAEnabled(issx_stage_ea3);
    g_ea_enabled[3]=Config.IsEAEnabled(issx_stage_ea4);
    g_ea_enabled[4]=Config.IsEAEnabled(issx_stage_ea5);
+
    g_debug.Write("INFO","modules","states_forced",
                  "ea1="+(g_ea_enabled[0]?"on":"off")+
                  " ea2="+(g_ea_enabled[1]?"on":"off")+
                  " ea3="+(g_ea_enabled[2]?"on":"off")+
                  " ea4="+(g_ea_enabled[3]?"on":"off")+
-                 " ea5="+(g_ea_enabled[4]?"on":"off")+" isolation="+(Config.GetBool("isolation_mode")?"true":"false"));
+                 " ea5="+(g_ea_enabled[4]?"on":"off")+
+                 " isolation="+(Config.GetBool("isolation_mode")?"true":"false"));
 
    const bool req_runtime_scheduler=Config.GetBool("gate_runtime_scheduler_requested");
    const bool req_timer_heavy=Config.GetBool("gate_timer_heavy_requested");
    const bool req_tick_heavy=Config.GetBool("gate_tick_heavy_requested");
-   const bool req_ui_projection=Config.GetBool("gate_ui_projection_requested");
+const bool req_ui_projection=Config.GetBool("gate_ui_projection_requested");
 
    const bool eff_runtime_scheduler=Config.GetBool("runtime_scheduler_enabled");
    const bool eff_timer_heavy=ISSX_IsTimerHeavyWorkOn();
-   const bool eff_tick_heavy=ISSX_IsGateOn(req_tick_heavy,false);
+   const bool eff_tick_heavy=Config.GetBool("tick_heavy_work_enabled");
    const bool eff_ui_projection=ISSX_IsUiProjectionOn();
 
    g_debug.Write("INFO","feature_state","session_snapshot",
@@ -1714,6 +2560,7 @@ int OnInit()
    g_debug.Write("INFO","feature_state","ea5_contracts","requested="+ISSX_OnOff(Config.GetBool("ea5_enabled"))+" effective="+ISSX_OnOff(g_ea_enabled[4])+" reason="+(g_ea_enabled[4]?"active":(Config.GetBool("isolation_mode")?"isolation_forced_off":"requested_off")));
 
    ISSX_LogFoundationStartupProfile(g_ea_enabled[0],eff_timer_heavy,eff_ui_projection);
+
    g_debug.Write("INFO","paths","operator_layout",
                  "operator_root="+g_operator_root_relative+"/"+
                  " market_json_path="+g_market_json_relative_path+
@@ -1721,15 +2568,7 @@ int OnInit()
                  " persistence_root="+ISSX_PersistencePath::SharedDir(g_firm_id)+
                  " debug_sink="+g_debug.ActivePath());
 
-  ISSX_LogGateSnapshot();
-
-   if(!Config.IsValid())
-     {
-      const string invalid_reason="config_validation_failed";
-      g_debug.Write("ERROR","startup","config_invalid",invalid_reason);
-      g_debug.Write("ERROR","lifecycle","oninit_end","result=INIT_FAILED reason="+invalid_reason);
-      return INIT_FAILED;
-     }
+   ISSX_LogGateSnapshot();
 
    if(g_ea_enabled[0] && (!eff_timer_heavy || !eff_ui_projection))
      {
@@ -1737,11 +2576,9 @@ int OnInit()
       g_debug.Write("WARN","startup","profile_degraded",block_reason+" action=continue_without_self_kill");
      }
 
-   // registry + runtime
+   // 2) runtime init
    g_registry.SeedBlueprintV170();
-   StageRegistry.Reset();
-   g_stage_registry_infra.Reset();
-   ISSX_SyncEA1StageRegistry("init","oninit",0,false);
+
    string runtime_init_state="skipped | reason="+(Config.GetBool("minimal_debug_mode")?"minimal_debug_mode":"gate_off");
    if(Config.GetBool("runtime_scheduler_enabled"))
      {
@@ -1752,13 +2589,60 @@ int OnInit()
       g_debug.Write("INFO","runtime","init_skipped","disabled_by_gate");
    ISSX_LogFeatureStatus("feature_init","runtime_scheduler",runtime_init_state,g_last_feature_init_runtime_scheduler,false);
 
-   g_bootstrapped     = false;
-   g_runtime_ready    = false;
-   g_first_cycle_done = false;
-   g_kernel_busy      = false;
-   g_timer_pulse_count=0;
-   g_timer_skip_runtime_not_ready_count=0;
-   g_timer_skip_kernel_busy_count=0;
+   // 3) data handler init
+   g_debug.Write("INFO","data_handler","init","assumed_available_static_module");
+
+   // 4) memory guard init
+   g_memory_guard.ResetCycle();
+   g_debug.Write("INFO","memory_guard","init","cycle_reset_ok");
+g_memory_guard.ConfigureSnapshotCapacity(Config.EffectiveSnapshotRetention());
+g_debug.Write("INFO","memory_guard","retention_configured",
+              "capacity="+IntegerToString(g_memory_guard.SnapshotCapacity()));
+              
+   // 5) stage registry build
+   if(!ISSX_BuildStageRegistry())
+     {
+      g_debug.Write("ERROR","startup","stage_registry_init_failed","stage_missing");
+      g_debug.Write("ERROR","lifecycle","oninit_end","result=INIT_FAILED reason=stage_missing");
+      return INIT_FAILED;
+     }
+
+   string stage_registry_reason="ok";
+if(!ISSX_ValidateStageRegistry(stage_registry_reason))
+  {
+   g_debug.Write("ERROR","startup","stage_registry_invalid",stage_registry_reason);
+   g_debug.Write("ERROR","lifecycle","oninit_end","result=INIT_FAILED reason="+stage_registry_reason);
+   return INIT_FAILED;
+  }
+
+   // 6) scheduler init
+   g_scheduler.Reset();
+   g_scheduler.Configure(ISSX_RuntimeSchedulerLayerEnabled(),ISSX_SchedulerCycleBudgetMs(),15);
+
+   string scheduler_reason="ok";
+   if(!ISSX_ValidateSchedulerConfig(scheduler_reason))
+     {
+      g_debug.Write("ERROR","startup","scheduler_invalid",scheduler_reason);
+      g_debug.Write("ERROR","lifecycle","oninit_end","result=INIT_FAILED reason="+scheduler_reason);
+      return INIT_FAILED;
+     }
+
+   // 7) telemetry / menu / UI init
+   g_ui.Init(g_debug);
+   g_debug.Write("INFO","ui","init","ok");
+
+   // 8) final readiness check
+   string ready_reason="ok";
+   if(!ISSX_FinalReadinessCheck(ready_reason))
+     {
+      g_debug.Write("ERROR","startup","readiness_failed",
+                    "reason="+ready_reason+
+                    " symbol="+_Symbol+
+                    " period="+IntegerToString((int)_Period)+
+                    " scheduler_budget_ms="+IntegerToString(ISSX_SchedulerCycleBudgetMs()));
+      g_debug.Write("ERROR","lifecycle","oninit_end","result=INIT_FAILED reason="+ready_reason);
+      return INIT_FAILED;
+     }
 
    int timer_sec=ISSX_EVENT_TIMER_SEC;
    if(timer_sec<1)
@@ -1770,13 +2654,13 @@ int OnInit()
    if(!EventSetTimer(timer_sec))
      {
       g_debug.Write("ERROR","timer","event_set_failed","err="+IntegerToString(GetLastError()));
-      g_debug.Write("ERROR","lifecycle","oninit_end","result=INIT_FAILED (critical timer failure)");
+      g_debug.Write("ERROR","lifecycle","oninit_end","result=INIT_FAILED reason=timer_event_set_failed");
       return INIT_FAILED;
      }
 
    g_runtime_ready=true;
    g_debug.Write("INFO","timer","event_set_ok","sec="+IntegerToString(timer_sec));
-   g_ui.Init(g_debug);
+   g_debug.Write("INFO","startup","readiness_ok","symbol="+_Symbol+" period="+IntegerToString(_Period));
    g_debug.Write("INFO","lifecycle","oninit_end","result=INIT_SUCCEEDED");
    return INIT_SUCCEEDED;
   }
@@ -1796,6 +2680,7 @@ void OnDeinit(const int reason)
    g_last_deinit_reason_code=reason;
    g_last_deinit_reason_text=ISSX_DeinitReasonText(reason);
    g_debug.Write("INFO","lifecycle","ondeinit","reason="+IntegerToString(reason)+" reason_text="+g_last_deinit_reason_text+" last_checkpoint="+g_last_checkpoint+" self_remove=false");
+   g_memory_guard.OnDeinitCleanup();
    g_telemetry.Flush();
    g_debug.Close(reason,"last_checkpoint="+g_last_checkpoint+" file_mode="+g_debug.ActiveMode()+" file_path="+g_debug.ActivePath());
   }
@@ -1818,18 +2703,21 @@ void OnTimer()
       return;
      }
 
-   g_kernel_busy=true;
-
-   g_memory_guard.ResetCycle();
+g_kernel_busy=true;
+g_memory_guard.ResetCycle();
+g_memory_guard.ConfigureSnapshotCapacity(Config.EffectiveSnapshotRetention());
+g_memory_guard.Cleanup();
 
    ISSX_SetCheckpoint("ontimer_enter");
    g_telemetry.Event("timer_heartbeat","timer_heartbeat");
    g_timer_pulse_count++;
+
    if(!g_first_timer_logged)
      {
       g_debug.Write("INFO","timer","first_heartbeat","first timer heartbeat reached");
       g_first_timer_logged=true;
      }
+
    const ulong timer_start_us=(ulong)GetMicrosecondCount();
    const bool sampled=((g_timer_pulse_count%15)==1);
    const bool gate_runtime_scheduler=Config.GetBool("runtime_scheduler_enabled");
@@ -1846,6 +2734,21 @@ void OnTimer()
                     " runtime_scheduler="+(gate_runtime_scheduler?"on":"off")+
                     " heavy_timer_work="+(gate_timer_heavy?"on":"off"));
 
+   string readiness_reason="ok";
+   if(!ISSX_CanRunScheduler(readiness_reason))
+     {
+      g_debug.Write("WARN","timer","skip",
+                    "reason="+readiness_reason+
+                    " runtime_ready="+ISSX_OnOff(g_runtime_ready)+
+                    " scheduler_budget_ms="+IntegerToString(ISSX_SchedulerCycleBudgetMs())+
+                    " stage_registry_ea1="+ISSX_StageStateRegistry::StateToString(StageRegistry.GetState("ea1_market")));
+      g_last_kernel_result="degraded";
+      g_last_kernel_reason=readiness_reason;
+      g_first_cycle_done=true;
+      g_kernel_busy=false;
+      return;
+     }
+
    bool timer_cycle_ok=true;
    long timer_kernel_elapsed_ms=0;
 
@@ -1855,14 +2758,17 @@ void OnTimer()
 
    string timer_heavy_status="skipped | gate=off";
    string kernel_reason="none";
+
    if(gate_timer_heavy)
      {
       const ulong kernel_start_us=(ulong)GetMicrosecondCount();
       bool ea1_stage_ran=false;
       string ea1_stage_result="skipped";
       string ea1_stage_reason="none";
+
       timer_cycle_ok=ISSX_RunKernelCycle(ea1_stage_ran,ea1_stage_result,ea1_stage_reason);
       timer_kernel_elapsed_ms=(long)(((ulong)GetMicrosecondCount()-kernel_start_us)/1000);
+
       if(!ea1_stage_ran)
         {
          timer_heavy_status="degraded | reason=no_enabled_stage_ran";
@@ -1887,6 +2793,7 @@ void OnTimer()
          g_debug.Write("INFO","timer","kernel_skip","disabled_by_gate");
          g_logged_timer_heavy_skip=true;
         }
+
       if(g_ea_enabled[0])
         {
          timer_cycle_ok=false;
@@ -1897,12 +2804,14 @@ void OnTimer()
          g_last_ea1_stage_elapsed_ms=0;
          ISSX_SyncEA1StageRegistry(g_last_ea1_stage_run,g_last_ea1_stage_reason,g_last_ea1_stage_elapsed_ms,true);
         }
+
       if((g_timer_pulse_count%30)==1)
          g_debug.Write("INFO","timer","minimal_heartbeat","pulse="+ISSX_Util::ULongToStringX(g_timer_pulse_count));
      }
 
    if(gate_runtime_scheduler && gate_timer_heavy)
       runtime_scheduler_status=(timer_cycle_ok ? "success" : "failed | reason=kernel_cycle_false");
+
    ISSX_LogFeatureStatus("feature_run","runtime_scheduler",runtime_scheduler_status,g_last_feature_runtime_scheduler,sampled);
    ISSX_LogFeatureStatus("feature_run","timer_heavy_work",timer_heavy_status,g_last_feature_timer_heavy,sampled);
 
@@ -1910,12 +2819,17 @@ void OnTimer()
    g_last_kernel_elapsed_ms=timer_kernel_elapsed_ms;
    g_telemetry.Metric("kernel_elapsed_ms",(double)timer_kernel_elapsed_ms);
    g_telemetry.LogSampledSummary((sampled || !timer_cycle_ok));
+
    if(kernel_reason=="none")
       kernel_reason=(gate_timer_heavy?"active":"timer_heavy_off");
    g_last_kernel_reason=kernel_reason;
 
    if(sampled || !timer_cycle_ok)
-      g_debug.Write("INFO","timer","kernel_result",(timer_cycle_ok?"ok":"degraded")+" elapsed_ms="+IntegerToString((int)timer_kernel_elapsed_ms)+" timer_heavy="+(gate_timer_heavy?"on":"off")+" reason="+kernel_reason);
+      g_debug.Write("INFO","timer","kernel_result",
+                    (timer_cycle_ok?"ok":"degraded")+
+                    " elapsed_ms="+IntegerToString((int)timer_kernel_elapsed_ms)+
+                    " timer_heavy="+(gate_timer_heavy?"on":"off")+
+                    " reason="+kernel_reason);
 
    const ulong elapsed_us=(ulong)GetMicrosecondCount()-timer_start_us;
    if(sampled || !timer_cycle_ok)
@@ -1932,10 +2846,12 @@ void OnTimer()
    g_stage_registry_infra.SetState(issx_stage_ea1,ISSX_EA1InfraStateFromRun(g_last_ea1_stage_run));
    g_stage_registry_infra.SetReason(issx_stage_ea1,g_last_ea1_stage_reason);
    g_stage_registry_infra.SetElapsed(issx_stage_ea1,g_last_ea1_stage_elapsed_ms);
+
    g_metrics.RecordLatency(issx_stage_ea1,g_last_ea1_stage_elapsed_ms);
    g_metrics.RecordThroughput(issx_stage_ea1,g_ea1.universe.active_universe);
    g_metrics.RecordHydrationRateBps(issx_stage_ea2,g_ea2.forensic.max_rates_returned);
    g_metrics.RecordExportSize(issx_stage_ea1,g_ea1.publish_stage_json_bytes);
+
    g_last_system_snapshot=ISSX_SystemSnapshot::DumpSystemState(g_runtime.State(),
                                                                g_ea1.universe.broker_universe,
                                                                g_ea2.counters.symbols_total,
@@ -1988,19 +2904,26 @@ void OnTimer()
 
    g_first_cycle_done=true;
    g_kernel_busy=false;
-
   }
 
 void OnTick()
   {
    static long tick_count=0;
+   static datetime last_tick_time=0;
+
    tick_count++;
+   last_tick_time=TimeCurrent();
+
    if(!g_first_tick_logged)
      {
       g_debug.Write("INFO","tick","first_heartbeat","first tick heartbeat reached");
       g_first_tick_logged=true;
      }
+
    const bool tick_sampled=((tick_count%100)==0);
+
+   g_telemetry.Event("tick_heartbeat","tick_heartbeat");
+
    if(!Config.GetBool("tick_heavy_work_enabled"))
      {
       if(!g_logged_tick_heavy_skip)
@@ -2008,15 +2931,28 @@ void OnTick()
          g_debug.Write("INFO","tick","heavy_work_skipped","disabled_by_gate");
          g_logged_tick_heavy_skip=true;
         }
-      ISSX_LogFeatureStatus("feature_run","tick_heavy_work","skipped | reason="+(Config.GetBool("minimal_debug_mode")?"minimal_debug_mode":"gate_off"),g_last_feature_run_tick_heavy,tick_sampled);
+
+      ISSX_LogFeatureStatus("feature_run","tick_heavy_work",
+                            "skipped | reason="+(Config.GetBool("minimal_debug_mode")?"minimal_debug_mode":"gate_off"),
+                            g_last_feature_run_tick_heavy,
+                            tick_sampled);
+
       if(tick_sampled)
-         g_debug.Write("INFO","tick","heartbeat","count="+IntegerToString((int)tick_count)+" mode=minimal");
+         g_debug.Write("INFO","tick","heartbeat",
+                       "count="+IntegerToString((int)tick_count)+
+                       " mode=thin_only"+
+                       " last_tick="+TimeToString(last_tick_time,TIME_DATE|TIME_SECONDS));
       return;
      }
 
-   ISSX_LogFeatureStatus("feature_run","tick_heavy_work","success",g_last_feature_run_tick_heavy,tick_sampled);
+   // keep OnTick intentionally thin; scheduler remains the sole execution coordinator
+   ISSX_LogFeatureStatus("feature_run","tick_heavy_work","armed_but_deferred_to_scheduler",g_last_feature_run_tick_heavy,tick_sampled);
+
    if((tick_count%50)==0)
-      g_debug.Write("INFO","tick","heartbeat","count="+IntegerToString((int)tick_count)+" mode=heavy_enabled");
+      g_debug.Write("INFO","tick","heartbeat",
+                    "count="+IntegerToString((int)tick_count)+
+                    " mode=thin_scheduler_owned"+
+                    " last_tick="+TimeToString(last_tick_time,TIME_DATE|TIME_SECONDS));
   }
 
 

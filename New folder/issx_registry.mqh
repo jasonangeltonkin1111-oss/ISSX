@@ -1838,11 +1838,36 @@ struct ISSXStageState
      }
   };
 
+struct ISSXStageRegistration
+  {
+   string stage_name;
+   bool   required_stage;
+   bool   registered_flag;
+   bool   enabled_flag;
+   int    priority_order;
+   string dependency_csv;
+   string disabled_reason;
+   datetime registered_at;
+
+   void Reset()
+     {
+      stage_name="";
+      required_stage=false;
+      registered_flag=false;
+      enabled_flag=false;
+      priority_order=0;
+      dependency_csv="";
+      disabled_reason="none";
+      registered_at=(datetime)0;
+     }
+  };
+
 class ISSX_StageStateRegistry
   {
 private:
-   ISSXStageState m_items[];
-   long           m_update_seq;
+   ISSXStageState        m_items[];
+   ISSXStageRegistration m_specs[];
+   long                  m_update_seq;
 
    int FindIndex(const string stage_name) const
      {
@@ -1875,6 +1900,36 @@ private:
       return idx;
      }
 
+   int FindSpecIndex(const string stage_name) const
+     {
+      const int n=ArraySize(m_specs);
+      for(int i=0;i<n;i++)
+        {
+         if(m_specs[i].stage_name==stage_name)
+            return i;
+        }
+      return -1;
+     }
+
+   int EnsureSpecIndex(const string stage_name)
+     {
+      if(ISSX_Util::IsEmpty(stage_name))
+         return -1;
+
+      int idx=FindSpecIndex(stage_name);
+      if(idx>=0)
+         return idx;
+
+      const int n=ArraySize(m_specs);
+      if(ArrayResize(m_specs,n+1)!=(n+1))
+         return -1;
+
+      idx=n;
+      m_specs[idx].Reset();
+      m_specs[idx].stage_name=stage_name;
+      return idx;
+     }
+
    bool IsStateValid(const int state) const
      {
       return (state>=STAGE_OFF && state<=STAGE_SKIPPED);
@@ -1900,6 +1955,84 @@ private:
       m_update_seq++;
      }
 
+   static string CanonicalRequiredStageName(const int idx)
+     {
+      switch(idx)
+        {
+         case 0: return "ea1_market";
+         case 1: return "ea2_history";
+         case 2: return "ea3_selection";
+         case 3: return "ea4_correlation";
+         case 4: return "ea5_contracts";
+        }
+      return "";
+     }
+
+   static string CanonicalDependenciesFor(const string stage_name)
+     {
+      if(stage_name=="ea1_market")
+         return "runtime_ready,symbol_valid,live_tick,recent_tick,rates_valid";
+      if(stage_name=="ea2_history")
+         return "ea1_market,history_access";
+      if(stage_name=="ea3_selection")
+         return "ea1_market,ea2_history";
+      if(stage_name=="ea4_correlation")
+         return "ea3_selection";
+      if(stage_name=="ea5_contracts")
+         return "ea1_market,ea2_history,ea3_selection,ea4_correlation";
+      return "";
+     }
+
+   bool ValidateOneRequiredStage(const string stage_name,string &reason) const
+     {
+      const int spec_idx=FindSpecIndex(stage_name);
+      if(spec_idx<0)
+        {
+         reason="stage_missing";
+         return false;
+        }
+
+      if(!m_specs[spec_idx].registered_flag)
+        {
+         reason="stage_not_registered";
+         return false;
+        }
+
+      const int state_idx=FindIndex(stage_name);
+      if(state_idx<0)
+        {
+         reason="stage_state_missing";
+         return false;
+        }
+
+      if(!IsStateValid(m_items[state_idx].state))
+        {
+         reason="stage_state_invalid";
+         return false;
+        }
+
+      if(m_specs[spec_idx].priority_order<=0)
+        {
+         reason="stage_priority_missing";
+         return false;
+        }
+
+      if(ISSX_Util::IsEmpty(m_specs[spec_idx].dependency_csv))
+        {
+         reason="stage_dependency_missing";
+         return false;
+        }
+
+      if(!m_specs[spec_idx].enabled_flag && ISSX_Util::IsEmpty(m_specs[spec_idx].disabled_reason))
+        {
+         reason="stage_disabled_reason_missing";
+         return false;
+        }
+
+      reason="ok";
+      return true;
+     }
+
 public:
    ISSX_StageStateRegistry()
      {
@@ -1909,12 +2042,118 @@ public:
    void Reset()
      {
       ArrayResize(m_items,0);
+      ArrayResize(m_specs,0);
       m_update_seq=0;
+     }
+
+   void SeedCanonicalRequiredStages(const bool ea1_enabled,
+                                    const bool ea2_enabled,
+                                    const bool ea3_enabled,
+                                    const bool ea4_enabled,
+                                    const bool ea5_enabled)
+     {
+      Reset();
+
+      RegisterStage("ea1_market",1,ea1_enabled,true,CanonicalDependenciesFor("ea1_market"),(ea1_enabled?"none":"requested_off"));
+      RegisterStage("ea2_history",2,ea2_enabled,true,CanonicalDependenciesFor("ea2_history"),(ea2_enabled?"none":"requested_off"));
+      RegisterStage("ea3_selection",3,ea3_enabled,true,CanonicalDependenciesFor("ea3_selection"),(ea3_enabled?"none":"requested_off"));
+      RegisterStage("ea4_correlation",4,ea4_enabled,true,CanonicalDependenciesFor("ea4_correlation"),(ea4_enabled?"none":"requested_off"));
+      RegisterStage("ea5_contracts",5,ea5_enabled,true,CanonicalDependenciesFor("ea5_contracts"),(ea5_enabled?"none":"requested_off"));
+
+      EnsureIndex("ea1_market");
+      EnsureIndex("ea2_history");
+      EnsureIndex("ea3_selection");
+      EnsureIndex("ea4_correlation");
+      EnsureIndex("ea5_contracts");
      }
 
    int Count() const
      {
       return ArraySize(m_items);
+     }
+
+   int RegisteredStageCount() const
+     {
+      int total=0;
+      for(int i=0;i<ArraySize(m_specs);i++)
+         if(m_specs[i].registered_flag)
+            total++;
+      return total;
+     }
+
+   int RequiredStageCount() const
+     {
+      int total=0;
+      for(int i=0;i<ArraySize(m_specs);i++)
+         if(m_specs[i].required_stage)
+            total++;
+      return total;
+     }
+
+   bool Exists(const string stage_name) const
+     {
+      return (FindIndex(stage_name)>=0 || FindSpecIndex(stage_name)>=0);
+     }
+
+   bool RegisterStage(const string stage_name,
+                      const int priority_order,
+                      const bool enabled_flag,
+                      const bool required_stage=true,
+                      const string dependency_csv="",
+                      const string disabled_reason="none")
+     {
+      if(ISSX_Util::IsEmpty(stage_name))
+         return false;
+
+      const int spec_idx=EnsureSpecIndex(stage_name);
+      if(spec_idx<0)
+         return false;
+
+      m_specs[spec_idx].stage_name=stage_name;
+      m_specs[spec_idx].required_stage=required_stage;
+      m_specs[spec_idx].registered_flag=true;
+      m_specs[spec_idx].enabled_flag=enabled_flag;
+      m_specs[spec_idx].priority_order=priority_order;
+      m_specs[spec_idx].dependency_csv=(ISSX_Util::IsEmpty(dependency_csv) ? CanonicalDependenciesFor(stage_name) : dependency_csv);
+      m_specs[spec_idx].disabled_reason=(enabled_flag ? "none" : NormalizeReason(disabled_reason));
+      m_specs[spec_idx].registered_at=TimeLocal();
+
+      EnsureIndex(stage_name);
+      return true;
+     }
+
+   bool SetEnabled(const string stage_name,const bool enabled_flag,const string disabled_reason="none")
+     {
+      const int spec_idx=EnsureSpecIndex(stage_name);
+      if(spec_idx<0)
+         return false;
+
+      m_specs[spec_idx].enabled_flag=enabled_flag;
+      m_specs[spec_idx].disabled_reason=(enabled_flag ? "none" : NormalizeReason(disabled_reason));
+      m_specs[spec_idx].registered_flag=true;
+      if(m_specs[spec_idx].registered_at<=0)
+         m_specs[spec_idx].registered_at=TimeLocal();
+      return true;
+     }
+
+   bool SetPriority(const string stage_name,const int priority_order)
+     {
+      const int spec_idx=EnsureSpecIndex(stage_name);
+      if(spec_idx<0)
+         return false;
+      m_specs[spec_idx].priority_order=priority_order;
+      m_specs[spec_idx].registered_flag=true;
+      return true;
+     }
+
+   bool SetDependencies(const string stage_name,const string dependency_csv)
+     {
+      const int spec_idx=EnsureSpecIndex(stage_name);
+      if(spec_idx<0)
+         return false;
+      m_specs[spec_idx].dependency_csv=NormalizeReason(dependency_csv);
+      m_specs[spec_idx].registered_flag=true;
+      return true;
      }
 
    bool SetState(const string stage_name,const int state)
@@ -2030,6 +2269,150 @@ public:
 
       out_state=m_items[idx];
       return true;
+     }
+
+   bool IsRegistered(const string stage_name) const
+     {
+      const int spec_idx=FindSpecIndex(stage_name);
+      if(spec_idx<0)
+         return false;
+      return m_specs[spec_idx].registered_flag;
+     }
+
+   bool IsEnabled(const string stage_name) const
+     {
+      const int spec_idx=FindSpecIndex(stage_name);
+      if(spec_idx<0)
+         return false;
+      return m_specs[spec_idx].enabled_flag;
+     }
+
+   int GetPriority(const string stage_name) const
+     {
+      const int spec_idx=FindSpecIndex(stage_name);
+      if(spec_idx<0)
+         return 0;
+      return m_specs[spec_idx].priority_order;
+     }
+
+   string GetDependencies(const string stage_name) const
+     {
+      const int spec_idx=FindSpecIndex(stage_name);
+      if(spec_idx<0)
+         return "";
+      return m_specs[spec_idx].dependency_csv;
+     }
+
+   string GetDisabledReason(const string stage_name) const
+     {
+      const int spec_idx=FindSpecIndex(stage_name);
+      if(spec_idx<0)
+         return "stage_missing";
+      return m_specs[spec_idx].disabled_reason;
+     }
+
+   bool ValidateRequiredStages(string &reason) const
+     {
+      reason="ok";
+
+      for(int i=0;i<5;i++)
+        {
+         const string stage_name=CanonicalRequiredStageName(i);
+         if(ISSX_Util::IsEmpty(stage_name))
+            continue;
+
+         string local_reason="ok";
+         if(!ValidateOneRequiredStage(stage_name,local_reason))
+           {
+            reason=stage_name+"_"+local_reason;
+            return false;
+           }
+        }
+
+      return true;
+     }
+
+   string BuildRegistrySummary() const
+     {
+      string names="";
+      string missing="";
+      string disabled="";
+
+      for(int i=0;i<5;i++)
+        {
+         const string stage_name=CanonicalRequiredStageName(i);
+         if(i>0)
+            names+=",";
+         names+=stage_name;
+
+         const int spec_idx=FindSpecIndex(stage_name);
+         if(spec_idx<0 || !m_specs[spec_idx].registered_flag)
+           {
+            if(StringLen(missing)>0)
+               missing+=",";
+            missing+=stage_name;
+            continue;
+           }
+
+         if(!m_specs[spec_idx].enabled_flag)
+           {
+            if(StringLen(disabled)>0)
+               disabled+=",";
+            disabled+=stage_name+"("+m_specs[spec_idx].disabled_reason+")";
+           }
+        }
+
+      if(StringLen(missing)<=0)
+         missing="none";
+      if(StringLen(disabled)<=0)
+         disabled="none";
+
+      return "required_stage_count="+IntegerToString(5)+
+             " registered_stage_count="+IntegerToString(RegisteredStageCount())+
+             " names="+names+
+             " missing_stages="+missing+
+             " disabled_stages="+disabled;
+     }
+
+   void DumpRegistrySummary() const
+     {
+      Print("ISSX: stage_registry_summary ",BuildRegistrySummary());
+
+      for(int i=0;i<5;i++)
+        {
+         const string stage_name=CanonicalRequiredStageName(i);
+         const int spec_idx=FindSpecIndex(stage_name);
+         const int state_idx=FindIndex(stage_name);
+
+         string state_text="missing";
+         string health_text="unknown";
+         string reason_text="none";
+         if(state_idx>=0)
+           {
+            state_text=StateToString(m_items[state_idx].state);
+            health_text=HealthToString(m_items[state_idx].health_state);
+            reason_text=m_items[state_idx].reason;
+           }
+
+         if(spec_idx<0)
+           {
+            Print("ISSX: stage_registry_item stage=",stage_name,
+                  " registered=no state=",state_text,
+                  " priority=0 enabled=unknown dependencies=missing reason=",reason_text);
+            continue;
+           }
+
+         Print("ISSX: stage_registry_item stage=",stage_name,
+               " registered=",(m_specs[spec_idx].registered_flag?"yes":"no"),
+               " required=",(m_specs[spec_idx].required_stage?"yes":"no"),
+               " enabled=",(m_specs[spec_idx].enabled_flag?"yes":"no"),
+               " priority=",IntegerToString(m_specs[spec_idx].priority_order),
+               " dependencies=",m_specs[spec_idx].dependency_csv,
+               " disabled_reason=",m_specs[spec_idx].disabled_reason,
+               " state=",state_text,
+               " health=",health_text,
+               " reason=",reason_text);
+        }
      }
 
    long UpdateSequence() const

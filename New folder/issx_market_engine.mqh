@@ -586,28 +586,28 @@ struct ISSX_EA1_RankabilityGate
    ISSX_ContradictionClass highest_blocking_contradiction_class;
 
    void Reset()
-  {
-   eligible_flag=false;
-   active_flag=false;
-   rankable_flag=false;
-   publishable_flag=false;
-   hard_block_flag=false;
-   exploratory_only_flag=false;
-   compare_safe_degraded_flag=false;
-   same_family_merged_away_flag=false;
-   identity_ready=false;
-   session_ready=false;
-   market_ready=false;
-   cost_ready=false;
-   acceptance_decision=issx_acceptance_rejected;
-   gate_reason_codes="unknown";
-   dependency_block_reason="none";
-   rankability_penalty=0.0;
-   readiness_score=0.0;
-   confidence_cap=0.0;
-   contradiction_count=0;
-   highest_blocking_contradiction_class=(ISSX_ContradictionClass)0;
-  }
+     {
+      eligible_flag=false;
+      active_flag=false;
+      rankable_flag=false;
+      publishable_flag=false;
+      hard_block_flag=false;
+      exploratory_only_flag=false;
+      compare_safe_degraded_flag=false;
+      same_family_merged_away_flag=false;
+      identity_ready=false;
+      session_ready=false;
+      market_ready=false;
+      cost_ready=false;
+      acceptance_decision=issx_acceptance_rejected;
+      gate_reason_codes="unknown";
+      dependency_block_reason="none";
+      rankability_penalty=0.0;
+      readiness_score=0.0;
+      confidence_cap=0.0;
+      contradiction_count=0;
+      highest_blocking_contradiction_class=(ISSX_ContradictionClass)0;
+     }
   };
 
 struct ISSX_EA1_SymbolLifecycle
@@ -666,6 +666,17 @@ struct ISSX_EA1_SymbolState
    bool                           changed_since_last_cycle;
    bool                           changed_since_last_publish;
    bool                           touched_this_cycle;
+   datetime                       first_hydrated_time;
+   datetime                       last_runtime_refresh_time;
+   datetime                       last_session_refresh_time;
+   datetime                       last_cost_refresh_time;
+   datetime                       last_gate_refresh_time;
+   bool                           hydration_seen_flag;
+   bool                           stale_runtime_flag;
+   bool                           stale_session_flag;
+   bool                           stale_cost_flag;
+   bool                           consistency_dirty_flag;
+   string                         service_block_class;
 
    void Reset()
      {
@@ -681,6 +692,17 @@ struct ISSX_EA1_SymbolState
       changed_since_last_cycle=false;
       changed_since_last_publish=false;
       touched_this_cycle=false;
+      first_hydrated_time=0;
+      last_runtime_refresh_time=0;
+      last_session_refresh_time=0;
+      last_cost_refresh_time=0;
+      last_gate_refresh_time=0;
+      hydration_seen_flag=false;
+      stale_runtime_flag=false;
+      stale_session_flag=false;
+      stale_cost_flag=false;
+      consistency_dirty_flag=false;
+      service_block_class="none";
      }
   };
 
@@ -846,6 +868,7 @@ struct ISSX_EA1_State
    string                   publish_last_successful_symbol;
    int                      publish_payload_bytes_attempted;
    int                      publish_payload_bytes_written;
+   int                      service_cursor;
 
    void Reset()
      {
@@ -908,7 +931,8 @@ struct ISSX_EA1_State
       publish_last_serialized_symbol="";
       publish_last_successful_symbol="";
       publish_payload_bytes_attempted=0;
-      publish_payload_bytes_written=0;
+      publish_payload_bytes_written=0; 
+      service_cursor=0;
      }
   };
 
@@ -946,7 +970,9 @@ private:
      {
       string u=c;
       StringToUpper(u);
-      return (u=="EUR" || u=="USD" || u=="GBP" || u=="JPY" || u=="AUD" || u=="NZD" || u=="CAD" || u=="CHF" || u=="NOK" || u=="SEK" || u=="SGD" || u=="HKD" || u=="ZAR" || u=="CNH");
+      return (u=="EUR" || u=="USD" || u=="GBP" || u=="JPY" || u=="AUD" || u=="NZD" ||
+              u=="CAD" || u=="CHF" || u=="NOK" || u=="SEK" || u=="SGD" || u=="HKD" ||
+              u=="ZAR" || u=="CNH");
      }
 
    static string NormalizeOperatorSector(const string s)
@@ -983,7 +1009,7 @@ private:
       out_cls.asset_class=asset_class;
       out_cls.instrument_family=family;
       out_cls.theme_bucket=bucket;
-      out_cls.equity_sector=(sector=="Unknown"?"na":ISSX_Util::Lower(sector));
+      out_cls.equity_sector=(sector=="Unknown" ? "na" : ISSX_Util::Lower(sector));
       out_cls.classification_source=source;
       out_cls.classification_confidence=confidence;
       out_cls.classification_reliability_score=confidence;
@@ -997,7 +1023,7 @@ private:
       out_cls.final_subsector=subsector;
       out_cls.symbol_family=family;
       out_cls.leader_bucket_type=issx_leader_bucket_theme_bucket;
-      out_cls.leader_bucket_id=(sector!="Unknown"?sector:bucket);
+      out_cls.leader_bucket_id=(sector!="Unknown" ? sector : bucket);
      }
 
    static void DeriveFromHeuristics(const string blob,const string normalized_symbol,ISSX_EA1_ClassificationTruth &out_cls)
@@ -1013,7 +1039,9 @@ private:
       if(ContainsLower(blob,"xal") || ContainsLower(blob,"aluminium") || ContainsLower(blob,"aluminum"))
         { SetClass(out_cls,"commodity","industrial_metal","commodities","Basic Materials","Industrial Metals","Aluminum","heuristic_industrial_metal",0.90); return; }
 
-      if(ContainsLower(blob,"btc") || ContainsLower(blob,"eth") || ContainsLower(blob,"xrp") || ContainsLower(blob,"sol") || ContainsLower(blob,"ada") || ContainsLower(blob,"doge") || ContainsLower(blob,"ltc"))
+      if(ContainsLower(blob,"btc") || ContainsLower(blob,"eth") || ContainsLower(blob,"xrp") ||
+         ContainsLower(blob,"sol") || ContainsLower(blob,"ada") || ContainsLower(blob,"doge") ||
+         ContainsLower(blob,"ltc"))
         {
          string ss="Major Crypto";
          if(ContainsLower(blob,"doge")) ss="Meme Coin";
@@ -1023,16 +1051,23 @@ private:
          return;
         }
 
-      if(ContainsLower(blob,"us30") || ContainsLower(blob,"dj30") || ContainsLower(blob,"ws30") || ContainsLower(blob,"nas100") || ContainsLower(blob,"ustec") || ContainsLower(blob,"us100") || ContainsLower(blob,"spx500") || ContainsLower(blob,"us500") || ContainsLower(blob,"spx") || ContainsLower(blob,"ger40") || ContainsLower(blob,"dax") || ContainsLower(blob,"de40") || ContainsLower(blob,"uk100") || ContainsLower(blob,"jp225") || ContainsLower(blob,"hk50"))
+      if(ContainsLower(blob,"us30") || ContainsLower(blob,"dj30") || ContainsLower(blob,"ws30") ||
+         ContainsLower(blob,"nas100") || ContainsLower(blob,"ustec") || ContainsLower(blob,"us100") ||
+         ContainsLower(blob,"spx500") || ContainsLower(blob,"us500") || ContainsLower(blob,"spx") ||
+         ContainsLower(blob,"ger40") || ContainsLower(blob,"dax") || ContainsLower(blob,"de40") ||
+         ContainsLower(blob,"uk100") || ContainsLower(blob,"jp225") || ContainsLower(blob,"hk50"))
         {
          string sub="US Equity Index";
-         if(ContainsLower(blob,"ger") || ContainsLower(blob,"dax") || ContainsLower(blob,"de40") || ContainsLower(blob,"uk100")) sub="EU Equity Index";
-         if(ContainsLower(blob,"jp225") || ContainsLower(blob,"hk50")) sub="Asia Equity Index";
+         if(ContainsLower(blob,"ger") || ContainsLower(blob,"dax") || ContainsLower(blob,"de40") || ContainsLower(blob,"uk100"))
+            sub="EU Equity Index";
+         if(ContainsLower(blob,"jp225") || ContainsLower(blob,"hk50"))
+            sub="Asia Equity Index";
          SetClass(out_cls,"index","equity_index","index","Index","Equity Index",sub,"heuristic_index",0.90);
          return;
         }
 
-      if(ContainsLower(blob,"brent") || ContainsLower(blob,"wti") || ContainsLower(blob,"usoil") || ContainsLower(blob,"ukoil") || ContainsLower(blob,"xbrusd") || ContainsLower(blob,"xtiusd"))
+      if(ContainsLower(blob,"brent") || ContainsLower(blob,"wti") || ContainsLower(blob,"usoil") ||
+         ContainsLower(blob,"ukoil") || ContainsLower(blob,"xbrusd") || ContainsLower(blob,"xtiusd"))
         { SetClass(out_cls,"commodity","energy","energy","Energy","Oil","Crude Oil","heuristic_energy",0.90); return; }
 
       string s=normalized_symbol;
@@ -1043,7 +1078,7 @@ private:
          string b=StringSubstr(s,3,3);
          if(IsFxCode(a) && IsFxCode(b))
            {
-            string sub=((a=="USD" || b=="USD")?"Major FX":"Cross FX");
+            string sub=((a=="USD" || b=="USD") ? "Major FX" : "Cross FX");
             SetClass(out_cls,"fx","spot_fx","currency","Currency","Foreign Exchange",sub,"heuristic_fx",0.87);
             return;
            }
@@ -1059,12 +1094,14 @@ public:
                         ISSX_EA1_ClassificationTruth &out_cls)
      {
       out_cls.Reset();
-      string native_sector_text=NormalizeOperatorSector(EnumToString((ENUM_SYMBOL_SECTOR)obs.sector));
-      string native_industry_text=EnumToString((ENUM_SYMBOL_INDUSTRY)obs.industry);
-      if(obs.sector<0 || native_sector_text=="Unknown")
-         native_sector_text="Unknown";
-      if(obs.industry<0)
-         native_industry_text="Unknown";
+
+      string native_sector_text="Unknown";
+      string native_industry_text="Unknown";
+
+      if(obs.sector>=0)
+         native_sector_text=NormalizeOperatorSector((string)obs.sector);
+      if(obs.industry>=0)
+         native_industry_text=(string)obs.industry;
 
       out_cls.native_exchange=obs.exchange;
       out_cls.native_country=obs.country;
@@ -1072,21 +1109,75 @@ public:
       out_cls.native_industry=native_industry_text;
       out_cls.native_sector_present=(native_sector_text!="Unknown");
       out_cls.native_industry_present=(native_industry_text!="Unknown");
-      out_cls.native_taxonomy_quality=(out_cls.native_sector_present?0.75:0.0)+(out_cls.native_industry_present?0.20:0.0);
+      out_cls.native_taxonomy_quality=(out_cls.native_sector_present ? 0.75 : 0.0)
+                                     +(out_cls.native_industry_present ? 0.20 : 0.0);
 
-      string blob=Normalize(obs.symbol_raw+" "+normalized_symbol+" "+canonical_root+" "+obs.description+" "+obs.path+" "+obs.base_currency+" "+obs.profit_currency+" "+obs.quote_currency);
-      DeriveFromHeuristics(blob,normalized_symbol,out_cls);
+      string path_blob=Normalize(obs.path+" "+obs.exchange);
+      string desc_blob=Normalize(obs.description);
+      string sym_blob=Normalize(obs.symbol_raw+" "+normalized_symbol+" "+canonical_root);
+      string all_blob=Normalize(path_blob+" "+desc_blob+" "+sym_blob+" "+obs.base_currency+" "+obs.profit_currency+" "+obs.quote_currency);
 
-      if(out_cls.native_sector_present)
+      if(ContainsLower(path_blob,"forex") || ContainsLower(path_blob,"fx"))
+        {
+         DeriveFromHeuristics(sym_blob+" "+obs.base_currency+" "+obs.profit_currency+" "+obs.quote_currency,normalized_symbol,out_cls);
+         if(out_cls.asset_class=="unknown")
+            SetClass(out_cls,"fx","spot_fx","currency","Currency","Foreign Exchange","FX","path_fx",0.88);
+        }
+      else if(ContainsLower(path_blob,"crypto"))
+        {
+         DeriveFromHeuristics(sym_blob+" "+desc_blob,normalized_symbol,out_cls);
+         if(out_cls.asset_class=="unknown")
+            SetClass(out_cls,"crypto","crypto_spot","crypto","Crypto Currency","Crypto Spot","Major Crypto","path_crypto",0.90);
+        }
+      else if(ContainsLower(path_blob,"index"))
+        {
+         DeriveFromHeuristics(sym_blob+" "+desc_blob,normalized_symbol,out_cls);
+         if(out_cls.asset_class=="unknown")
+            SetClass(out_cls,"index","equity_index","index","Index","Equity Index","Index CFD","path_index",0.89);
+        }
+      else if(ContainsLower(path_blob,"metal") || ContainsLower(path_blob,"commodity") || ContainsLower(path_blob,"energy"))
+        {
+         DeriveFromHeuristics(all_blob,normalized_symbol,out_cls);
+         if(out_cls.asset_class=="unknown")
+            SetClass(out_cls,"commodity","commodity","commodities","Commodities","Commodity","Commodity CFD","path_commodity",0.86);
+        }
+      else
+        {
+         DeriveFromHeuristics(all_blob,normalized_symbol,out_cls);
+        }
+
+      if(out_cls.asset_class=="unknown" && out_cls.native_sector_present)
         {
          out_cls.final_sector=out_cls.native_sector;
+         out_cls.final_industry=(out_cls.native_industry_present ? out_cls.native_industry : "Unknown");
+         out_cls.classification_source="native";
+         out_cls.classification_confidence=0.82;
+         out_cls.classification_reliability_score=0.80;
+         out_cls.taxonomy_action_taken=issx_taxonomy_accepted;
+        }
+      else if(out_cls.native_sector_present && out_cls.classification_confidence<0.60)
+        {
+         out_cls.final_sector=out_cls.native_sector;
+         out_cls.final_industry=(out_cls.native_industry_present ? out_cls.native_industry : out_cls.final_industry);
          out_cls.classification_source="native";
          out_cls.classification_confidence=MathMax(out_cls.classification_confidence,0.82);
          out_cls.classification_reliability_score=MathMax(out_cls.classification_reliability_score,0.80);
          out_cls.taxonomy_action_taken=issx_taxonomy_accepted;
         }
 
-      if(out_cls.native_sector_present && out_cls.native_sector=="Currency" && (ContainsLower(blob,"xal") || ContainsLower(blob,"aluminium") || ContainsLower(blob,"aluminum") || ContainsLower(blob,"xau") || ContainsLower(blob,"xag") || ContainsLower(blob,"xpt") || ContainsLower(blob,"xpd") || ContainsLower(blob,"g au")))
+      if(out_cls.native_sector_present
+         && out_cls.native_sector=="Currency"
+         && (ContainsLower(all_blob,"xal")
+             || ContainsLower(all_blob,"aluminium")
+             || ContainsLower(all_blob,"aluminum")
+             || ContainsLower(all_blob,"xau")
+             || ContainsLower(all_blob,"xag")
+             || ContainsLower(all_blob,"xpt")
+             || ContainsLower(all_blob,"xpd")
+             || ContainsLower(all_blob,"gold")
+             || ContainsLower(all_blob,"silver")
+             || ContainsLower(all_blob,"platinum")
+             || ContainsLower(all_blob,"palladium")))
         {
          out_cls.native_vs_manual_conflict=true;
          out_cls.taxonomy_conflict_scope="sector";
@@ -1099,10 +1190,17 @@ public:
          out_cls.taxonomy_action_taken=issx_taxonomy_accepted;
         }
 
-      out_cls.equity_sector=(out_cls.final_sector=="Technology"?"technology":"na");
+      if(out_cls.final_sector=="Technology")
+         out_cls.equity_sector="technology";
+      else
+         out_cls.equity_sector="na";
+
       out_cls.leader_bucket_id=out_cls.final_sector;
       if(out_cls.final_sector=="Technology")
          out_cls.leader_bucket_type=issx_leader_bucket_equity_sector;
+      else
+         out_cls.leader_bucket_type=issx_leader_bucket_theme_bucket;
+
       out_cls.bucket_publishable=(out_cls.final_sector!="Unknown");
      }
   };
@@ -1248,6 +1346,173 @@ private:
          return fallback;
       return v;
      }
+        static int SecondsOfDay(const datetime value)
+     {
+      MqlDateTime dt;
+      TimeToStruct(value,dt);
+      return (dt.hour*3600 + dt.min*60 + dt.sec);
+     }
+
+static void LoadRawObservation(const string symbol,ISSX_EA1_RawBrokerObservation &out_obs)
+  {
+   out_obs.Reset();
+   out_obs.symbol_raw=symbol;
+
+   if(ISSX_Util::IsEmpty(symbol))
+     {
+      out_obs.symbol_discovery_state="empty_symbol";
+      out_obs.symbol_selection_state="empty_symbol";
+      out_obs.symbol_synchronization_state="empty_symbol";
+      out_obs.property_read_status="empty_symbol";
+      out_obs.property_unavailable_flag=true;
+      out_obs.select_failed_perm=true;
+      return;
+     }
+
+   out_obs.selection_state=SymbolSelect(symbol,true);
+   out_obs.symbol_selection_state=(out_obs.selection_state ? "selected" : "select_failed");
+   out_obs.select_failed_temp=!out_obs.selection_state;
+   out_obs.select_failed_perm=false;
+
+   out_obs.sync_state=SafeSymbolBool(symbol,SYMBOL_SELECT);
+   out_obs.synchronized_flag=SafeSymbolBool(symbol,SYMBOL_VISIBLE);
+   out_obs.custom_symbol_flag=SafeSymbolBool(symbol,SYMBOL_CUSTOM);
+   out_obs.trade_permitted=(SafeSymbolLong(symbol,SYMBOL_TRADE_MODE,SYMBOL_TRADE_MODE_DISABLED)!=(long)SYMBOL_TRADE_MODE_DISABLED);
+
+   out_obs.trade_mode=SafeSymbolLong(symbol,SYMBOL_TRADE_MODE,0);
+   out_obs.calc_mode=SafeSymbolLong(symbol,SYMBOL_TRADE_CALC_MODE,0);
+
+   out_obs.digits=SafeSymbolInt(symbol,SYMBOL_DIGITS,0);
+   out_obs.point=SafeSymbolDouble(symbol,SYMBOL_POINT,0.0);
+   out_obs.tick_size=SafeSymbolDouble(symbol,SYMBOL_TRADE_TICK_SIZE,0.0);
+   out_obs.tick_value=SafeSymbolDouble(symbol,SYMBOL_TRADE_TICK_VALUE,0.0);
+   out_obs.tick_value_profit=SafeSymbolDouble(symbol,SYMBOL_TRADE_TICK_VALUE_PROFIT,0.0);
+   out_obs.tick_value_loss=SafeSymbolDouble(symbol,SYMBOL_TRADE_TICK_VALUE_LOSS,0.0);
+   out_obs.contract_size=SafeSymbolDouble(symbol,SYMBOL_TRADE_CONTRACT_SIZE,0.0);
+
+   out_obs.volume_min=SafeSymbolDouble(symbol,SYMBOL_VOLUME_MIN,0.0);
+   out_obs.volume_step=SafeSymbolDouble(symbol,SYMBOL_VOLUME_STEP,0.0);
+   out_obs.volume_max=SafeSymbolDouble(symbol,SYMBOL_VOLUME_MAX,0.0);
+
+   out_obs.stops_level=SafeSymbolInt(symbol,SYMBOL_TRADE_STOPS_LEVEL,0);
+   out_obs.freeze_level=SafeSymbolInt(symbol,SYMBOL_TRADE_FREEZE_LEVEL,0);
+
+   out_obs.path=SafeSymbolString(symbol,SYMBOL_PATH,"");
+   out_obs.description=SafeSymbolString(symbol,SYMBOL_DESCRIPTION,"");
+   out_obs.exchange=SafeSymbolString(symbol,SYMBOL_EXCHANGE,"");
+   out_obs.country=SafeSymbolString(symbol,SYMBOL_COUNTRY,"");
+   out_obs.margin_currency=SafeSymbolString(symbol,SYMBOL_CURRENCY_MARGIN,"");
+   out_obs.profit_currency=SafeSymbolString(symbol,SYMBOL_CURRENCY_PROFIT,"");
+   out_obs.base_currency=SafeSymbolString(symbol,SYMBOL_CURRENCY_BASE,"");
+   out_obs.quote_currency="";
+
+   out_obs.sector=SafeSymbolLong(symbol,SYMBOL_SECTOR,-1);
+   out_obs.industry=SafeSymbolLong(symbol,SYMBOL_INDUSTRY,-1);
+
+   MqlTick tick;
+   ZeroMemory(tick);
+   out_obs.quote_observable=RefreshTick(symbol,tick);
+   if(out_obs.quote_observable)
+     {
+      out_obs.quote_tick_snapshot=tick;
+      out_obs.quote_time=(datetime)tick.time;
+      out_obs.quote_last_seen=(datetime)tick.time;
+     }
+   else
+     {
+      ZeroMemory(out_obs.quote_tick_snapshot);
+      out_obs.quote_time=0;
+      out_obs.quote_last_seen=0;
+     }
+
+   bool trade_window_open=false;
+   bool quote_window_open=false;
+   datetime now_ts=TimeTradeServer();
+   if(now_ts<=0)
+      now_ts=TimeCurrent();
+
+   MqlDateTime dt;
+   TimeToStruct(now_ts,dt);
+   const ENUM_DAY_OF_WEEK dow=(ENUM_DAY_OF_WEEK)dt.day_of_week;
+
+   out_obs.session_trade_windows=CountSessionWindows(symbol,dow,true,trade_window_open);
+   out_obs.session_quote_windows=CountSessionWindows(symbol,dow,false,quote_window_open);
+   out_obs.session_property_availability=(out_obs.session_trade_windows>0 || out_obs.session_quote_windows>0);
+
+   out_obs.history_addressable=(Bars(symbol,_Period)>0);
+
+   out_obs.metadata_readable=
+      (StringLen(out_obs.symbol_raw)>0 &&
+       out_obs.digits>0 &&
+       out_obs.point>0.0 &&
+       out_obs.volume_step>=0.0);
+
+   out_obs.property_unavailable_flag=!out_obs.metadata_readable;
+   out_obs.property_read_status=(out_obs.metadata_readable ? "ok" : "partial");
+   out_obs.property_read_fail_mask=0;
+
+   if(!out_obs.metadata_readable)
+     {
+      if(out_obs.digits<=0)          out_obs.property_read_fail_mask|=1;
+      if(out_obs.point<=0.0)         out_obs.property_read_fail_mask|=2;
+      if(out_obs.volume_step<0.0)    out_obs.property_read_fail_mask|=4;
+     }
+
+   out_obs.symbol_discovery_state="listed";
+   out_obs.symbol_synchronization_state=(out_obs.synchronized_flag ? "visible" : "not_visible");
+  }
+  
+   static bool IsWithinSessionWindow(const int now_sec,const int from_sec,const int to_sec)
+     {
+      if(from_sec<0 || to_sec<0)
+         return false;
+
+      if(from_sec==to_sec)
+         return true; // broker uses full-day window
+
+      if(from_sec<to_sec)
+         return (now_sec>=from_sec && now_sec<to_sec);
+
+      // wrapped session over midnight
+      return (now_sec>=from_sec || now_sec<to_sec);
+     }
+
+   static int CountSessionWindows(const string symbol,
+                                  const ENUM_DAY_OF_WEEK dow,
+                                  const bool trade_sessions,
+                                  bool &out_has_active_window)
+     {
+      out_has_active_window=false;
+
+      datetime now_ts=TimeTradeServer();
+      if(now_ts<=0)
+         now_ts=TimeCurrent();
+
+      const int now_sec=SecondsOfDay(now_ts);
+
+      int count=0;
+      for(int session_idx=0; session_idx<24; session_idx++)
+        {
+         datetime from_time=0;
+         datetime to_time=0;
+
+         const bool ok=(trade_sessions
+                        ? SymbolInfoSessionTrade(symbol,dow,session_idx,from_time,to_time)
+                        : SymbolInfoSessionQuote(symbol,dow,session_idx,from_time,to_time));
+
+         if(!ok)
+            break;
+
+         const int from_sec=(int)(from_time % 86400);
+         const int to_sec=(int)(to_time % 86400);
+
+         count++;
+         if(IsWithinSessionWindow(now_sec,from_sec,to_sec))
+            out_has_active_window=true;
+        }
+
+      return count;
+     }
 
    static bool RefreshTick(const string symbol,MqlTick &tick)
      {
@@ -1326,81 +1591,204 @@ private:
      }
 
    static void RestorePriorContinuity(const ISSX_EA1_SymbolState &prior,ISSX_EA1_SymbolState &dst)
-     {
-      dst.symbol_lifecycle=prior.symbol_lifecycle;
-      dst.normalized_identity.family_published_rep=prior.normalized_identity.family_published_rep;
-      dst.normalized_identity.family_rep_stability_window=prior.normalized_identity.family_rep_stability_window;
-      dst.normalized_identity.preferred_variant_locked=prior.normalized_identity.preferred_variant_locked;
-      dst.normalized_identity.preferred_variant_lock_age_cycles=prior.normalized_identity.preferred_variant_lock_age_cycles;
-      dst.changed_since_last_cycle=false;
-      dst.changed_since_last_publish=false;
-      dst.symbol_lifecycle.resumed_from_persistence=true;
-      dst.symbol_lifecycle.continuity_origin=issx_continuity_resumed_current;
-      dst.symbol_lifecycle.continuity_age_cycles=prior.symbol_lifecycle.continuity_age_cycles;
-     }
+  {
+   ISSX_EA1_RawBrokerObservation fresh_raw=dst.raw_broker_observation;
+   const int fresh_symbol_id=dst.symbol_id;
 
-   static void LoadRawObservation(const string symbol,ISSX_EA1_RawBrokerObservation &out_obs)
-     {
-      out_obs.Reset();
-      out_obs.symbol_raw=symbol;
-      out_obs.path=SafeSymbolString(symbol,SYMBOL_PATH,"");
-      out_obs.description=SafeSymbolString(symbol,SYMBOL_DESCRIPTION,"");
-      out_obs.exchange=SafeSymbolString(symbol,SYMBOL_EXCHANGE,"");
-      out_obs.country="";
-      out_obs.sector=SafeSymbolLong(symbol,SYMBOL_SECTOR,-1);
-      out_obs.industry=SafeSymbolLong(symbol,SYMBOL_INDUSTRY,-1);
-      out_obs.trade_mode=SafeSymbolLong(symbol,SYMBOL_TRADE_MODE,0);
-      out_obs.calc_mode=SafeSymbolLong(symbol,SYMBOL_TRADE_CALC_MODE,0);
-      out_obs.digits=SafeSymbolInt(symbol,SYMBOL_DIGITS,0);
-      out_obs.point=SafeSymbolDouble(symbol,SYMBOL_POINT,0.0);
-      out_obs.tick_size=SafeSymbolDouble(symbol,SYMBOL_TRADE_TICK_SIZE,0.0);
-      out_obs.tick_value=SafeSymbolDouble(symbol,SYMBOL_TRADE_TICK_VALUE,0.0);
-      out_obs.tick_value_profit=SafeSymbolDouble(symbol,SYMBOL_TRADE_TICK_VALUE_PROFIT,0.0);
-      out_obs.tick_value_loss=SafeSymbolDouble(symbol,SYMBOL_TRADE_TICK_VALUE_LOSS,0.0);
-      out_obs.contract_size=SafeSymbolDouble(symbol,SYMBOL_TRADE_CONTRACT_SIZE,0.0);
-      out_obs.volume_min=SafeSymbolDouble(symbol,SYMBOL_VOLUME_MIN,0.0);
-      out_obs.volume_step=SafeSymbolDouble(symbol,SYMBOL_VOLUME_STEP,0.0);
-      out_obs.volume_max=SafeSymbolDouble(symbol,SYMBOL_VOLUME_MAX,0.0);
-      out_obs.stops_level=SafeSymbolInt(symbol,SYMBOL_TRADE_STOPS_LEVEL,0);
-      out_obs.freeze_level=SafeSymbolInt(symbol,SYMBOL_TRADE_FREEZE_LEVEL,0);
-      out_obs.margin_currency=SafeSymbolString(symbol,SYMBOL_CURRENCY_MARGIN,"");
-      out_obs.profit_currency=SafeSymbolString(symbol,SYMBOL_CURRENCY_PROFIT,"");
-      out_obs.base_currency=SafeSymbolString(symbol,SYMBOL_CURRENCY_BASE,"");
-      out_obs.quote_currency=SafeSymbolString(symbol,SYMBOL_CURRENCY_PROFIT,"");
-      out_obs.selection_state=SafeSymbolBool(symbol,SYMBOL_SELECT);
-      out_obs.sync_state=SafeSymbolBool(symbol,SYMBOL_VISIBLE);
-      out_obs.metadata_readable=(out_obs.digits>0 || out_obs.point>0.0 || out_obs.contract_size>0.0 || out_obs.volume_min>0.0);
-      out_obs.trade_permitted=(out_obs.trade_mode!=0);
-      out_obs.custom_symbol_flag=SafeSymbolBool(symbol,SYMBOL_CUSTOM);
-      out_obs.synchronized_flag=SafeSymbolBool(symbol,SYMBOL_SELECT);
-      out_obs.history_addressable=true;
-      out_obs.property_unavailable_flag=!out_obs.metadata_readable;
-      out_obs.select_failed_temp=false;
-      out_obs.select_failed_perm=false;
-      out_obs.symbol_discovery_state="discovered";
-      out_obs.symbol_selection_state=(out_obs.selection_state ? "selected" : "not_selected");
-      out_obs.symbol_synchronization_state=(out_obs.sync_state ? "synchronized" : "unsynchronized");
-      out_obs.property_read_status=(out_obs.metadata_readable ? "metadata_readable" : "property_unavailable");
-      out_obs.property_read_fail_mask=(out_obs.metadata_readable ? 0 : 1);
-      out_obs.session_property_availability=true;
-      out_obs.session_trade_windows=0;
-      out_obs.session_quote_windows=0;
+   dst=prior;
 
-      MqlTick tick;
-      if(RefreshTick(symbol,tick))
+   dst.symbol_id=fresh_symbol_id;
+   dst.raw_broker_observation=fresh_raw;
+   dst.changed_since_last_cycle=false;
+   dst.changed_since_last_publish=false;
+   dst.touched_this_cycle=false;
+   dst.symbol_lifecycle.resumed_from_persistence=true;
+   dst.symbol_lifecycle.continuity_origin=issx_continuity_resumed_current;
+   dst.hydration_seen_flag=false;
+   dst.touched_this_cycle=false;
+
+   if(dst.symbol_lifecycle.continuity_age_cycles<0)
+      dst.symbol_lifecycle.continuity_age_cycles=0;
+  }
+
+      static void BuildRuntimeTruth(const ISSX_EA1_RawBrokerObservation &obs,ISSX_EA1_ValidatedRuntimeTruth &out_rt)
+     {
+      out_rt.Reset();
+
+      out_rt.readability_state=(obs.metadata_readable ? issx_readability_full : issx_readability_unreadable);
+      out_rt.unknown_reason=(obs.metadata_readable ? issx_unknown_not_applicable : issx_unknown_true_unknown);
+      out_rt.observed_quote_liveness=obs.quote_observable;
+      out_rt.trade_permitted_now=obs.trade_permitted;
+      out_rt.quote_recent_flag=(obs.quote_last_seen>0 && (TimeCurrent()-obs.quote_last_seen)<=120);
+      out_rt.synchronized_flag=obs.synchronized_flag;
+      out_rt.history_addressable=obs.history_addressable;
+      out_rt.selection_required_flag=!obs.selection_state;
+      out_rt.property_zero_distinct_from_unavailable=(obs.property_unavailable_flag && obs.point==0.0);
+      out_rt.session_trade_windows=obs.session_trade_windows;
+      out_rt.session_quote_windows=obs.session_quote_windows;
+
+      const bool session_info_available=obs.session_property_availability;
+      const bool quote_window_known_open=(obs.session_quote_windows>0);
+      const bool trade_window_known_open=(obs.session_trade_windows>0);
+
+      out_rt.declared_session_open=(session_info_available
+                                    ? (trade_window_known_open || quote_window_known_open)
+                                    : obs.trade_permitted);
+
+      if(!obs.metadata_readable)
         {
-         out_obs.quote_tick_snapshot=tick;
-         out_obs.quote_time=(datetime)tick.time;
-         out_obs.quote_last_seen=(datetime)tick.time;
-         out_obs.quote_observable=true;
+         out_rt.practical_market_state=issx_market_blocked;
+         out_rt.practical_market_state_reason_codes="spec_incomplete";
+         out_rt.current_friction_state="unknown";
+         out_rt.spread_state_vs_baseline="unknown";
+         out_rt.activity_transition_state="unknown";
+         out_rt.liquidity_ramp_state="unknown";
+         out_rt.session_reconciliation_state="declared_only";
+         out_rt.session_phase_class=issx_ea1_session_unknown;
+         out_rt.session_phase=issx_ea1_session_unknown;
+         return;
+        }
+
+      if(obs.quote_observable)
+        {
+         double bid=obs.quote_tick_snapshot.bid;
+         double ask=obs.quote_tick_snapshot.ask;
+         double point=(obs.point>0.0 ? obs.point : 0.00001);
+
+         out_rt.current_spread_points=((ask>bid && point>0.0) ? ((ask-bid)/point) : 0.0);
+         out_rt.spread_median_short_points=out_rt.current_spread_points;
+         out_rt.spread_p90_short_points=out_rt.current_spread_points*1.20;
+         out_rt.spread_widening_ratio=1.0;
+         out_rt.quote_interval_median_ms=1000.0;
+         out_rt.quote_interval_p90_ms=5000.0;
+         out_rt.quote_stall_rate=(out_rt.quote_recent_flag ? 0.0 : 1.0);
+         out_rt.quote_burstiness_score=(out_rt.quote_recent_flag ? 0.70 : 0.10);
+         out_rt.observation_samples_short=1;
+         out_rt.observation_samples_medium=1;
+         out_rt.observation_density_score=(out_rt.quote_recent_flag ? 0.75 : 0.25);
+         out_rt.observation_gap_risk=(out_rt.quote_recent_flag ? 0.15 : 0.85);
+         out_rt.market_sampling_quality_score=(out_rt.quote_recent_flag ? 0.80 : 0.35);
+         out_rt.current_vs_normal_spread_percentile=0.50;
+         out_rt.current_vs_normal_quote_rate_percentile=(out_rt.quote_recent_flag ? 0.70 : 0.20);
+         out_rt.current_friction_state=(out_rt.current_spread_points<=20.0 ? "normal" : "elevated");
+         out_rt.spread_state_vs_baseline=(out_rt.current_spread_points<=20.0 ? "at_or_below_baseline" : "above_baseline");
+         out_rt.activity_transition_state=(out_rt.quote_recent_flag ? "active" : "cooling");
+         out_rt.liquidity_ramp_state=(out_rt.quote_recent_flag ? "supported" : "thin");
         }
       else
         {
-         ZeroMemory(out_obs.quote_tick_snapshot);
-         out_obs.quote_time=0;
-         out_obs.quote_last_seen=0;
-         out_obs.quote_observable=false;
+         out_rt.current_spread_points=0.0;
+         out_rt.spread_median_short_points=0.0;
+         out_rt.spread_p90_short_points=0.0;
+         out_rt.spread_widening_ratio=0.0;
+         out_rt.quote_interval_median_ms=0.0;
+         out_rt.quote_interval_p90_ms=0.0;
+         out_rt.quote_stall_rate=1.0;
+         out_rt.quote_burstiness_score=0.0;
+         out_rt.observation_samples_short=0;
+         out_rt.observation_samples_medium=0;
+         out_rt.observation_density_score=0.0;
+         out_rt.observation_gap_risk=1.0;
+         out_rt.market_sampling_quality_score=0.0;
+         out_rt.current_vs_normal_spread_percentile=0.0;
+         out_rt.current_vs_normal_quote_rate_percentile=0.0;
+         out_rt.current_friction_state="unknown";
+         out_rt.spread_state_vs_baseline="unknown";
+         out_rt.activity_transition_state="dormant";
+         out_rt.liquidity_ramp_state="thin";
         }
+
+      if(session_info_available)
+        {
+         if(trade_window_known_open && out_rt.quote_recent_flag)
+           {
+            out_rt.session_phase_class=issx_ea1_session_open;
+            out_rt.session_truth_confidence=0.95;
+            out_rt.session_reconciliation_state="session_and_quote_aligned";
+           }
+         else if(trade_window_known_open)
+           {
+            out_rt.session_phase_class=issx_ea1_session_pre_open;
+            out_rt.session_truth_confidence=0.70;
+            out_rt.session_reconciliation_state="session_open_quote_thin";
+           }
+         else if(quote_window_known_open && out_rt.quote_recent_flag)
+           {
+            out_rt.session_phase_class=issx_ea1_session_pre_open;
+            out_rt.session_truth_confidence=0.72;
+            out_rt.session_reconciliation_state="quote_window_only";
+           }
+         else
+           {
+            out_rt.session_phase_class=issx_ea1_session_closed;
+            out_rt.session_truth_confidence=0.90;
+            out_rt.session_reconciliation_state="session_windows_closed";
+           }
+        }
+      else
+        {
+         if(out_rt.quote_recent_flag && obs.trade_permitted)
+           {
+            out_rt.session_phase_class=issx_ea1_session_open;
+            out_rt.session_truth_confidence=0.80;
+            out_rt.session_reconciliation_state="observed_supported";
+           }
+         else if(obs.trade_permitted)
+           {
+            out_rt.session_phase_class=issx_ea1_session_pre_open;
+            out_rt.session_truth_confidence=0.45;
+            out_rt.session_reconciliation_state="declared_only";
+           }
+         else
+           {
+            out_rt.session_phase_class=issx_ea1_session_closed;
+            out_rt.session_truth_confidence=0.80;
+            out_rt.session_reconciliation_state="observed_supported";
+           }
+        }
+
+      if(obs.trade_permitted && out_rt.quote_recent_flag && out_rt.session_phase_class==issx_ea1_session_open)
+         out_rt.practical_market_state=issx_market_open_usable;
+      else if(obs.trade_permitted && (out_rt.session_phase_class==issx_ea1_session_pre_open || out_rt.quote_recent_flag))
+         out_rt.practical_market_state=issx_market_open_cautious;
+      else if(out_rt.quote_recent_flag)
+         out_rt.practical_market_state=issx_market_quote_only;
+      else
+         out_rt.practical_market_state=issx_market_closed_idle;
+
+      string reasons="none";
+      if(!obs.trade_permitted)
+         reasons=JoinReason(reasons,"trade_disabled");
+      if(!out_rt.quote_recent_flag)
+         reasons=JoinReason(reasons,"quote_old");
+      if(obs.property_unavailable_flag)
+         reasons=JoinReason(reasons,"spec_incomplete");
+      if(out_rt.selection_required_flag)
+         reasons=JoinReason(reasons,"selection_required");
+      if(session_info_available && !trade_window_known_open && !quote_window_known_open)
+         reasons=JoinReason(reasons,"session_closed");
+
+      out_rt.practical_market_state_reason_codes=reasons;
+      out_rt.current_spread_money_per_lot=obs.tick_value*out_rt.current_spread_points;
+      out_rt.session_phase=out_rt.session_phase_class;
+      out_rt.transition_penalty_active=(out_rt.session_phase_class==issx_ea1_session_pre_open
+                                        || out_rt.session_phase_class==issx_ea1_session_rollover);
+
+      if(out_rt.session_phase_class==issx_ea1_session_open)
+        {
+         out_rt.minutes_since_session_open=0;
+         out_rt.minutes_to_session_close=0;
+        }
+      else
+        {
+         out_rt.minutes_since_session_open=-1;
+         out_rt.minutes_to_session_close=-1;
+        }
+
+      out_rt.runtime_truth_score=MathMax(0.0,MathMin(1.0,
+                                0.45*out_rt.session_truth_confidence
+                              + 0.35*out_rt.observation_density_score
+                              + 0.20*out_rt.market_sampling_quality_score));
      }
 
    static void NormalizeIdentity(const ISSX_EA1_RawBrokerObservation &obs,ISSX_EA1_NormalizedIdentity &out_id)
@@ -1461,114 +1849,136 @@ private:
         }
      }
 
-   static void BuildRuntimeTruth(const ISSX_EA1_RawBrokerObservation &obs,ISSX_EA1_ValidatedRuntimeTruth &out_rt)
+   static void BuildRankability(ISSX_EA1_SymbolState &io_symbol)
      {
-      out_rt.Reset();
+      io_symbol.rankability_gate.Reset();
 
-      out_rt.readability_state=(obs.metadata_readable ? issx_readability_full : issx_readability_unreadable);
-      out_rt.unknown_reason=(obs.metadata_readable ? issx_unknown_not_applicable : issx_unknown_true_unknown);
-      out_rt.declared_session_open=obs.trade_permitted;
-      out_rt.observed_quote_liveness=obs.quote_observable;
-      out_rt.trade_permitted_now=obs.trade_permitted;
-      out_rt.quote_recent_flag=(obs.quote_last_seen>0 && (TimeCurrent()-obs.quote_last_seen)<=120);
-      out_rt.synchronized_flag=obs.synchronized_flag;
-      out_rt.history_addressable=obs.history_addressable;
-      out_rt.selection_required_flag=!obs.selection_state;
-      out_rt.property_zero_distinct_from_unavailable=(obs.property_unavailable_flag && obs.point==0.0);
+      io_symbol.rankability_gate.eligible_flag=
+         (io_symbol.raw_broker_observation.metadata_readable
+          && !io_symbol.raw_broker_observation.custom_symbol_flag);
 
-      if(!obs.metadata_readable)
+      io_symbol.rankability_gate.active_flag=
+         (io_symbol.validated_runtime_truth.quote_recent_flag
+          || io_symbol.raw_broker_observation.trade_permitted);
+
+      io_symbol.rankability_gate.hard_block_flag=
+         (io_symbol.tradeability_baseline.blocked_for_ranking
+          || io_symbol.classification_truth.classification_hard_block);
+
+      io_symbol.rankability_gate.compare_safe_degraded_flag=
+         (io_symbol.validated_runtime_truth.readability_state==issx_readability_full);
+
+      io_symbol.rankability_gate.same_family_merged_away_flag=false;
+      io_symbol.rankability_gate.identity_ready=!ISSX_Util::IsEmpty(io_symbol.normalized_identity.symbol_norm);
+      io_symbol.rankability_gate.session_ready=
+         (io_symbol.validated_runtime_truth.session_phase_class!=issx_ea1_session_unknown
+          && io_symbol.validated_runtime_truth.session_truth_confidence>0.0);
+      io_symbol.rankability_gate.market_ready=
+         (io_symbol.validated_runtime_truth.practical_market_state!=issx_market_state_unknown);
+      io_symbol.rankability_gate.cost_ready=
+         (io_symbol.tradeability_baseline.cost_complete
+          || io_symbol.tradeability_baseline.tradeability_now_complete);
+
+      if(io_symbol.rankability_gate.hard_block_flag)
         {
-         out_rt.practical_market_state=issx_market_blocked;
-         out_rt.practical_market_state_reason_codes="spec_incomplete";
-         out_rt.current_friction_state="unknown";
-         out_rt.spread_state_vs_baseline="unknown";
-         out_rt.activity_transition_state="unknown";
-         out_rt.liquidity_ramp_state="unknown";
-         out_rt.session_reconciliation_state="declared_only";
-         out_rt.session_phase_class=issx_ea1_session_unknown;
+         io_symbol.rankability_gate.rankable_flag=false;
+         io_symbol.rankability_gate.publishable_flag=false;
+         io_symbol.rankability_gate.exploratory_only_flag=false;
+         io_symbol.rankability_gate.acceptance_decision=issx_acceptance_rejected;
+         io_symbol.rankability_gate.gate_reason_codes="hard_block";
+         io_symbol.rankability_gate.dependency_block_reason="tradeability_block";
+         io_symbol.rankability_gate.rankability_penalty=1.0;
+         io_symbol.rankability_gate.readiness_score=0.0;
+         io_symbol.rankability_gate.confidence_cap=0.0;
+         io_symbol.rankability_gate.highest_blocking_contradiction_class=(ISSX_ContradictionClass)0;
+         io_symbol.rankability_gate.contradiction_count=0;
          return;
         }
 
-      if(obs.quote_observable)
+      if(!io_symbol.rankability_gate.eligible_flag)
         {
-         double bid=obs.quote_tick_snapshot.bid;
-         double ask=obs.quote_tick_snapshot.ask;
-         double point=(obs.point>0.0 ? obs.point : 0.00001);
-         out_rt.current_spread_points=((ask>bid && point>0.0) ? ((ask-bid)/point) : 0.0);
-         out_rt.spread_median_short_points=out_rt.current_spread_points;
-         out_rt.spread_p90_short_points=out_rt.current_spread_points*1.20;
-         out_rt.spread_widening_ratio=1.0;
-         out_rt.quote_interval_median_ms=1000.0;
-         out_rt.quote_interval_p90_ms=5000.0;
-         out_rt.quote_stall_rate=(out_rt.quote_recent_flag ? 0.0 : 1.0);
-         out_rt.quote_burstiness_score=(out_rt.quote_recent_flag ? 0.70 : 0.10);
-         out_rt.observation_samples_short=1;
-         out_rt.observation_samples_medium=1;
-         out_rt.observation_density_score=(out_rt.quote_recent_flag ? 0.75 : 0.25);
-         out_rt.observation_gap_risk=(out_rt.quote_recent_flag ? 0.15 : 0.85);
-         out_rt.market_sampling_quality_score=(out_rt.quote_recent_flag ? 0.80 : 0.35);
-         out_rt.current_vs_normal_spread_percentile=0.50;
-         out_rt.current_vs_normal_quote_rate_percentile=(out_rt.quote_recent_flag ? 0.70 : 0.20);
-         out_rt.current_friction_state=(out_rt.current_spread_points<=20.0 ? "normal" : "elevated");
-         out_rt.spread_state_vs_baseline=(out_rt.current_spread_points<=20.0 ? "at_or_below_baseline" : "above_baseline");
-         out_rt.activity_transition_state=(out_rt.quote_recent_flag ? "active" : "cooling");
-         out_rt.liquidity_ramp_state=(out_rt.quote_recent_flag ? "supported" : "thin");
-         out_rt.session_truth_confidence=(out_rt.quote_recent_flag ? 0.80 : 0.45);
-         out_rt.session_phase_class=(out_rt.quote_recent_flag ? issx_ea1_session_open : issx_ea1_session_closed);
-         out_rt.session_reconciliation_state=(obs.trade_permitted ? "observed_supported" : "contradictory");
-
-         if(obs.trade_permitted && out_rt.quote_recent_flag)
-            out_rt.practical_market_state=issx_market_open_usable;
-         else if(obs.trade_permitted)
-            out_rt.practical_market_state=issx_market_open_cautious;
-         else
-            out_rt.practical_market_state=issx_market_quote_only;
-        }
-      else
-        {
-         out_rt.observation_density_score=0.0;
-         out_rt.observation_gap_risk=1.0;
-         out_rt.market_sampling_quality_score=0.0;
-         out_rt.session_truth_confidence=(obs.trade_permitted ? 0.35 : 0.80);
-         out_rt.session_phase_class=(obs.trade_permitted ? issx_ea1_session_pre_open : issx_ea1_session_closed);
-         out_rt.session_reconciliation_state=(obs.trade_permitted ? "declared_only" : "observed_supported");
-         out_rt.current_friction_state="unknown";
-         out_rt.spread_state_vs_baseline="unknown";
-         out_rt.activity_transition_state="dormant";
-         out_rt.liquidity_ramp_state="thin";
-         out_rt.practical_market_state=(obs.trade_permitted ? issx_market_open_cautious : issx_market_closed_idle);
+         io_symbol.rankability_gate.rankable_flag=false;
+         io_symbol.rankability_gate.publishable_flag=false;
+         io_symbol.rankability_gate.exploratory_only_flag=false;
+         io_symbol.rankability_gate.acceptance_decision=issx_acceptance_rejected;
+         io_symbol.rankability_gate.gate_reason_codes="not_eligible";
+         io_symbol.rankability_gate.dependency_block_reason="metadata_unreadable";
+         io_symbol.rankability_gate.rankability_penalty=1.0;
+         io_symbol.rankability_gate.readiness_score=0.0;
+         io_symbol.rankability_gate.confidence_cap=0.0;
+         io_symbol.rankability_gate.highest_blocking_contradiction_class=(ISSX_ContradictionClass)0;
+         io_symbol.rankability_gate.contradiction_count=0;
+         return;
         }
 
-      string reasons="none";
-      if(!obs.trade_permitted)
-         reasons=JoinReason(reasons,"trade_disabled");
-      if(!out_rt.quote_recent_flag)
-         reasons=JoinReason(reasons,"quote_old");
-      if(obs.property_unavailable_flag)
-         reasons=JoinReason(reasons,"spec_incomplete");
-      if(out_rt.selection_required_flag)
-         reasons=JoinReason(reasons,"selection_required");
-      out_rt.practical_market_state_reason_codes=reasons;
-      out_rt.current_spread_money_per_lot=obs.tick_value*out_rt.current_spread_points;
-      out_rt.session_trade_windows=obs.session_trade_windows;
-      out_rt.session_quote_windows=obs.session_quote_windows;
-      out_rt.session_phase=out_rt.session_phase_class;
-      out_rt.transition_penalty_active=(out_rt.session_phase_class==issx_ea1_session_pre_open
-                                        || out_rt.session_phase_class==issx_ea1_session_rollover);
-      if(out_rt.session_phase_class==issx_ea1_session_open)
-        {
-         out_rt.minutes_since_session_open=0;
-         out_rt.minutes_to_session_close=0;
-        }
+      io_symbol.rankability_gate.readiness_score=0.30;
+      if(io_symbol.validated_runtime_truth.readability_state==issx_readability_full)
+         io_symbol.rankability_gate.readiness_score+=0.25;
+      if(io_symbol.tradeability_baseline.cost_complete)
+         io_symbol.rankability_gate.readiness_score+=0.15;
+      if(io_symbol.validated_runtime_truth.quote_recent_flag)
+         io_symbol.rankability_gate.readiness_score+=0.15;
+      if(io_symbol.classification_truth.bucket_publishable)
+         io_symbol.rankability_gate.readiness_score+=0.15;
+
+      io_symbol.rankability_gate.rankability_penalty=io_symbol.tradeability_baseline.tradeability_penalty;
+      if(!io_symbol.validated_runtime_truth.quote_recent_flag)
+         io_symbol.rankability_gate.rankability_penalty+=0.10;
+      if(!io_symbol.tradeability_baseline.cost_complete)
+         io_symbol.rankability_gate.rankability_penalty+=0.15;
+      if(!io_symbol.classification_truth.bucket_publishable)
+         io_symbol.rankability_gate.rankability_penalty+=0.25;
+
+      io_symbol.rankability_gate.rankable_flag=(io_symbol.rankability_gate.readiness_score>=0.45);
+      io_symbol.rankability_gate.publishable_flag=
+         (io_symbol.rankability_gate.rankable_flag
+          && io_symbol.rankability_gate.readiness_score>=0.60
+          && io_symbol.rankability_gate.rankability_penalty<=0.70);
+
+      io_symbol.rankability_gate.exploratory_only_flag=
+         (io_symbol.rankability_gate.rankable_flag
+          && (!io_symbol.rankability_gate.publishable_flag
+              || io_symbol.rankability_gate.readiness_score<0.70
+              || io_symbol.rankability_gate.rankability_penalty>0.45));
+
+      if(!io_symbol.rankability_gate.rankable_flag)
+         io_symbol.rankability_gate.publishable_flag=false;
+
+      if(io_symbol.rankability_gate.publishable_flag)
+         io_symbol.rankability_gate.acceptance_decision=
+            (io_symbol.rankability_gate.exploratory_only_flag
+             ? issx_acceptance_accepted_degraded
+             : issx_acceptance_accepted_for_ranking);
+      else if(io_symbol.rankability_gate.rankable_flag)
+         io_symbol.rankability_gate.acceptance_decision=issx_acceptance_accepted_degraded;
+      else
+         io_symbol.rankability_gate.acceptance_decision=issx_acceptance_rejected;
+
+      io_symbol.rankability_gate.confidence_cap=
+         (io_symbol.rankability_gate.rankable_flag
+          ? (io_symbol.rankability_gate.exploratory_only_flag ? 0.55 : 0.95)
+          : 0.0);
+
+      if(!io_symbol.rankability_gate.rankable_flag)
+         io_symbol.rankability_gate.gate_reason_codes="not_rankable";
       else
         {
-         out_rt.minutes_since_session_open=-1;
-         out_rt.minutes_to_session_close=-1;
+         io_symbol.rankability_gate.gate_reason_codes="rankable";
+         if(io_symbol.rankability_gate.exploratory_only_flag)
+            io_symbol.rankability_gate.gate_reason_codes=JoinReason(io_symbol.rankability_gate.gate_reason_codes,"exploratory");
+         if(!io_symbol.tradeability_baseline.cost_complete)
+            io_symbol.rankability_gate.gate_reason_codes=JoinReason(io_symbol.rankability_gate.gate_reason_codes,"cost_partial");
+         if(!io_symbol.validated_runtime_truth.quote_recent_flag)
+            io_symbol.rankability_gate.gate_reason_codes=JoinReason(io_symbol.rankability_gate.gate_reason_codes,"quote_old");
+         if(!io_symbol.classification_truth.bucket_publishable)
+            io_symbol.rankability_gate.gate_reason_codes=JoinReason(io_symbol.rankability_gate.gate_reason_codes,"bucket_weak");
         }
-      out_rt.runtime_truth_score=MathMax(0.0,MathMin(1.0,
-                                0.45*out_rt.session_truth_confidence
-                              + 0.35*out_rt.observation_density_score
-                              + 0.20*out_rt.market_sampling_quality_score));
+
+      io_symbol.rankability_gate.dependency_block_reason=
+         (io_symbol.rankability_gate.rankable_flag ? "none" : "insufficient_truth");
+
+      io_symbol.rankability_gate.highest_blocking_contradiction_class=(ISSX_ContradictionClass)0;
+      io_symbol.rankability_gate.contradiction_count=0;
      }
 
    static void BuildTradeability(const ISSX_EA1_RawBrokerObservation &obs,
@@ -1689,209 +2099,13 @@ private:
          out_tb.tradeability_reason_codes=JoinReason(out_tb.tradeability_reason_codes,"cost_partial");
      }
 
-   static void BuildRankability(ISSX_EA1_SymbolState &io_symbol)
-     {
-      io_symbol.rankability_gate.Reset();
-
-      io_symbol.rankability_gate.eligible_flag=(io_symbol.raw_broker_observation.metadata_readable && !io_symbol.raw_broker_observation.custom_symbol_flag);
-      io_symbol.rankability_gate.active_flag=(io_symbol.validated_runtime_truth.quote_recent_flag || io_symbol.raw_broker_observation.trade_permitted);
-      io_symbol.rankability_gate.hard_block_flag=(io_symbol.tradeability_baseline.blocked_for_ranking || io_symbol.classification_truth.classification_hard_block);
-      io_symbol.rankability_gate.compare_safe_degraded_flag=(io_symbol.validated_runtime_truth.readability_state==issx_readability_full);
-      io_symbol.rankability_gate.same_family_merged_away_flag=false;
-      io_symbol.rankability_gate.identity_ready=(!ISSX_Util::IsEmpty(io_symbol.normalized_identity.symbol_norm));
-      io_symbol.rankability_gate.session_ready=(io_symbol.validated_runtime_truth.session_phase_class!=issx_ea1_session_unknown
-                                                && io_symbol.validated_runtime_truth.session_truth_confidence>0.0);
-      io_symbol.rankability_gate.market_ready=(io_symbol.validated_runtime_truth.practical_market_state!=issx_market_state_unknown);
-      io_symbol.rankability_gate.cost_ready=(io_symbol.tradeability_baseline.cost_complete
-                                             || io_symbol.tradeability_baseline.tradeability_now_complete);
-      io_symbol.rankability_gate.readiness_score=0.0;
-      io_symbol.rankability_gate.confidence_cap=0.0;
-      io_symbol.rankability_gate.rankability_penalty=0.0;
-
-      if(io_symbol.rankability_gate.hard_block_flag)
-        {
-         io_symbol.rankability_gate.rankable_flag=false;
-         io_symbol.rankability_gate.publishable_flag=false;
-         io_symbol.rankability_gate.acceptance_decision=issx_acceptance_rejected;
-         io_symbol.rankability_gate.gate_reason_codes="hard_block";
-         io_symbol.rankability_gate.dependency_block_reason="tradeability_block";
-         io_symbol.rankability_gate.confidence_cap=0.0;
-         return;
-        }
-
-      if(!io_symbol.rankability_gate.eligible_flag)
-        {
-         io_symbol.rankability_gate.rankable_flag=false;
-         io_symbol.rankability_gate.publishable_flag=false;
-         io_symbol.rankability_gate.acceptance_decision=issx_acceptance_rejected;
-         io_symbol.rankability_gate.gate_reason_codes="not_eligible";
-         io_symbol.rankability_gate.dependency_block_reason="metadata_unreadable";
-         io_symbol.rankability_gate.confidence_cap=0.0;
-         return;
-        }
-
-      io_symbol.rankability_gate.readiness_score=0.30;
-      if(io_symbol.validated_runtime_truth.readability_state==issx_readability_full)
-         io_symbol.rankability_gate.readiness_score+=0.25;
-      if(io_symbol.tradeability_baseline.cost_complete)
-         io_symbol.rankability_gate.readiness_score+=0.15;
-      if(io_symbol.validated_runtime_truth.quote_recent_flag)
-         io_symbol.rankability_gate.readiness_score+=0.15;
-      if(io_symbol.classification_truth.bucket_publishable)
-         io_symbol.rankability_gate.readiness_score+=0.15;
-
-      io_symbol.rankability_gate.rankability_penalty=io_symbol.tradeability_baseline.tradeability_penalty;
-      if(!io_symbol.validated_runtime_truth.quote_recent_flag)
-         io_symbol.rankability_gate.rankability_penalty+=0.10;
-      if(!io_symbol.tradeability_baseline.cost_complete)
-         io_symbol.rankability_gate.rankability_penalty+=0.15;
-      if(!io_symbol.classification_truth.bucket_publishable)
-         io_symbol.rankability_gate.rankability_penalty+=0.25;
-
-      io_symbol.rankability_gate.exploratory_only_flag=(io_symbol.rankability_gate.readiness_score<0.70 || io_symbol.rankability_gate.rankability_penalty>0.45);
-      io_symbol.rankability_gate.rankable_flag=(io_symbol.rankability_gate.readiness_score>=0.45);
-      io_symbol.rankability_gate.publishable_flag=(io_symbol.rankability_gate.readiness_score>=0.60 && io_symbol.rankability_gate.rankability_penalty<=0.70);
-      io_symbol.rankability_gate.confidence_cap=(io_symbol.rankability_gate.exploratory_only_flag ? 0.55 : 0.95);
-
-      if(io_symbol.rankability_gate.publishable_flag)
-         io_symbol.rankability_gate.acceptance_decision=(io_symbol.rankability_gate.exploratory_only_flag ? issx_acceptance_accepted_degraded : issx_acceptance_accepted_for_ranking);
-      else if(io_symbol.rankability_gate.rankable_flag)
-         io_symbol.rankability_gate.acceptance_decision=issx_acceptance_accepted_degraded;
-      else
-         io_symbol.rankability_gate.acceptance_decision=issx_acceptance_rejected;
-
-      io_symbol.rankability_gate.gate_reason_codes="rankable";
-      if(io_symbol.rankability_gate.exploratory_only_flag)
-         io_symbol.rankability_gate.gate_reason_codes=JoinReason(io_symbol.rankability_gate.gate_reason_codes,"exploratory");
-      if(!io_symbol.tradeability_baseline.cost_complete)
-         io_symbol.rankability_gate.gate_reason_codes=JoinReason(io_symbol.rankability_gate.gate_reason_codes,"cost_partial");
-      if(!io_symbol.validated_runtime_truth.quote_recent_flag)
-         io_symbol.rankability_gate.gate_reason_codes=JoinReason(io_symbol.rankability_gate.gate_reason_codes,"quote_old");
-      if(!io_symbol.classification_truth.bucket_publishable)
-         io_symbol.rankability_gate.gate_reason_codes=JoinReason(io_symbol.rankability_gate.gate_reason_codes,"bucket_weak");
-
-      io_symbol.rankability_gate.dependency_block_reason=(io_symbol.rankability_gate.rankable_flag ? "none" : "insufficient_truth");
-io_symbol.rankability_gate.highest_blocking_contradiction_class=(ISSX_ContradictionClass)0;
-io_symbol.rankability_gate.contradiction_count=0;
-     }
-
-   static string BuildSymbolFingerprint(const ISSX_EA1_SymbolState &s)
-     {
-      string blob=
-         s.raw_broker_observation.symbol_raw+"|"+
-         s.normalized_identity.symbol_norm+"|"+
-         IntegerToString((int)s.validated_runtime_truth.practical_market_state)+"|"+
-         s.classification_truth.theme_bucket+"|"+
-         s.classification_truth.equity_sector+"|"+
-         IntegerToString((int)s.tradeability_baseline.tradeability_class)+"|"+
-         IntegerToString(s.rankability_gate.acceptance_decision)+"|"+
-         s.rankability_gate.gate_reason_codes+"|"+
-         s.tradeability_baseline.tradeability_reason_codes;
-      return HashString(blob);
-     }
-
-   static void UpdateContinuityAndChanges(const string previous_fingerprint,ISSX_EA1_SymbolState &io_symbol)
-     {
-      io_symbol.symbol_fingerprint=BuildSymbolFingerprint(io_symbol);
-      io_symbol.changed_since_last_cycle=(previous_fingerprint!="" && previous_fingerprint!=io_symbol.symbol_fingerprint);
-      io_symbol.changed_since_last_publish=io_symbol.changed_since_last_cycle;
-      io_symbol.touched_this_cycle=true;
-
-      if(previous_fingerprint=="")
-        {
-         io_symbol.symbol_lifecycle.lifecycle_state=issx_ea1_lifecycle_new;
-         io_symbol.symbol_lifecycle.continuity_origin=issx_continuity_fresh_boot;
-         io_symbol.symbol_lifecycle.continuity_age_cycles=1;
-        }
-      else if(io_symbol.changed_since_last_cycle)
-        {
-         io_symbol.symbol_lifecycle.lifecycle_state=issx_ea1_lifecycle_changed;
-         io_symbol.symbol_lifecycle.continuity_age_cycles=0;
-         io_symbol.symbol_lifecycle.material_change_since_last_publish=true;
-         io_symbol.symbol_lifecycle.continuity_reason_codes="material_change";
-        }
-      else
-        {
-         io_symbol.symbol_lifecycle.lifecycle_state=issx_ea1_lifecycle_stable;
-         io_symbol.symbol_lifecycle.continuity_age_cycles++;
-         io_symbol.symbol_lifecycle.material_change_since_last_publish=false;
-         io_symbol.symbol_lifecycle.continuity_reason_codes="stable";
-        }
-
-      if(io_symbol.rankability_gate.hard_block_flag)
-         io_symbol.symbol_lifecycle.lifecycle_state=issx_ea1_lifecycle_blocked;
-
-      if(io_symbol.rankability_gate.rankable_flag)
-         io_symbol.symbol_lifecycle.admission_state=issx_ea1_admission_rank_candidate;
-      else if(io_symbol.raw_broker_observation.metadata_readable)
-         io_symbol.symbol_lifecycle.admission_state=issx_ea1_admission_metadata_ready;
-      else
-         io_symbol.symbol_lifecycle.admission_state=issx_ea1_admission_listed;
-
-      io_symbol.symbol_lifecycle.owner_module_hash=HashString(ISSX_MARKET_ENGINE_MODULE_VERSION+"|"+io_symbol.raw_broker_observation.symbol_raw);
-     }
-
-   static void UpdateUniverseFingerprints(ISSX_EA1_State &io_state)
-     {
-      string broker_ids[];
-      string eligible_ids[];
-      string active_ids[];
-      string rankable_ids[];
-      string publishable_ids[];
-
-      for(int i=0;i<ArraySize(io_state.symbols);i++)
-        {
-         PushString(broker_ids,io_state.symbols[i].raw_broker_observation.symbol_raw);
-
-         if(io_state.symbols[i].rankability_gate.eligible_flag)
-            PushString(eligible_ids,io_state.symbols[i].raw_broker_observation.symbol_raw);
-         if(io_state.symbols[i].rankability_gate.active_flag)
-            PushString(active_ids,io_state.symbols[i].raw_broker_observation.symbol_raw);
-         if(io_state.symbols[i].rankability_gate.rankable_flag)
-            PushString(rankable_ids,io_state.symbols[i].raw_broker_observation.symbol_raw);
-         if(io_state.symbols[i].rankability_gate.publishable_flag)
-            PushString(publishable_ids,io_state.symbols[i].raw_broker_observation.symbol_raw);
-        }
-
-      io_state.universe.broker_universe_fingerprint=FingerprintArray(broker_ids);
-      io_state.universe.eligible_universe_fingerprint=FingerprintArray(eligible_ids);
-      io_state.universe.active_universe_fingerprint=FingerprintArray(active_ids);
-      io_state.universe.rankable_universe_fingerprint=FingerprintArray(rankable_ids);
-      io_state.universe.frontier_universe_fingerprint=io_state.universe.rankable_universe_fingerprint;
-      io_state.universe.publishable_universe_fingerprint=FingerprintArray(publishable_ids);
-      io_state.cohort_fingerprint=io_state.universe.rankable_universe_fingerprint;
-      io_state.deltas.changed_symbol_ids_compact=CompactChangedIds(io_state.symbols);
-     }
-
-   static void ResetPostDiscoveryCounters(ISSX_EA1_CycleCounters &c)
-     {
-      c.metadata_ready_count=0;
-      c.probe_ready_count=0;
-      c.rank_candidate_count=0;
-      c.degraded_count=0;
-      c.blocked_count=0;
-      c.contradiction_count=0;
-      c.contradiction_severity_max=0;
-      c.changed_symbol_count=0;
-      c.accepted_strong_count=0;
-      c.accepted_degraded_count=0;
-      c.rejected_count=0;
-      c.cooldown_count=0;
-      c.stale_usable_count=0;
-     }
-
-   static string TradeabilityClassText(const ISSX_TradeabilityClass v)
-     {
-      switch(v)
-        {
-         case issx_tradeability_very_cheap: return "very_cheap";
-         case issx_tradeability_cheap:      return "cheap";
-         case issx_tradeability_moderate:   return "moderate";
-         case issx_tradeability_expensive:  return "expensive";
-         case issx_tradeability_blocked:    return "blocked";
-         default:                           return "unknown";
-        }
-     }
+   static void Classify(const ISSX_EA1_RawBrokerObservation &obs,
+                     const string normalized_symbol,
+                     const string canonical_root,
+                     ISSX_EA1_ClassificationTruth &out_cls)
+  {
+   ISSX_MarketTaxonomy::Classify(obs,normalized_symbol,canonical_root,out_cls);
+  }
 
 public:
    static string PracticalMarketStateText(const ISSX_PracticalMarketState v)
@@ -2194,7 +2408,17 @@ private:
    static void WriteTradeabilityJson(ISSX_JsonWriter &j,const ISSX_EA1_TradeabilityBaseline &tb)
      {
       j.BeginNamedObject("tradeability_baseline");
-      j.NameString("tradeability_class",TradeabilityClassText(tb.tradeability_class));
+      string tradeability_text="unknown";
+switch(tb.tradeability_class)
+  {
+   case issx_tradeability_very_cheap: tradeability_text="very_cheap"; break;
+   case issx_tradeability_cheap:      tradeability_text="cheap";      break;
+   case issx_tradeability_moderate:   tradeability_text="moderate";   break;
+   case issx_tradeability_expensive:  tradeability_text="expensive";  break;
+   case issx_tradeability_blocked:    tradeability_text="blocked";    break;
+   default:                           tradeability_text="unknown";    break;
+  }
+j.NameString("tradeability_class",tradeability_text);
       j.NameInt("commission_state",(int)tb.commission_state);
       j.NameInt("swap_state",(int)tb.swap_state);
       j.NameDouble("roundtrip_cost_points",tb.roundtrip_cost_points,2);
@@ -2285,6 +2509,7 @@ private:
                                        const string writer_nonce)
      {
       ISSX_JsonWriter j;
+      j.Reset();
       j.BeginObject();
       j.NameString("stage_alias",ISSX_OperatorSurface::StageAlias(issx_stage_ea1));
       j.NameString("internal_stage_id","ea1");
@@ -2472,45 +2697,28 @@ private:
    static string BuildStageSummaryJson(const ISSX_EA1_State &state)
      {
       ISSX_JsonWriter j;
+      j.Reset();
+      datetime ts=TimeTradeServer();
+      if(ts<=0)
+         ts=TimeCurrent();
+      const string hydration_state=(state.hydration_complete ? "complete" :
+                                    ((state.hydration_processed>0 || state.hydration_total>0) ? "in_progress" : "not_started"));
       j.BeginObject();
+      j.NameString("schema_version",ISSX_SCHEMA_VERSION);
+      j.NameString("version",ISSX_ENGINE_VERSION);
+      j.NameString("server_time",TimeToString(ts,TIME_DATE|TIME_SECONDS));
       j.NameString("stage_alias",ISSX_OperatorSurface::StageAlias(issx_stage_ea1));
       j.NameString("internal_stage_id","ea1");
-      j.NameInt("minute_id",state.minute_id);
-      j.NameInt("sequence_no",state.sequence_no);
-      j.NameBool("stage_minimum_ready_flag",state.stage_minimum_ready_flag);
-      j.NameString("stage_publishability_state",StagePublishabilityText(state.stage_publishability_state));
-      j.NameBool("degraded_flag",state.degraded_flag);
-      j.NameBool("publishable",state.publishable);
-      j.NameString("dependency_block_reason",state.dependency_block_reason);
-      j.NameString("debug_weak_link_code",state.debug_weak_link_code);
-      j.NameInt("discovery_minute_id",state.discovery_minute_id);
-      j.NameBool("discovery_attempted",state.discovery_attempted);
-      j.NameBool("discovery_skipped",state.discovery_skipped);
-      j.NameBool("discovery_success",state.discovery_success);
-      j.NameBool("discovery_no_change",state.discovery_no_change);
-      j.NameInt("discovery_elapsed_ms",state.discovery_elapsed_ms);
-      j.NameInt("discovery_skip_streak",state.discovery_skip_streak);
-      j.NameString("discovery_status_reason",state.discovery_status_reason);
       j.NameString("ea1_runtime_state",ISSX_EA1_RuntimeStateText(state.runtime_state));
+      j.NameString("stage_publishability_state",StagePublishabilityText(state.stage_publishability_state));
+      j.NameString("stage_reason",state.dependency_block_reason);
+      j.NameInt("symbol_count",ArraySize(state.symbols));
       j.NameInt("hydration_processed",state.hydration_processed);
       j.NameInt("hydration_total",state.hydration_total);
       j.NameInt("hydration_remaining",state.hydration_remaining);
-      j.NameInt("hydration_window_size",state.hydration_window_size);
-      j.NameInt("hydration_window_start",state.hydration_window_start);
-      j.NameInt("hydration_window_end",state.hydration_window_end);
-      j.NameInt("hydration_windows_completed",state.hydration_windows_completed);
-      j.NameInt("hydration_full_passes",state.hydration_full_passes);
-      j.NameBool("hydration_complete",state.hydration_complete);
-      j.NameBool("deterministic_sort_applied",state.deterministic_sort_applied);
-      j.NameInt("deterministic_sorted_count",state.deterministic_sorted_count);
-      j.NameString("deterministic_sort_basis",state.deterministic_sort_basis);
-      j.NameInt("broker_universe",state.universe.broker_universe);
-      j.NameInt("eligible_universe",state.universe.eligible_universe);
-      j.NameInt("active_universe",state.universe.active_universe);
-      j.NameInt("rankable_universe",state.universe.rankable_universe);
-      j.NameInt("publishable_universe",state.universe.publishable_universe);
-      j.NameInt("changed_symbol_count",state.deltas.changed_symbol_count);
-      j.NameString("changed_symbol_ids_compact",state.deltas.changed_symbol_ids_compact);
+      j.NameString("hydration_state",hydration_state);
+      j.NameString("discovery_status",state.discovery_status_reason);
+      j.NameString("publish_status",state.publish_last_checkpoint);
       j.EndObject();
       return j.ToString();
      }
@@ -2563,66 +2771,72 @@ public:
    io_state.deltas.Reset();
    io_state.counters.Reset();
 
-      const int total=SymbolsTotal(false);
-      io_state.universe.broker_universe=(total>0 ? total : 0);
+   const int total=SymbolsTotal(false);
+   io_state.universe.broker_universe=(total>0 ? total : 0);
 
-      ArrayResize(io_state.symbols,0);
+   ArrayResize(io_state.symbols,0);
 
-      // Ported/adapted from legacy EA1_MarketCore.mq5 BuildUniverse sorting:
-      // keep symbol traversal deterministic so continuity/fingerprints do not
-      // drift when broker enumeration order changes across sessions.
-      string discovered_symbols[];
-      ArrayResize(discovered_symbols,0);
-      for(int i=0;i<total;i++)
-        {
-         string symbol=SymbolName(i,false);
-         if(symbol=="")
-            continue;
+   string discovered_symbols[];
+   ArrayResize(discovered_symbols,0);
 
-         if(!IsSymbolIntakeStable(symbol))
-            continue;
+   for(int i=0;i<total;i++)
+     {
+      string symbol=SymbolName(i,false);
+      if(symbol=="")
+         continue;
 
-         int n=ArraySize(discovered_symbols);
-         ArrayResize(discovered_symbols,n+1);
-         discovered_symbols[n]=symbol;
-        }
-      if(ArraySize(discovered_symbols)>1)
-         ISSX_Util::SortStringsInPlace(discovered_symbols);
+      if(!IsSymbolIntakeStable(symbol))
+         continue;
 
-      int accepted_count=0;
-      for(int i=0;i<ArraySize(discovered_symbols);i++)
-        {
-         const string symbol=discovered_symbols[i];
-
-         bool is_custom=SafeSymbolBool(symbol,SYMBOL_CUSTOM);
-         if(!include_custom_symbols && is_custom)
-            continue;
-
-         if(max_symbols>0 && accepted_count>=max_symbols)
-            break;
-
-         int new_index=ArraySize(io_state.symbols);
-         ArrayResize(io_state.symbols,new_index+1);
-         io_state.symbols[new_index].Reset();
-         io_state.symbols[new_index].symbol_id=accepted_count;
-
-         LoadRawObservation(symbol,io_state.symbols[new_index].raw_broker_observation);
-
-         int prior_index=FindPriorSymbolIndex(prior_symbols,symbol);
-         if(prior_index>=0)
-            RestorePriorContinuity(prior_symbols[prior_index],io_state.symbols[new_index]);
-
-         accepted_count++;
-         io_state.counters.listed_count++;
-        }
-
-      io_state.universe.active_universe=0;
-      io_state.universe.eligible_universe=0;
-      io_state.universe.rankable_universe=0;
-      io_state.universe.frontier_hint_universe=0;
-      io_state.universe.publishable_universe=0;
-      return (accepted_count>0);
+      int n=ArraySize(discovered_symbols);
+      ArrayResize(discovered_symbols,n+1);
+      discovered_symbols[n]=symbol;
      }
+
+   if(ArraySize(discovered_symbols)>1)
+      ISSX_Util::SortStringsInPlace(discovered_symbols);
+
+   string accepted_symbols[];
+   ArrayResize(accepted_symbols,0);
+
+   int accepted_count=0;
+   for(int i=0;i<ArraySize(discovered_symbols);i++)
+     {
+      const string symbol=discovered_symbols[i];
+
+      const bool is_custom=SafeSymbolBool(symbol,SYMBOL_CUSTOM);
+      if(!include_custom_symbols && is_custom)
+         continue;
+
+      if(max_symbols>0 && accepted_count>=max_symbols)
+         break;
+
+      const int new_index=ArraySize(io_state.symbols);
+      ArrayResize(io_state.symbols,new_index+1);
+      io_state.symbols[new_index].Reset();
+      io_state.symbols[new_index].symbol_id=accepted_count;
+
+      LoadRawObservation(symbol,io_state.symbols[new_index].raw_broker_observation);
+
+      const int prior_index=FindPriorSymbolIndex(prior_symbols,symbol);
+      if(prior_index>=0)
+         RestorePriorContinuity(prior_symbols[prior_index],io_state.symbols[new_index]);
+
+      PushString(accepted_symbols,symbol);
+
+      accepted_count++;
+      io_state.counters.listed_count++;
+     }
+
+   io_state.universe.broker_universe_fingerprint=FingerprintArray(accepted_symbols);
+   io_state.universe.active_universe=0;
+   io_state.universe.eligible_universe=0;
+   io_state.universe.rankable_universe=0;
+   io_state.universe.frontier_hint_universe=0;
+   io_state.universe.publishable_universe=0;
+
+   return (accepted_count>0);
+  }
 
    static void HydrateIdentitySymbol(ISSX_EA1_State &io_state,const int index)
      {
@@ -2732,95 +2946,283 @@ public:
      }
 
    static void BuildGateAndContinuityPhase(ISSX_EA1_State &io_state)
+  {
+   io_state.scheduler.phase_id=ISSX_EA1_MapToRuntimePhase(issx_ea1_phase_update_continuity);
+   io_state.universe.eligible_universe=0;
+   io_state.universe.active_universe=0;
+   io_state.universe.rankable_universe=0;
+   io_state.universe.publishable_universe=0;
+   io_state.universe.frontier_hint_universe=0;
+   io_state.deltas.Reset();
+   io_state.counters.metadata_ready_count=0;
+io_state.counters.probe_ready_count=0;
+io_state.counters.rank_candidate_count=0;
+io_state.counters.degraded_count=0;
+io_state.counters.blocked_count=0;
+io_state.counters.contradiction_count=0;
+io_state.counters.contradiction_severity_max=0;
+io_state.counters.changed_symbol_count=0;
+io_state.counters.accepted_strong_count=0;
+io_state.counters.accepted_degraded_count=0;
+io_state.counters.rejected_count=0;
+io_state.counters.cooldown_count=0;
+io_state.counters.stale_usable_count=0;
+
+   datetime now=TimeTradeServer();
+   if(now<=0)
+      now=TimeCurrent();
+
+   for(int i=0;i<ArraySize(io_state.symbols);i++)
      {
-      io_state.scheduler.phase_id=ISSX_EA1_MapToRuntimePhase(issx_ea1_phase_update_continuity);
-      io_state.universe.eligible_universe=0;
-      io_state.universe.active_universe=0;
-      io_state.universe.rankable_universe=0;
-      io_state.universe.publishable_universe=0;
-      io_state.universe.frontier_hint_universe=0;
-      io_state.deltas.Reset();
-      ResetPostDiscoveryCounters(io_state.counters);
+      string previous_fingerprint=io_state.symbols[i].symbol_fingerprint;
 
-      for(int i=0;i<ArraySize(io_state.symbols);i++)
+      BuildRankability(io_state.symbols[i]);
+      string fp_blob=
+   io_state.symbols[i].raw_broker_observation.symbol_raw+"|"+
+   io_state.symbols[i].normalized_identity.symbol_norm+"|"+
+   IntegerToString((int)io_state.symbols[i].validated_runtime_truth.practical_market_state)+"|"+
+   io_state.symbols[i].classification_truth.theme_bucket+"|"+
+   io_state.symbols[i].classification_truth.equity_sector+"|"+
+   IntegerToString((int)io_state.symbols[i].tradeability_baseline.tradeability_class)+"|"+
+   IntegerToString(io_state.symbols[i].rankability_gate.acceptance_decision)+"|"+
+   io_state.symbols[i].rankability_gate.gate_reason_codes+"|"+
+   io_state.symbols[i].tradeability_baseline.tradeability_reason_codes;
+
+io_state.symbols[i].symbol_fingerprint=ISSX_Hash::HashStringHex(fp_blob);
+io_state.symbols[i].changed_since_last_cycle=
+   (previous_fingerprint!="" && previous_fingerprint!=io_state.symbols[i].symbol_fingerprint);
+io_state.symbols[i].changed_since_last_publish=io_state.symbols[i].changed_since_last_cycle;
+io_state.symbols[i].touched_this_cycle=true;
+
+if(previous_fingerprint=="")
+  {
+   io_state.symbols[i].symbol_lifecycle.lifecycle_state=issx_ea1_lifecycle_new;
+   io_state.symbols[i].symbol_lifecycle.continuity_origin=issx_continuity_fresh_boot;
+   io_state.symbols[i].symbol_lifecycle.continuity_age_cycles=1;
+  }
+else if(io_state.symbols[i].changed_since_last_cycle)
+  {
+   io_state.symbols[i].symbol_lifecycle.lifecycle_state=issx_ea1_lifecycle_changed;
+   io_state.symbols[i].symbol_lifecycle.continuity_age_cycles=0;
+   io_state.symbols[i].symbol_lifecycle.material_change_since_last_publish=true;
+   io_state.symbols[i].symbol_lifecycle.continuity_reason_codes="material_change";
+  }
+else
+  {
+   io_state.symbols[i].symbol_lifecycle.lifecycle_state=issx_ea1_lifecycle_stable;
+   io_state.symbols[i].symbol_lifecycle.continuity_age_cycles++;
+   io_state.symbols[i].symbol_lifecycle.material_change_since_last_publish=false;
+   io_state.symbols[i].symbol_lifecycle.continuity_reason_codes="stable";
+  }
+
+if(io_state.symbols[i].rankability_gate.hard_block_flag)
+   io_state.symbols[i].symbol_lifecycle.lifecycle_state=issx_ea1_lifecycle_blocked;
+
+if(io_state.symbols[i].rankability_gate.rankable_flag)
+   io_state.symbols[i].symbol_lifecycle.admission_state=issx_ea1_admission_rank_candidate;
+else if(io_state.symbols[i].raw_broker_observation.metadata_readable)
+   io_state.symbols[i].symbol_lifecycle.admission_state=issx_ea1_admission_metadata_ready;
+else
+   io_state.symbols[i].symbol_lifecycle.admission_state=issx_ea1_admission_listed;
+
+io_state.symbols[i].symbol_lifecycle.owner_module_hash=
+   ISSX_Hash::HashStringHex(ISSX_MARKET_ENGINE_MODULE_VERSION+"|"+io_state.symbols[i].raw_broker_observation.symbol_raw);
+
+      io_state.symbols[i].last_gate_refresh_time=now;
+      io_state.symbols[i].stale_runtime_flag=!io_state.symbols[i].validated_runtime_truth.quote_recent_flag;
+      io_state.symbols[i].stale_session_flag=(io_state.symbols[i].validated_runtime_truth.session_phase_class==issx_ea1_session_unknown);
+      io_state.symbols[i].stale_cost_flag=!io_state.symbols[i].tradeability_baseline.cost_complete;
+
+      if(!io_state.symbols[i].raw_broker_observation.metadata_readable)
+         io_state.symbols[i].service_block_class="metadata_unreadable";
+      else if(io_state.symbols[i].rankability_gate.hard_block_flag)
+         io_state.symbols[i].service_block_class="hard_block";
+      else if(!io_state.symbols[i].tradeability_baseline.cost_complete)
+         io_state.symbols[i].service_block_class="cost_partial";
+      else if(!io_state.symbols[i].validated_runtime_truth.quote_recent_flag)
+         io_state.symbols[i].service_block_class="quote_stale";
+      else if(!io_state.symbols[i].classification_truth.bucket_publishable)
+         io_state.symbols[i].service_block_class="classification_weak";
+      else
+         io_state.symbols[i].service_block_class="none";
+
+      io_state.symbols[i].consistency_dirty_flag=(io_state.symbols[i].service_block_class!="none");
+
+      if(io_state.symbols[i].rankability_gate.eligible_flag)
+         io_state.universe.eligible_universe++;
+      if(io_state.symbols[i].rankability_gate.active_flag)
+         io_state.universe.active_universe++;
+      if(io_state.symbols[i].rankability_gate.rankable_flag)
+         io_state.universe.rankable_universe++;
+      if(io_state.symbols[i].rankability_gate.publishable_flag)
+         io_state.universe.publishable_universe++;
+
+      if(io_state.symbols[i].changed_since_last_cycle)
+         io_state.counters.changed_symbol_count++;
+
+      switch(io_state.symbols[i].rankability_gate.acceptance_decision)
         {
-         string previous_fingerprint=io_state.symbols[i].symbol_fingerprint;
-
-         BuildRankability(io_state.symbols[i]);
-         UpdateContinuityAndChanges(previous_fingerprint,io_state.symbols[i]);
-
-         if(io_state.symbols[i].rankability_gate.eligible_flag)
-            io_state.universe.eligible_universe++;
-         if(io_state.symbols[i].rankability_gate.active_flag)
-            io_state.universe.active_universe++;
-         if(io_state.symbols[i].rankability_gate.rankable_flag)
-            io_state.universe.rankable_universe++;
-         if(io_state.symbols[i].rankability_gate.publishable_flag)
-            io_state.universe.publishable_universe++;
-
-         if(io_state.symbols[i].changed_since_last_cycle)
-            io_state.counters.changed_symbol_count++;
-
-         switch(io_state.symbols[i].rankability_gate.acceptance_decision)
-           {
-            case issx_acceptance_accepted_for_ranking:
-               io_state.counters.accepted_strong_count++;
-               break;
-            case issx_acceptance_accepted_degraded:
-               io_state.counters.accepted_degraded_count++;
-               break;
-            case issx_acceptance_rejected:
-               io_state.counters.rejected_count++;
-               break;
-            default:
-               io_state.counters.stale_usable_count++;
-               break;
-           }
-
-         if(io_state.symbols[i].rankability_gate.hard_block_flag)
-            io_state.counters.blocked_count++;
-         else if(io_state.symbols[i].rankability_gate.exploratory_only_flag)
-            io_state.counters.degraded_count++;
-
-         if(io_state.symbols[i].raw_broker_observation.metadata_readable)
-            io_state.counters.metadata_ready_count++;
-         if(io_state.symbols[i].validated_runtime_truth.readability_state==issx_readability_full)
-            io_state.counters.probe_ready_count++;
-         if(io_state.symbols[i].rankability_gate.rankable_flag)
-            io_state.counters.rank_candidate_count++;
+         case issx_acceptance_accepted_for_ranking:
+            io_state.counters.accepted_strong_count++;
+            break;
+         case issx_acceptance_accepted_degraded:
+            io_state.counters.accepted_degraded_count++;
+            break;
+         case issx_acceptance_rejected:
+            io_state.counters.rejected_count++;
+            break;
+         default:
+            io_state.counters.stale_usable_count++;
+            break;
         }
 
-      io_state.universe.frontier_hint_universe=io_state.universe.rankable_universe;
-      io_state.deltas.changed_symbol_count=io_state.counters.changed_symbol_count;
-      io_state.deltas.changed_family_count=io_state.counters.changed_symbol_count;
-      io_state.deltas.changed_bucket_count=io_state.counters.changed_symbol_count;
+      if(io_state.symbols[i].rankability_gate.hard_block_flag)
+         io_state.counters.blocked_count++;
+      else if(io_state.symbols[i].rankability_gate.exploratory_only_flag)
+         io_state.counters.degraded_count++;
 
-      if(io_state.universe.broker_universe>0)
-         io_state.universe.percent_universe_touched_recent=(100.0*(double)ArraySize(io_state.symbols)/(double)io_state.universe.broker_universe);
-      else
-         io_state.universe.percent_universe_touched_recent=0.0;
-
-      if(io_state.universe.rankable_universe>0)
-         io_state.universe.percent_rankable_revalidated_recent=100.0;
-      else
-         io_state.universe.percent_rankable_revalidated_recent=0.0;
-
-      io_state.universe.percent_frontier_revalidated_recent=(io_state.universe.frontier_hint_universe>0 ? 100.0 : 0.0);
-      io_state.universe.never_serviced_count=0;
-      io_state.universe.overdue_service_count=0;
-      io_state.universe.never_ranked_but_eligible_count=MathMax(0,io_state.universe.eligible_universe-io_state.universe.rankable_universe);
-      io_state.universe.newly_active_symbols_waiting_count=0;
-      io_state.universe.near_cutline_recheck_age_max=0;
-
-      UpdateUniverseFingerprints(io_state);
-      UpdateGlobalStateFlags(io_state);
+      if(io_state.symbols[i].raw_broker_observation.metadata_readable)
+         io_state.counters.metadata_ready_count++;
+      if(io_state.symbols[i].validated_runtime_truth.readability_state==issx_readability_full)
+         io_state.counters.probe_ready_count++;
+      if(io_state.symbols[i].rankability_gate.rankable_flag)
+         io_state.counters.rank_candidate_count++;
      }
 
-   static bool RefreshDiscoveryOnly(ISSX_EA1_State &io_state)
+   io_state.universe.frontier_hint_universe=io_state.universe.rankable_universe;
+   io_state.deltas.changed_symbol_count=io_state.counters.changed_symbol_count;
+   io_state.deltas.changed_family_count=io_state.counters.changed_symbol_count;
+   io_state.deltas.changed_bucket_count=io_state.counters.changed_symbol_count;
+
+   if(io_state.universe.broker_universe>0)
+      io_state.universe.percent_universe_touched_recent=(100.0*(double)ArraySize(io_state.symbols)/(double)io_state.universe.broker_universe);
+   else
+      io_state.universe.percent_universe_touched_recent=0.0;
+
+   if(io_state.universe.rankable_universe>0)
+      io_state.universe.percent_rankable_revalidated_recent=100.0;
+   else
+      io_state.universe.percent_rankable_revalidated_recent=0.0;
+
+   io_state.universe.percent_frontier_revalidated_recent=(io_state.universe.frontier_hint_universe>0 ? 100.0 : 0.0);
+   io_state.universe.never_serviced_count=0;
+   io_state.universe.overdue_service_count=0;
+   io_state.universe.never_ranked_but_eligible_count=MathMax(0,io_state.universe.eligible_universe-io_state.universe.rankable_universe);
+   io_state.universe.newly_active_symbols_waiting_count=0;
+   io_state.universe.near_cutline_recheck_age_max=0;
+
+   string broker_ids[];
+string eligible_ids[];
+string active_ids[];
+string rankable_ids[];
+string publishable_ids[];
+
+ArrayResize(broker_ids,0);
+ArrayResize(eligible_ids,0);
+ArrayResize(active_ids,0);
+ArrayResize(rankable_ids,0);
+ArrayResize(publishable_ids,0);
+
+for(int u=0;u<ArraySize(io_state.symbols);u++)
+  {
+   int nb=ArraySize(broker_ids);
+   ArrayResize(broker_ids,nb+1);
+   broker_ids[nb]=io_state.symbols[u].raw_broker_observation.symbol_raw;
+
+   if(io_state.symbols[u].rankability_gate.eligible_flag)
      {
-      io_state.scheduler.phase_id=ISSX_EA1_MapToRuntimePhase(issx_ea1_phase_discover_symbols);
-      return DiscoverUniverse(io_state,false,0);
+      int ne=ArraySize(eligible_ids);
+      ArrayResize(eligible_ids,ne+1);
+      eligible_ids[ne]=io_state.symbols[u].raw_broker_observation.symbol_raw;
      }
+
+   if(io_state.symbols[u].rankability_gate.active_flag)
+     {
+      int na=ArraySize(active_ids);
+      ArrayResize(active_ids,na+1);
+      active_ids[na]=io_state.symbols[u].raw_broker_observation.symbol_raw;
+     }
+
+   if(io_state.symbols[u].rankability_gate.rankable_flag)
+     {
+      int nr=ArraySize(rankable_ids);
+      ArrayResize(rankable_ids,nr+1);
+      rankable_ids[nr]=io_state.symbols[u].raw_broker_observation.symbol_raw;
+     }
+
+   if(io_state.symbols[u].rankability_gate.publishable_flag)
+     {
+      int np=ArraySize(publishable_ids);
+      ArrayResize(publishable_ids,np+1);
+      publishable_ids[np]=io_state.symbols[u].raw_broker_observation.symbol_raw;
+     }
+  }
+
+string broker_data="";
+for(int b=0;b<ArraySize(broker_ids);b++)
+  {
+   if(b>0) broker_data+="|";
+   broker_data+=broker_ids[b];
+  }
+
+string eligible_data="";
+for(int e=0;e<ArraySize(eligible_ids);e++)
+  {
+   if(e>0) eligible_data+="|";
+   eligible_data+=eligible_ids[e];
+  }
+
+string active_data="";
+for(int a=0;a<ArraySize(active_ids);a++)
+  {
+   if(a>0) active_data+="|";
+   active_data+=active_ids[a];
+  }
+
+string rankable_data="";
+for(int r=0;r<ArraySize(rankable_ids);r++)
+  {
+   if(r>0) rankable_data+="|";
+   rankable_data+=rankable_ids[r];
+  }
+
+string publishable_data="";
+for(int p=0;p<ArraySize(publishable_ids);p++)
+  {
+   if(p>0) publishable_data+="|";
+   publishable_data+=publishable_ids[p];
+  }
+
+string changed_ids="";
+for(int c=0;c<ArraySize(io_state.symbols);c++)
+  {
+   if(!io_state.symbols[c].changed_since_last_cycle)
+      continue;
+   if(changed_ids!="")
+      changed_ids+=",";
+   changed_ids+=IntegerToString(io_state.symbols[c].symbol_id);
+  }
+if(changed_ids=="")
+   changed_ids="none";
+
+io_state.universe.broker_universe_fingerprint=ISSX_Hash::HashStringHex(broker_data);
+io_state.universe.eligible_universe_fingerprint=ISSX_Hash::HashStringHex(eligible_data);
+io_state.universe.active_universe_fingerprint=ISSX_Hash::HashStringHex(active_data);
+io_state.universe.rankable_universe_fingerprint=ISSX_Hash::HashStringHex(rankable_data);
+io_state.universe.frontier_universe_fingerprint=io_state.universe.rankable_universe_fingerprint;
+io_state.universe.publishable_universe_fingerprint=ISSX_Hash::HashStringHex(publishable_data);
+io_state.cohort_fingerprint=io_state.universe.rankable_universe_fingerprint;
+io_state.deltas.changed_symbol_ids_compact=changed_ids;
+   UpdateGlobalStateFlags(io_state);
+  }
+
+   static bool RefreshDiscoveryOnly(ISSX_EA1_State &io_state,
+                                 const bool include_custom_symbols=false,
+                                 const int max_symbols=0)
+  {
+   io_state.scheduler.phase_id=ISSX_EA1_MapToRuntimePhase(issx_ea1_phase_discover_symbols);
+   return DiscoverUniverse(io_state,include_custom_symbols,max_symbols);
+  }
 
    static void PrepareHydrationQueue(ISSX_EA1_State &io_state,const int max_symbols)
      {
@@ -2860,39 +3262,93 @@ public:
      }
 
    static void BuildHydrationUniverse(ISSX_EA1_State &io_state)
+  {
+   const int n=io_state.hydration_total;
+   if(n<=0)
      {
-      const int n=io_state.hydration_total;
-      if(n<=0)
-        {
-         ArrayResize(io_state.symbols,0);
-         return;
-        }
-
-      if(ArraySize(io_state.symbols)>n)
-         ArrayResize(io_state.symbols,n);
-
-      io_state.universe.broker_universe=n;
-      io_state.counters.listed_count=n;
-      io_state.hydration_remaining=MathMax(0,n-io_state.hydration_processed);
-      if(io_state.hydration_window_size<=0)
-         io_state.hydration_window_size=n;
-      if(io_state.hydration_window_end<=io_state.hydration_window_start)
-         io_state.hydration_window_end=MathMin(n,io_state.hydration_window_start+io_state.hydration_window_size);
+      ArrayResize(io_state.symbols,0);
+      return;
      }
+
+   if(ArraySize(io_state.symbols)>n)
+      ArrayResize(io_state.symbols,n);
+
+   if(io_state.universe.broker_universe<=0)
+      io_state.universe.broker_universe=n;
+
+   io_state.counters.listed_count=n;
+   io_state.hydration_remaining=MathMax(0,n-io_state.hydration_processed);
+
+   if(io_state.hydration_window_size<=0)
+      io_state.hydration_window_size=n;
+
+   if(io_state.hydration_window_end<=io_state.hydration_window_start)
+      io_state.hydration_window_end=MathMin(n,io_state.hydration_window_start+io_state.hydration_window_size);
+  }
 
    static void HydrateSymbolAt(ISSX_EA1_State &io_state,const int index)
-     {
-      if(index<0 || index>=ArraySize(io_state.symbols))
-         return;
+  {
+   if(index<0 || index>=ArraySize(io_state.symbols))
+      return;
 
-      string symbol=io_state.symbols[index].raw_broker_observation.symbol_raw;
-      LoadRawObservation(symbol,io_state.symbols[index].raw_broker_observation);
-      HydrateIdentitySymbol(io_state,index);
-      HydrateRuntimeSymbol(io_state,index);
-      HydrateClassificationSymbol(io_state,index);
-      HydrateTradeabilitySymbol(io_state,index);
+   const string symbol=io_state.symbols[index].raw_broker_observation.symbol_raw;
+
+   LoadRawObservation(symbol,io_state.symbols[index].raw_broker_observation);
+   HydrateIdentitySymbol(io_state,index);
+   HydrateRuntimeSymbol(io_state,index);
+   HydrateClassificationSymbol(io_state,index);
+   HydrateTradeabilitySymbol(io_state,index);
+
+   datetime now=TimeTradeServer();
+   if(now<=0)
+      now=TimeCurrent();
+
+   if(io_state.symbols[index].first_hydrated_time<=0)
+      io_state.symbols[index].first_hydrated_time=now;
+
+   io_state.symbols[index].last_runtime_refresh_time=now;
+   io_state.symbols[index].last_session_refresh_time=now;
+   io_state.symbols[index].last_cost_refresh_time=now;
+   io_state.symbols[index].hydration_seen_flag=true;
+   io_state.symbols[index].stale_runtime_flag=false;
+   io_state.symbols[index].stale_session_flag=false;
+   io_state.symbols[index].stale_cost_flag=false;
+   io_state.symbols[index].consistency_dirty_flag=false;
+   io_state.symbols[index].service_block_class="none";
+  }
+
+static int ServiceReadyUniverse(ISSX_EA1_State &io_state,const int batch_size)
+  {
+   const int total=ArraySize(io_state.symbols);
+   if(total<=0)
+      return 0;
+
+   const int work=MathMax(1,MathMin(batch_size,total));
+
+   if(io_state.service_cursor<0 || io_state.service_cursor>=total)
+      io_state.service_cursor=0;
+
+   int processed=0;
+   for(int i=0;i<work;i++)
+     {
+      int idx=io_state.service_cursor+i;
+      if(idx>=total)
+         idx-=total;
+
+      HydrateSymbolAt(io_state,idx);
+      processed++;
      }
 
+   io_state.service_cursor+=processed;
+   if(io_state.service_cursor>=total)
+      io_state.service_cursor-=total;
+
+   CanonicalizeDeterministicOrder(io_state);
+   BuildGateAndContinuityPhase(io_state);
+
+   return processed;
+  }
+  
    static void HydrationRebuildUniverseMetrics(ISSX_EA1_State &io_state)
      {
       CanonicalizeDeterministicOrder(io_state);
@@ -3036,10 +3492,11 @@ public:
      }
 
    static bool StageSlice(ISSX_EA1_State &io_state,
-                          const string firm_id,
-                          const string writer_boot_id,
-                          const string writer_nonce,
-                          const int max_symbols=0)
+                       const string firm_id,
+                       const string writer_boot_id,
+                       const string writer_nonce,
+                       const int max_symbols=0,
+                       const bool include_custom_symbols=false)
      {
       io_state.discovery_attempted=false;
       io_state.discovery_skipped=false;
@@ -3060,7 +3517,7 @@ public:
          const int symbols_before=ArraySize(io_state.symbols);
          const string fingerprint_before=io_state.universe.broker_universe_fingerprint;
          const ulong t0=GetTickCount();
-         const bool discovery_ok=RefreshDiscoveryOnly(io_state);
+         const bool discovery_ok=RefreshDiscoveryOnly(io_state,include_custom_symbols,max_symbols);
          io_state.discovery_elapsed_ms=(int)(GetTickCount()-t0);
          io_state.discovery_minute_id=current_minute;
          m_last_discovery_minute=current_minute;
@@ -3110,9 +3567,12 @@ public:
         }
 
       if(io_state.runtime_state==EA1_STATE_HYDRATING)
-         RunHydrationCycle(io_state);
-      else if(io_state.runtime_state==EA1_STATE_READY && io_state.sequence_no<=0)
-         HydrationRebuildUniverseMetrics(io_state);
+   RunHydrationCycle(io_state);
+else if(io_state.runtime_state==EA1_STATE_READY)
+  {
+   const int ready_batch=MathMax(1,MathMin(25,io_state.hydration_batch_size));
+   ServiceReadyUniverse(io_state,ready_batch);
+  }
 
       io_state.sequence_no++;
       io_state.dump_sequence_no=io_state.sequence_no;
@@ -3207,8 +3667,8 @@ public:
       io_state.publish_last_checkpoint="publish_build_debug_json_success";
       Print("ISSX: ea1_publish checkpoint=publish_build_debug_json_success bytes=",IntegerToString(io_state.publish_debug_json_bytes));
 
-      io_state.publish_last_checkpoint="publish_build_universe_dump_start";
-      Print("ISSX: ea1_publish checkpoint=publish_build_universe_dump_start symbols=",IntegerToString(ArraySize(io_state.symbols)));
+      io_state.publish_last_checkpoint="publish_build_universe_json_start";
+      Print("ISSX: ea1_publish checkpoint=publish_build_universe_json_start symbols=",IntegerToString(ArraySize(io_state.symbols)));
       if(ArraySize(io_state.symbols)>0)
         {
          io_state.publish_last_serialized_symbol=io_state.symbols[ArraySize(io_state.symbols)-1].normalized_identity.symbol_norm;
@@ -3221,22 +3681,27 @@ public:
       io_state.publish_universe_json_bytes=StringLen(out_broker_dump_json);
       if(out_broker_dump_json=="")
         {
-         io_state.publish_last_checkpoint="publish_build_universe_dump_fail";
+         io_state.publish_last_checkpoint="publish_build_universe_json_fail";
          io_state.publish_last_error=ISSX_ErrorToString(ISSX_ERR_JSON_BUILD);
          io_state.publish_elapsed_ms=(int)(GetTickCount()-t0);
-         Print("ISSX: ea1_publish checkpoint=publish_build_universe_dump_fail reason=json_build");
-         return false;
+         Print("ISSX: ea1_publish checkpoint=publish_build_universe_json_fail reason=json_build optional=1");
+         out_broker_dump_json="";
         }
-      if(ISSX_DataHandler::EstimateUtf8Bytes(out_broker_dump_json)>ISSX_EA1_PUBLISH_UNIVERSE_JSON_MAX_BYTES)
+      else if(ISSX_DataHandler::EstimateUtf8Bytes(out_broker_dump_json)>ISSX_EA1_PUBLISH_UNIVERSE_JSON_MAX_BYTES)
         {
-         io_state.publish_last_checkpoint="publish_build_universe_dump_fail";
+         io_state.publish_last_checkpoint="publish_build_universe_json_fail";
          io_state.publish_last_error="json_too_large_universe";
          io_state.publish_elapsed_ms=(int)(GetTickCount()-t0);
-         Print("ISSX: ea1_publish checkpoint=publish_build_universe_dump_fail reason=json_too_large_universe bytes=",IntegerToString(io_state.publish_universe_json_bytes));
-         return false;
+         Print("ISSX: ea1_publish checkpoint=publish_build_universe_json_fail reason=json_too_large_universe bytes=",IntegerToString(io_state.publish_universe_json_bytes)," optional=1");
+         out_broker_dump_json="";
+         io_state.publish_universe_json_bytes=0;
         }
-      io_state.publish_last_checkpoint="publish_build_universe_dump_success";
-      Print("ISSX: ea1_publish checkpoint=publish_build_universe_dump_success bytes=",IntegerToString(io_state.publish_universe_json_bytes));
+      else
+        {
+         io_state.publish_last_checkpoint="publish_build_universe_json_success";
+         io_state.publish_last_error=ISSX_ErrorToString(ISSX_ERR_NONE);
+         Print("ISSX: ea1_publish checkpoint=publish_build_universe_json_success bytes=",IntegerToString(io_state.publish_universe_json_bytes));
+        }
 
       io_state.publish_payload_bytes_attempted=ISSX_DataHandler::EstimateUtf8Bytes(out_stage_json)+
                                                ISSX_DataHandler::EstimateUtf8Bytes(out_debug_snapshot_json)+
@@ -3267,6 +3732,7 @@ public:
                                         const string writer_nonce)
      {
       ISSX_JsonWriter j;
+      j.Reset();
       j.BeginObject();
       j.NameString("stage_alias",ISSX_OperatorSurface::StageAlias(issx_stage_ea1));
       j.NameString("internal_stage_id","ea1");
