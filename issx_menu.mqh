@@ -4,8 +4,9 @@
 #include <ISSX/issx_core.mqh>
 
 #define ISSX_MENU_STAGE_COUNT 5
+#define ISSX_MENU_MAX_ROWS    64
 
-// ISSX MENU ENGINE v1.732
+// ISSX MENU ENGINE v1.734
 
 class ISSX_MenuEngine
   {
@@ -16,26 +17,6 @@ private:
    string Obj(const string key) const
      {
       return m_prefix+"_"+key;
-     }
-
-   bool IsKnownObjectKey(const string key) const
-     {
-      if(key=="TITLE")
-         return true;
-
-      for(int i=1;i<=ISSX_MENU_STAGE_COUNT;i++)
-        {
-         const string idx=IntegerToString(i);
-         if(key=="STAGE_BTN_"+idx || key=="STAGE_TITLE_"+idx)
-            return true;
-         for(int j=1;j<=5;j++)
-           {
-            if(key=="STAGE_LINE_"+idx+"_"+IntegerToString(j))
-               return true;
-           }
-        }
-
-      return false;
      }
 
    bool EnsureLabel(const string name,
@@ -100,48 +81,34 @@ private:
       return true;
      }
 
-   bool RenderStageSection(const int stage_index,
-                           const int base_x,
-                           const int top_y,
-                           const string title,
-                           const string line1,
-                           const string line2,
-                           const string line3,
-                           const string line4,
-                           const string line5,
-                           const bool enabled,
-                           const bool allow_toggle)
+   bool AddSection(const string key,const string title,int &row)
+     {
+      if(row>=ISSX_MENU_MAX_ROWS)
+         return false;
+      if(!EnsureLabel(Obj("ROW_"+IntegerToString(row)+"_"+key),8,145+(row*13),"["+title+"]",clrGold,8,true))
+         return false;
+      row++;
+      return true;
+     }
+
+   bool AddLine(const string key,const string text,int &row,const color clr=clrSilver)
+     {
+      if(row>=ISSX_MENU_MAX_ROWS)
+         return false;
+      if(!EnsureLabel(Obj("ROW_"+IntegerToString(row)+"_"+key),12,145+(row*13),text,clr,8,false))
+         return false;
+      row++;
+      return true;
+     }
+
+   bool RenderStageButton(const int stage_index,const bool enabled,const bool allow_toggle)
      {
       const string idx=IntegerToString(stage_index+1);
-      const string button_name=Obj("STAGE_BTN_"+idx);
-      const string title_name=Obj("STAGE_TITLE_"+idx);
-      const string line_name_1=Obj("STAGE_LINE_"+idx+"_1");
-      const string line_name_2=Obj("STAGE_LINE_"+idx+"_2");
-      const string line_name_3=Obj("STAGE_LINE_"+idx+"_3");
-      const string line_name_4=Obj("STAGE_LINE_"+idx+"_4");
-      const string line_name_5=Obj("STAGE_LINE_"+idx+"_5");
-
+      const string label=(stage_index==0?"EA1":"EA"+idx);
       const color state_bg=(enabled ? clrDarkGreen : clrDimGray);
       const string state_text=(enabled?"ON":"OFF");
-      const string button_text=title+" ["+state_text+"]"+(allow_toggle?"":" (locked)");
-
-      if(!EnsureButton(button_name,base_x,top_y,208,16,button_text,state_bg))
-         return false;
-      if(!EnsureLabel(title_name,base_x+6,top_y+2,title,clrAqua,8,true))
-         return false;
-
-      if(!EnsureLabel(line_name_1,base_x+12,top_y+19,"- "+line1,clrSilver,7))
-         return false;
-      if(!EnsureLabel(line_name_2,base_x+12,top_y+31,"- "+line2,clrSilver,7))
-         return false;
-      if(!EnsureLabel(line_name_3,base_x+12,top_y+43,"- "+line3,clrSilver,7))
-         return false;
-      if(!EnsureLabel(line_name_4,base_x+12,top_y+55,"- "+line4,clrSilver,7))
-         return false;
-      if(!EnsureLabel(line_name_5,base_x+12,top_y+67,"- "+line5,clrSilver,7))
-         return false;
-
-      return true;
+      const string button_text=label+" ["+state_text+"]"+(allow_toggle?"":" (locked)");
+      return EnsureButton(Obj("STAGE_BTN_"+idx),240,145+(stage_index*20),150,18,button_text,state_bg);
      }
 
 public:
@@ -151,7 +118,26 @@ public:
       m_last_error="";
      }
 
-   bool Build(const bool &enabled[])
+   bool Build(const bool &enabled[],
+              const string broker,
+              const string server,
+              const long login,
+              const string instance_tag,
+              const string runtime_state,
+              const int ea1_max_symbols,
+              const int ea1_hydration_batch,
+              const int ea1_rolling_batch,
+              const int ea1_rolling_cadence,
+              const int ea1_publish_cadence,
+              const bool proj_stage_status,
+              const bool proj_universe,
+              const bool proj_debug,
+              const bool chart_ui_updates,
+              const bool ui_projection,
+              const bool runtime_scheduler,
+              const int cycle_budget_ms,
+              const bool tick_heavy,
+              const bool isolation_mode)
      {
       m_last_error="";
       if(StringLen(m_prefix)==0)
@@ -166,63 +152,37 @@ public:
          return false;
         }
 
-      if(!EnsureLabel(Obj("TITLE"),8,145,"ISSX SYSTEM",clrGold,9,true))
-         return false;
+      int row=0;
+      if(!AddSection("SYSTEM","SYSTEM",row)) return false;
+      if(!AddLine("SYS_1","broker="+broker,row)) return false;
+      if(!AddLine("SYS_2","server="+server+" login="+ISSX_Util::LongToStringX(login),row)) return false;
+      if(!AddLine("SYS_3","instance="+instance_tag,row)) return false;
+      if(!AddLine("SYS_4","runtime_state="+runtime_state,row)) return false;
 
-      int y=162;
-      if(!RenderStageSection(0,8,y,"ISSX EA1 MARKET",
-                             "Discovery",
-                             "Cadence",
-                             "Universe",
-                             "Publish",
-                             "Projection",
-                             enabled[0],
-                             false))
-         return false;
+      if(!AddSection("STAGES","STAGES",row)) return false;
+      if(!AddLine("STG_1","EA1="+(enabled[0]?"on":"off")+" EA2="+(enabled[1]?"on":"off")+" EA3="+(enabled[2]?"on":"off"),row)) return false;
+      if(!AddLine("STG_2","EA4="+(enabled[3]?"on":"off")+" EA5="+(enabled[4]?"on":"off"),row)) return false;
 
-      y+=86;
-      if(!RenderStageSection(1,8,y,"ISSX EA2 HISTORY",
-                             "Hydration",
-                             "Readiness",
-                             "Sync Status",
-                             "Pipeline Input",
-                             "Publish",
-                             enabled[1],
-                             true))
-         return false;
+      if(!AddSection("EA1","EA1 / HYDRATION",row)) return false;
+      if(!AddLine("EA1_1","max_symbols="+IntegerToString(ea1_max_symbols),row)) return false;
+      if(!AddLine("EA1_2","hydration_batch_size="+IntegerToString(ea1_hydration_batch),row)) return false;
+      if(!AddLine("EA1_3","rolling_batch_size="+IntegerToString(ea1_rolling_batch),row)) return false;
+      if(!AddLine("EA1_4","rolling_cadence="+IntegerToString(ea1_rolling_cadence)+"s publish_cadence="+IntegerToString(ea1_publish_cadence)+"s",row)) return false;
 
-      y+=86;
-      if(!RenderStageSection(2,8,y,"ISSX EA3 SELECTION",
-                             "Candidate Input",
-                             "Frontier",
-                             "Reserve",
-                             "Continuity",
-                             "Publish",
-                             enabled[2],
-                             true))
-         return false;
+      if(!AddSection("PROJ","PROJECTION",row)) return false;
+      if(!AddLine("PRJ_1","stage_status_root="+(proj_stage_status?"on":"off")+" universe_snapshot="+(proj_universe?"on":"off"),row)) return false;
+      if(!AddLine("PRJ_2","debug_snapshots="+(proj_debug?"on":"off")+" hud_projection="+(ui_projection?"on":"off"),row)) return false;
+      if(!AddLine("PRJ_3","chart_ui_updates="+(chart_ui_updates?"on":"off"),row)) return false;
 
-      y+=86;
-      if(!RenderStageSection(3,8,y,"ISSX EA4 CORRELATION",
-                             "Pair Bounds",
-                             "Correlation Results",
-                             "Overlap",
-                             "Permissions",
-                             "Publish",
-                             enabled[3],
-                             true))
-         return false;
+      if(!AddSection("SCHED","SCHEDULER / RUNTIME",row)) return false;
+      if(!AddLine("SCH_1","runtime_scheduler="+(runtime_scheduler?"on":"off")+" cycle_budget_ms="+IntegerToString(cycle_budget_ms),row)) return false;
+      if(!AddLine("SCH_2","tick_heavy="+(tick_heavy?"on":"off")+" isolation_mode="+(isolation_mode?"on":"off"),row)) return false;
 
-      y+=86;
-      if(!RenderStageSection(4,8,y,"ISSX EA5 CONTRACTS",
-                             "Payload Build",
-                             "Export Status",
-                             "Schema",
-                             "Freshness",
-                             "Publish",
-                             enabled[4],
-                             true))
-         return false;
+      for(int i=0;i<ISSX_MENU_STAGE_COUNT;i++)
+        {
+         if(!RenderStageButton(i,enabled[i],i>0 && !isolation_mode))
+            return false;
+        }
 
       return true;
      }
@@ -232,16 +192,8 @@ public:
       if(StringLen(m_prefix)==0)
          return false;
       string owned_prefix=m_prefix+"_";
-      const int owned_prefix_len=StringLen(owned_prefix);
-      if(StringLen(object_name)<=owned_prefix_len)
+      if(StringSubstr(object_name,0,StringLen(owned_prefix))!=owned_prefix)
          return false;
-      if(StringSubstr(object_name,0,owned_prefix_len)!=owned_prefix)
-         return false;
-
-      const string owned_key=StringSubstr(object_name,owned_prefix_len);
-      if(!IsKnownObjectKey(owned_key))
-         return false;
-
       return (ObjectFind(0,object_name)>=0);
      }
 
@@ -305,14 +257,12 @@ public:
       if(StringLen(m_prefix)==0)
          return;
 
-      ObjectDelete(0,Obj("TITLE"));
-      for(int i=0;i<ISSX_MENU_STAGE_COUNT;i++)
+      const int total=ObjectsTotal(0,-1,-1);
+      for(int i=total-1;i>=0;i--)
         {
-         const string idx=IntegerToString(i+1);
-         ObjectDelete(0,Obj("STAGE_BTN_"+idx));
-         ObjectDelete(0,Obj("STAGE_TITLE_"+idx));
-         for(int j=1;j<=5;j++)
-            ObjectDelete(0,Obj("STAGE_LINE_"+idx+"_"+IntegerToString(j)));
+         const string name=ObjectName(0,i,-1,-1);
+         if(StringFind(name,m_prefix+"_")==0)
+            ObjectDelete(0,name);
         }
      }
   };
