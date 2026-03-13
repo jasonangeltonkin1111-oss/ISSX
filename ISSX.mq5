@@ -1,5 +1,5 @@
 #property strict
-#property version   "1.733"
+#property version   "1.734"
 #property description "ISSX single-wrapper consolidated kernel (safe attach wrapper)"
 
 #include <ISSX/issx_core.mqh>
@@ -496,11 +496,13 @@ void ISSX_ResolveOperatorContext()
       g_operator_server_name="Unknown Server";
    g_operator_server_name_safe=ISSX_OperatorSurface::SanitizeServerName(g_operator_server_name);
    g_operator_login_id=(long)AccountInfoInteger(ACCOUNT_LOGIN);
-   g_market_json_file_name=ISSX_OperatorSurface::OperatorFileName(issx_stage_ea1,g_operator_server_name,ISSX_JSON_EXT);
-   g_market_log_file_name=ISSX_OperatorSurface::OperatorFileName(issx_stage_ea1,g_operator_server_name,".log");
+   const string stage_alias=ISSX_Util::Lower(ISSX_OperatorSurface::StageAlias(issx_stage_ea1));
+   const string login_safe=ISSX_Util::LongToStringX(g_operator_login_id);
+   g_market_json_file_name=stage_alias+"_"+g_operator_server_name_safe+"_"+login_safe+ISSX_JSON_EXT;
+   g_market_log_file_name=stage_alias+"_"+g_operator_server_name_safe+"_"+login_safe+".log";
    g_market_json_relative_path=ISSX_Util::JoinPath(g_operator_root_relative,g_market_json_file_name);
    g_market_log_relative_path=ISSX_Util::JoinPath(g_operator_root_relative,g_market_log_file_name);
-   g_market_rolling_json_relative_path=ISSX_Util::JoinPath(g_operator_root_relative,ISSX_OperatorSurface::StageAlias(issx_stage_ea1)+"_"+g_operator_server_name_safe+"_"+ISSX_Util::LongToStringX(g_operator_login_id)+"_rolling"+ISSX_JSON_EXT);
+   g_market_rolling_json_relative_path=ISSX_Util::JoinPath(g_operator_root_relative,stage_alias+"_"+g_operator_server_name_safe+"_"+login_safe+"_rolling"+ISSX_JSON_EXT);
   }
 
 string ISSX_BuildEA1StageStatusJson()
@@ -633,9 +635,6 @@ bool ISSX_MaybePersistEA1RollingJson()
       return false;
 
    const int total=ArraySize(g_ea1.symbols);
-   if(total<=0)
-      return false;
-
    const long minute_id=(long)(now/60);
    if(g_ea1_rolling_last_minute_id!=minute_id)
      {
@@ -643,69 +642,100 @@ bool ISSX_MaybePersistEA1RollingJson()
       g_ea1_rolling_cursor=0;
      }
 
-   const int batch_size=MathMax(1,InpEA1RollingBatchSize);
+   const int rolling_batch_size=MathMax(1,InpEA1RollingBatchSize);
+   const int batch_size=MathMax(1,MathMin(50,rolling_batch_size));
    if(g_ea1_rolling_cursor>=total)
       g_ea1_rolling_cursor=0;
 
-   const int batch_start=g_ea1_rolling_cursor;
-   const int batch_count=MathMin(batch_size,total-batch_start);
-   if(batch_count<=0)
-      return false;
+   const int batch_start=(total>0?g_ea1_rolling_cursor:0);
+   const int batch_count=(total>0?MathMin(batch_size,total-batch_start):0);
 
-   string symbols_json="[";
-   for(int i=0;i<batch_count;i++)
+   if(batch_count>0)
      {
-      if(i>0)
-         symbols_json+=",";
-      symbols_json+=ISSX_EA1RollingSymbolJson(g_ea1.symbols[batch_start+i]);
+      g_ea1_rolling_cursor=batch_start+batch_count;
+      if(g_ea1_rolling_cursor>=total)
+         g_ea1_rolling_cursor=0;
      }
-   symbols_json+="]";
 
-   g_ea1_rolling_cursor=batch_start+batch_count;
-   if(g_ea1_rolling_cursor>=total)
-      g_ea1_rolling_cursor=0;
-
+   const int hydration_remaining=MathMax(0,g_ea1.hydration_total-g_ea1.hydration_processed);
    const double hydration_progress=(g_ea1.hydration_total>0)?((double)g_ea1.hydration_processed/(double)g_ea1.hydration_total):(g_ea1.hydration_complete?1.0:0.0);
    const string hydration_state=(g_ea1.hydration_complete?"complete":((g_ea1.hydration_processed>0||g_ea1.hydration_total>0)?"in_progress":"not_started"));
    const string server_time=TimeToString(now,TIME_DATE|TIME_SECONDS);
 
-   string snapshot="{";
-   snapshot+="\"server_time\":"+ISSX_JsonQ(server_time)+",";
-   snapshot+="\"minute_id\":"+ISSX_Util::LongToStringX(minute_id)+",";
-   snapshot+="\"batch_start\":"+IntegerToString(batch_start)+",";
-   snapshot+="\"batch_count\":"+IntegerToString(batch_count)+",";
-   snapshot+="\"total_symbols\":"+IntegerToString(total)+",";
-   snapshot+="\"cursor_next\":"+IntegerToString(g_ea1_rolling_cursor)+",";
-   snapshot+="\"ea1_state\":"+ISSX_JsonQ(ISSX_MarketEngine::RuntimeStateText(g_ea1.runtime_state))+",";
-   snapshot+="\"hydration_state\":"+ISSX_JsonQ(hydration_state)+",";
-   snapshot+="\"hydration_progress\":"+ISSX_Util::DoubleToStringX(hydration_progress,4);
-   snapshot+="}";
-   ISSX_EA1RollingAppendSnapshot(snapshot);
+   ISSX_JsonWriter snap;
+   snap.Reset();
+   snap.BeginObject();
+   snap.NameString("server_time",server_time);
+   snap.NameLong("minute_id",minute_id);
+   snap.NameInt("batch_start",batch_start);
+   snap.NameInt("batch_count",batch_count);
+   snap.NameInt("total_symbols",total);
+   snap.NameInt("cursor_next",g_ea1_rolling_cursor);
+   snap.NameString("ea1_state",ISSX_MarketEngine::RuntimeStateText(g_ea1.runtime_state));
+   snap.NameString("hydration_state",hydration_state);
+   snap.NameDouble("hydration_progress",hydration_progress,4);
+   snap.EndObject();
+   ISSX_EA1RollingAppendSnapshot(snap.ToString());
 
-   string recent_json="[";
-   for(int r=0;r<g_ea1_recent_snapshots_count;r++)
+   ISSX_JsonWriter payload_w;
+   payload_w.Reset();
+   payload_w.BeginObject();
+   payload_w.NameString("schema","issx.ea1.market");
+   payload_w.NameString("version",ISSX_ENGINE_VERSION);
+   payload_w.NameString("broker",g_operator_broker_name);
+   payload_w.NameString("server",g_operator_server_name);
+   payload_w.NameLong("login",g_operator_login_id);
+   payload_w.NameString("firm_id",g_firm_id);
+   payload_w.NameString("instance_id",g_boot_id);
+   payload_w.NameString("server_time",server_time);
+   payload_w.NameString("ea1_state",ISSX_MarketEngine::RuntimeStateText(g_ea1.runtime_state));
+   payload_w.NameString("stage_state",g_last_ea1_stage_run);
+   payload_w.NameString("stage_reason",g_last_ea1_stage_reason);
+   payload_w.NameInt("symbol_total",total);
+   payload_w.NameInt("hydration_processed",g_ea1.hydration_processed);
+   payload_w.NameInt("hydration_total",g_ea1.hydration_total);
+   payload_w.NameInt("hydration_remaining",hydration_remaining);
+   payload_w.NameString("hydration_state",hydration_state);
+   payload_w.NameDouble("hydration_progress",hydration_progress,4);
+
+   payload_w.BeginNamedObject("batch");
+   payload_w.NameInt("size",batch_size);
+   payload_w.NameInt("start",batch_start);
+   payload_w.NameInt("count",batch_count);
+   payload_w.NameInt("total",total);
+   payload_w.NameInt("cursor_next",g_ea1_rolling_cursor);
+   payload_w.EndObject();
+
+   payload_w.BeginNamedArray("symbols");
+   for(int i=0;i<batch_count;i++)
      {
-      if(r>0)
-         recent_json+=",";
-      recent_json+=g_ea1_recent_snapshots[r];
+      const ISSX_EA1_SymbolState &sym=g_ea1.symbols[batch_start+i];
+      payload_w.BeginObject();
+      payload_w.NameString("symbol",sym.normalized_identity.symbol_norm);
+      payload_w.NameString("family",sym.normalized_identity.alias_family_id);
+      payload_w.NameString("state",ISSX_MarketEngine::PracticalMarketStateText(sym.validated_runtime_truth.practical_market_state));
+      payload_w.NameDouble("bid",sym.raw_broker_observation.quote_tick_snapshot.bid,6);
+      payload_w.NameDouble("ask",sym.raw_broker_observation.quote_tick_snapshot.ask,6);
+      payload_w.NameDouble("spread_points",sym.validated_runtime_truth.current_spread_points,2);
+      payload_w.NameBool("rankable",sym.rankability_gate.rankable_flag);
+      payload_w.EndObject();
      }
-   recent_json+="]";
+   payload_w.EndArray();
 
-   string payload="{";
-   payload+="\"server_time\":"+ISSX_JsonQ(server_time)+",";
-   payload+="\"ea1_state\":"+ISSX_JsonQ(ISSX_MarketEngine::RuntimeStateText(g_ea1.runtime_state))+",";
-   payload+="\"symbols\":"+symbols_json+",";
-   payload+="\"hydration_state\":"+ISSX_JsonQ(hydration_state)+",";
-   payload+="\"hydration_progress\":"+ISSX_Util::DoubleToStringX(hydration_progress,4)+",";
-   payload+="\"batch\":{\"start\":"+IntegerToString(batch_start)+",\"count\":"+IntegerToString(batch_count)+",\"total\":"+IntegerToString(total)+",\"cursor_next\":"+IntegerToString(g_ea1_rolling_cursor)+"},";
-   payload+="\"downstream\":{";
-   payload+="\"ea2\":{\"run\":"+ISSX_JsonQ(g_last_ea2_stage_run)+",\"reason\":"+ISSX_JsonQ(g_last_ea2_stage_reason)+"},";
-   payload+="\"ea3\":{\"run\":"+ISSX_JsonQ(g_last_ea3_stage_run)+",\"reason\":"+ISSX_JsonQ(g_last_ea3_stage_reason)+"},";
-   payload+="\"ea4\":{\"run\":"+ISSX_JsonQ(g_last_ea4_stage_run)+",\"reason\":"+ISSX_JsonQ(g_last_ea4_stage_reason)+"},";
-   payload+="\"ea5\":{\"run\":"+ISSX_JsonQ(g_last_ea5_stage_run)+",\"reason\":"+ISSX_JsonQ(g_last_ea5_stage_reason)+"}";
-   payload+="},";
-   payload+="\"recent_snapshots\":"+recent_json;
-   payload+="}";
+   payload_w.BeginNamedObject("downstream");
+   payload_w.BeginNamedObject("ea2"); payload_w.NameString("run",g_last_ea2_stage_run); payload_w.NameString("reason",g_last_ea2_stage_reason); payload_w.EndObject();
+   payload_w.BeginNamedObject("ea3"); payload_w.NameString("run",g_last_ea3_stage_run); payload_w.NameString("reason",g_last_ea3_stage_reason); payload_w.EndObject();
+   payload_w.BeginNamedObject("ea4"); payload_w.NameString("run",g_last_ea4_stage_run); payload_w.NameString("reason",g_last_ea4_stage_reason); payload_w.EndObject();
+   payload_w.BeginNamedObject("ea5"); payload_w.NameString("run",g_last_ea5_stage_run); payload_w.NameString("reason",g_last_ea5_stage_reason); payload_w.EndObject();
+   payload_w.EndObject();
+
+   payload_w.BeginNamedArray("recent_snapshots");
+   for(int r=0;r<g_ea1_recent_snapshots_count;r++)
+      payload_w.ValueString(g_ea1_recent_snapshots[r]);
+   payload_w.EndArray();
+   payload_w.EndObject();
+
+   const string payload=payload_w.ToString();
 
    g_debug.Write("INFO","ea1_publish","json_build_success",
                  "path="+g_market_rolling_json_relative_path+
@@ -1110,7 +1140,14 @@ void ISSX_RenderMenu()
       g_debug.Write("INFO","menu","init","prefix=ISSX_MENU");
      }
 
-   if(!g_menu.Build(g_ea_enabled))
+   if(!g_menu.Build(g_ea_enabled,
+                   g_operator_broker_name,g_operator_server_name,g_operator_login_id,
+                   (InpInstanceTag==""?g_boot_id:InpInstanceTag),
+                   g_last_kernel_result+"/"+g_last_kernel_reason,
+                   InpEA1MaxSymbols,InpEA1HydrationBatchSize,InpEA1RollingBatchSize,InpEA1RollingCadenceSec,InpEA1PublishCadenceSec,
+                   Config.GetBool("project_stage_status_root"),Config.GetBool("project_universe_snapshot"),Config.GetBool("project_debug_snapshots"),
+                   Config.GetBool("chart_ui_updates_enabled"),Config.GetBool("gate_ui_projection_requested"),
+                   Config.GetBool("runtime_scheduler_enabled"),InpSchedulerCycleBudgetMs,Config.GetBool("tick_heavy_work_enabled"),Config.GetBool("isolation_mode")))
       g_debug.Write("WARN","menu","build_failed",g_menu.LastError());
   }
 
@@ -1435,8 +1472,7 @@ bool ISSX_RunKernelCycle(bool &ea1_stage_ran,string &ea1_stage_result,string &ea
       }
    }
 
-   if(g_ea1.hydration_complete)
-      ISSX_MaybePersistEA1RollingJson();
+   ISSX_MaybePersistEA1RollingJson();
 
    g_telemetry.EndStage("ea1_market",(ea1_stage_result=="success"?"READY":"DEGRADED"));
 
@@ -1935,7 +1971,7 @@ void OnTimer()
                g_startup_profile,
                (eff_runtime_scheduler?"on":"off"),
                g_last_kernel_result,g_last_kernel_reason,g_last_kernel_elapsed_ms,
-               g_operator_broker_name,g_operator_server_name,g_ea_enabled,
+               g_operator_broker_name,g_operator_server_name,g_operator_login_id,g_ea_enabled,
                g_ea1,g_ea2,g_ea3,g_ea4,g_ea5,
                g_last_ea1_stage_run,g_last_ea1_stage_reason,g_last_ea1_stage_elapsed_ms,g_last_ea1_publish_state,
                g_last_ea1_publish_reason,
@@ -2002,7 +2038,7 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
    if(g_menu.HandleClick(sparam,g_ea_enabled,allow_toggle))
      {
       g_debug.Write("INFO","menu","toggle","object="+sparam+" state=ok lp="+ISSX_Util::LongToStringX(event_lparam)+" dp="+DoubleToString(event_dparam,2));
-      g_menu.Build(g_ea_enabled);
+      ISSX_RenderMenu();
      }
    else
       g_debug.Write("WARN","menu","toggle_denied","object="+sparam+" reason="+g_menu.LastError());
